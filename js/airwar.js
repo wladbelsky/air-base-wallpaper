@@ -83,14 +83,16 @@ const AIRWAR = {
   meetColumn(p, v, lead) {
     const near = ENEMIES.filter(e => e.kind === 'armor' && enemyAlive(e));
     const sM = rand(0.45, 0.65) * p.P.length, M = p.P.sample(sM).pos.setY(0), tMeet = (sM - lead) / v;
-    if (near.length && Math.random() < 0.6) { p.foes = near.slice(0, 4); return; }
-    const dir = new V3(-M.x, 0, -M.z); if (dir.lengthSq() < 1) dir.set(1, 0, 0); dir.normalize();
+    if (near.length && (Math.random() < 0.6 || near.length >= 4 + STRESS.level * 6)) { p.foes = near.slice(0, 4); return; }   // the ones already there (no more than a raid's worth)
+    // they come in from beyond M toward the base and stop 25 short of it, but never inside the fence (M over the base:
+    // short of the fence on that side)
+    const u = M.lengthSq() < 1 ? new V3(-1, 0, 0) : M.clone().normalize(), dir = u.clone().negate(), rM = M.length();
+    const rStop = Math.max(rM - 25, fenceRadius(u) + 8), rStart = Math.max(rM, rStop);
     const sp = rand(2.8, 3.6), perp = new V3(-dir.z, 0, dir.x), n = randi(2, 3), sq = pick(ENEMY_NAMES.armor);
     for (let i = 0; i < n; i++) {
-      const st = M.clone().addScaledVector(dir, -sp * tMeet).addScaledVector(perp, (i - (n - 1) / 2) * 3).addScaledVector(dir, -i * 3);
+      const st = u.clone().multiplyScalar(rStart + sp * tMeet + i * 3).addScaledVector(perp, (i - (n - 1) / 2) * 3);
       for (let k = 0; k < 12 && this.onScreen(st, 0.08); k++) st.addScaledVector(dir, -4);   // never pop up on screen
-      const stop = M.clone().addScaledVector(dir, 25).addScaledVector(perp, (i - (n - 1) / 2) * 3);
-      if (Math.hypot(stop.x, stop.z) < 70) stop.setLength(70);                                 // they stop outside the fence
+      const stop = u.clone().multiplyScalar(rStop).addScaledVector(perp, (i - (n - 1) / 2) * 3);
       const e = spawnArmor(st, dir, i ? pick(['bmp', 'btr', 't90']) : 't90', stop, sq, i); e.speed = sp; p.foes.push(e);
     }
     const b0 = p.foes[0].p, bh = Math.atan2(b0.z, b0.x);

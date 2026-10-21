@@ -160,6 +160,30 @@ test('airfield: every home is reachable — taxi routes start at the home and en
   expect(r).toEqual([]);
 });
 
+test('airfield: taxi routes never loop — no more than a U-turn within 6 units of the path', async ({ wp }) => {
+  const r = await wp.run(() => {
+    // the heading change over any 6-unit stretch of the smoothed path (as followDeck drives it)
+    const loop = pts => {
+      const c = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(p[0], 0, p[1])), false, 'centripetal'), L = c.getLength(), N = Math.ceil(L / 0.05), cum = [0];
+      let prev = null;
+      for (let i = 0; i <= N; i++) { const t = c.getTangentAt(i / N), h = Math.atan2(-t.z, t.x); if (prev !== null) cum.push(cum[cum.length - 1] + Math.atan2(Math.sin(h - prev), Math.cos(h - prev))); prev = h; }
+      let w = 0; const k = Math.round(6 / (L / N));
+      for (let i = 0; i < cum.length; i++) w = Math.max(w, Math.abs(cum[Math.min(cum.length - 1, i + k)] - cum[i]));
+      return w / DEG;
+    };
+    const out = [];
+    for (const s of [...PARKING.stands, ...PARKING.shelters, ...PARKING.hangars, ...PARKING.remote]) {
+      for (const [name, pts] of [['pushback', AIRFIELD.pushback(s)], ['taxi out', AIRFIELD.toHold(s)]]) if (loop(pts) > 150) out.push(`${name} from ${s.x},${s.z}`);
+      for (let xStop = RW.td; xStop < RW.x1; xStop += 3) {
+        const lk = AIRFIELD.exitFor(s, xStop);
+        for (const x0 of [lk - 4.5, lk - 4.3]) { const w = loop(AIRFIELD.homeRoute(s, x0, lk)); if (w > 150) out.push(`home to ${s.x},${s.z} by link ${lk}: ${w.toFixed(0)}°`); }
+      }
+    }
+    return [...new Set(out)];
+  });
+  expect(r).toEqual([]);
+});
+
 test('roads stay off the runway, the taxiway and the apron, and nothing grows on them', async ({ wp }) => {
   const r = await wp.run(() => {
     const out = [], R = BASE_LAYOUT.rwy;
@@ -167,6 +191,13 @@ test('roads stay off the runway, the taxiway and the apron, and nothing grows on
       const x = road[i][0] + (road[i + 1][0] - road[i][0]) * u, z = road[i][1] + (road[i + 1][1] - road[i][1]) * u;
       if (x > R.x0 - 2 && x < R.x1 + 2 && Math.abs(z - R.z) < R.w / 2 + 1.6) out.push(`road on the runway at ${x.toFixed(0)},${z.toFixed(0)}`);
     }
+    // the remote stand slabs and the taxiway: inside the fence, clear of the perimeter road
+    const A = BASE_LAYOUT.apron, TW = BASE_LAYOUT.twy;
+    for (const [x0, z0, x1, z1] of [...BASE_LAYOUT.remote.map(r => [r.x0, r.z1, r.x1, A.z0]), [TW.x0, TW.z - TW.w / 2, TW.x1, TW.z + TW.w / 2]])
+      for (let x = x0; x <= x1; x += 0.5) for (let z = z0; z <= z1; z += 0.5) {
+        if (!insideFence(x, z)) out.push(`concrete outside the fence at ${x.toFixed(0)},${z.toFixed(0)}`);
+        if (roadDist(x, z) < BASE_LAYOUT.ROAD_W / 2 + 0.2) out.push(`road across the concrete at ${x.toFixed(0)},${z.toFixed(0)}`);
+      }
     let trees = 0; const m = new THREE.Matrix4(), p = new THREE.Vector3();
     for (const v of TERRAIN.veg) for (let i = 0; i < v.count; i++) { v.getMatrixAt(i, m); p.setFromMatrixPosition(m); if (roadDist(p.x, p.z) < BASE_LAYOUT.ROAD_W / 2) trees++; }
     return { out: [...new Set(out)], trees };

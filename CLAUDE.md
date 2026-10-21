@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=1`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=2`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -90,12 +90,17 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   instanced and drawn only for stands in use (`updateMarks`, after every build / count change / retire); the helicopter
   pads are all drawn, always.
 - **One-way traffic**: the parallel taxiway runs west to the holding point (`BASE_LAYOUT.hold`) of the departure link;
-  the apron lane runs east (entered by the west / centre channel, left by the east channel onto the taxiway).
-  Front-row stands open onto the taxiway, shelters / hangars / the back remote row onto the lane. Parking is nose
-  in; leaving starts with a pushback (`startDeckPath(pts, speed, true)`: tail first).
-- **Ground movement**: `startDeckPath` / `followDeck` (Catmull-Rom through `AIRFIELD.round`ed corners) with
-  car-following (`AIRFIELD.blocked`: stop behind whoever is close ahead; two blocking each other → the one listed
-  first in `AIRCRAFT` goes; a three-way knot is untied after 25 s). `onGround` = `GROUND_STATES` (helicopters never).
+  the apron lane runs east (entered by the west / centre channel, left by the east channel onto the taxiway — east
+  of the last runway link, so nobody ever meets head-on). Front-row stands open onto the taxiway, shelters / hangars /
+  the back remote row onto the lane. Parking is nose in; leaving starts with a pushback (`startDeckPath(pts, speed,
+  true)`: tail first).
+- **Ground movement**: `startDeckPath` / `followDeck` (Catmull-Rom through `AIRFIELD.round`ed corners — `round` never
+  emits a doubled point, that made the curve loop) with car-following (`AIRFIELD.blocked`: stop behind whoever is in
+  the way or close in front, and short of where a pushback ends). Nobody ever drives on through the one in front:
+  aircraft blocking each other round a cycle (`knot`, fresh `blockBy` links only) → the pushback goes, else the first in
+  `AIRCRAFT`. A pushback starts only with nobody near its path or taxiing toward its end (`pushbackClear`); one that
+  has waited 20 s (`wantsOut`) makes the traffic stop a gap short of its end (`yielding`). `onGround` = `GROUND_STATES`
+  (helicopters never). The harness flags two taxiing aircraft closer than 0.3 × their lengths (ground collision).
 - **FixedWing states**: `parked` → `ready` (engines, waits for the door and `pushbackClear`) → `pushback` →
   `taxi_out` → `hold_short` → `lineup` → `takeoff_roll` (brakes, roll, rotate at `vR`) → `climb` → `orbit` →
   `approach` → `final` → `rollout` → `taxi_in` → `parked`; `go_around` (→ `orbit`, `landReq` kept); an emergency:
@@ -141,7 +146,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - **Emergency landing**: every 8–15 min in peace (`emTimer`) a jet in orbit declares one (`a.emerg`, smoke `trail`);
   `canApproach` gives it priority, `canLineUp` is closed while `GROUND_OPS.emerg`; it stops on the runway
   (`emergency`), `EmergencyScene`: two crash tenders from the fire station foam it, a tug tows it home (`towed`, via
-  `AIRFIELD.homeRoute`), the runway opens when it is clear.
+  `AIRFIELD.homeRoute`), the runway opens as soon as it is towed off it (`GROUND_OPS.emerg` cleared: the tow may
+  queue behind departures).
 - **Unloading** (`UnloadScene`): a transport parked with `a.cargo` on a stand (not in a hangar): `a.rampT` opens the
   ramp (C-130 / C-17 models), a K-loader comes from the cargo yard along the service road, three pallets slide onto it,
   it drives away; `a.groundBusy` holds the aircraft's departure in `ready` meanwhile.
@@ -151,7 +157,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - Enemy kinds: `bandit` (waves from `ENEMY_TYPES`; bombers / attack jets drop a stick on a `BASE.targets` structure,
   others may loose a cruise missile), `cruise` (low, at a structure; C-RAM / NASAMS / Stingers), `ballistic` (from
   high above; Patriot), `heli` (Ka-52 / Mi-24: with the armour, hover off the fence, rockets), `armor` (columns from
-  `spawnColumn`: drive to a stop line outside the fence, fire at the perimeter — cosmetic). Dogfight bandits (`duel`)
+  `spawnColumn`, `AIRWAR.meetColumn`: drive to a stop line outside the fence on their own side (`fenceRadius(u)` + 8),
+  fire at the perimeter — cosmetic; the harness flags armour inside the fence). Dogfight bandits (`duel`)
   fly a pass path and are left to the fighters.
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
   site rows show DAMAGED). Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are

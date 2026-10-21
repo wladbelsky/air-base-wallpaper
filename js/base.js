@@ -7,14 +7,15 @@
    BASE_LAYOUT is the one source of positions: the models below and the ground traffic (airfield.js) both read it. */
 const BASE_LAYOUT = {
   rwy: { x0: -64, x1: 64, z: 8, w: 4.4, td: -54 },          // td: touchdown point (x)
-  twy: { z: -2, x0: -66, x1: 66, w: 2.2 },                  // parallel taxiway (westbound)
+  twy: { z: -2, x0: -66, x1: 68, w: 2.2 },                  // parallel taxiway (westbound)
   links: [-64, -30, 0, 32, 64],                             // runway <-> taxiway links (x); -64 = departure end
   hold: { x: -64, z: 2.6 },                                 // holding point of the departure link
   apron: { x0: -42, x1: 42, z0: -3.1, z1: -26 },
   lane: -16,                                                // apron taxi lane (z), eastbound
-  channels: [-44, -4, 64],                                  // apron <-> taxiway: west and centre channels in (north), the east one out (south)
-  remote: [{ x0: -70, x1: -44 }, { x0: 44, x1: 68 }],       // remote stands, both ends of the apron
-  fence: [[-74, -2], [-58, -40], [-24, -66], [12, -70], [50, -50], [76, -14], [74, 22], [44, 54], [8, 72], [-28, 64], [-58, 42], [-76, 18]],
+  channels: [-44, -4, 66.5],                                // apron <-> taxiway: west and centre channels in (north), the east one out (south, east of the last runway link: no head-on meeting there)
+  // remote stands at both ends of the apron (slabs joined to it, kept inside the fence): stand xs, rows (z)
+  remote: [{ x0: -67.5, x1: -42, z1: -15, xs: [-63, -54], rows: [-9] }, { x0: 42, x1: 66, z1: -26, xs: [49, 58], rows: [-9, -20] }],
+  fence: [[-80, -2], [-63, -43], [-24, -66], [12, -70], [56, -53], [81, -14], [74, 22], [44, 54], [8, 72], [-28, 64], [-58, 42], [-76, 18]],
   gate: 9                                                   // fence segment with the main gate (index of its first point)
 };
 const BL = BASE_LAYOUT;
@@ -49,7 +50,7 @@ function layoutParking() {
   P.hangars.push({ x: 4.5, z: -23.8, kind: 'h', row: 'b', door: 0, w: 11, d: 9, size: 'big' });
   P.hangars.push({ x: 17.5, z: -23, kind: 'h', row: 'b', door: 0, w: 8.6, d: 7.4, size: 'medium' });
   for (const x of [27, 32.5]) P.hangars.push({ x, z: -21.6, kind: 'd', row: 'b', door: 0, w: 4.6, d: 4.4, size: 'small' });
-  for (const r of BL.remote) for (const z of r.x0 > 0 ? [-9, -20] : [-9]) for (let x = r.x0 + 5; x < r.x1 - 8; x += 9) P.remote.push({ x, z, kind: 'r', row: z > -15 ? 'a' : 'c' });   // the east channel runs past the east end
+  for (const r of BL.remote) for (const z of r.rows) for (const x of r.xs) P.remote.push({ x, z, kind: 'r', row: z > -15 ? 'a' : 'c' });   // the east channel runs past the east end
   for (const z of [18, 24, 30]) for (const x of [11, 17, 23, 29]) P.heli.push({ x, z, yaw: 0, kind: 'heli', occ: null });
   for (const l of [P.stands, P.shelters, P.hangars, P.remote]) for (const s of l) { s.yaw = N; s.occ = null; }
   return P;
@@ -235,9 +236,10 @@ function buildBase() {
   for (const lx of BL.links) { slab(g, lx - TW.w / 2, TW.z, lx + TW.w / 2, R.z - R.w / 2, 0.035, ASPH2); deckLine(g, lx, TW.z, lx, R.z - R.w / 2, 0.08, 0xd8b030, my - 0.006); }
   for (const sz of [-0.15, 0.15]) deckLine(g, BL.hold.x - 1.1, BL.hold.z + sz, BL.hold.x + 1.1, BL.hold.z + sz, 0.07, 0xd8b030, my);
   slab(g, A.x0, A.z1, A.x1, A.z0, 0.03, CONC);
-  for (const r of BL.remote) slab(g, r.x0, -25, r.x1, A.z0, 0.03, CONC);
+  for (const r of BL.remote) slab(g, r.x0, r.z1, r.x1, A.z0, 0.03, CONC);
+  const ec = BL.channels[2]; slab(g, ec - 1.6, BL.lane - 1.6, ec + 1.6, A.z0, 0.03, CONC);   // the east channel
   for (const cx of BL.channels) deckLine(g, cx, TW.z, cx, BL.lane, 0.08, 0xd8b030, my - 0.012);
-  deckLine(g, -70, BL.lane, 70, BL.lane, 0.08, 0xd8b030, my - 0.012);
+  deckLine(g, BL.channels[0], BL.lane, BL.channels[2], BL.lane, 0.08, 0xd8b030, my - 0.012);
   // --- heli pad (south of the runway), the fire station with its apron onto the runway, the roads
   slab(g, 7.5, 14.5, 32.5, 33.5, 0.03, CONC);
   slab(g, -7.5, R.z + R.w / 2 + 0.9, -0.5, 15.7, 0.03, CONC);

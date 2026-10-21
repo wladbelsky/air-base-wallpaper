@@ -87,10 +87,11 @@ test('fire intensity 0: combat mode without passes or enemies', async ({ wp }) =
 
 test('a long, heavy fight (high stress) stays within bounds', async ({ wp }) => {
   // the gunships up first: armour comes in on its own and in their passes, the AC-130 circles over it
-  await wp.run(() => AIRCRAFT.filter(a => ['ah64', 'ac130', 'a10'].includes(a.spec.key)).forEach(a => a.requestLaunch()));
-  const up = await wp.until(() => AIRCRAFT.some(a => a.spec.key === 'ah64' && a.aloft) && AIRCRAFT.some(a => a.spec.key === 'ac130' && a.aloft), 400);
-  expect(up.done).toBe(true);
-  await wp.run(() => { __t.forceFight(); STRESS.level = 0.9; });
+  // (automatic flight ops off meanwhile: they would bring the helicopters back while the AC-130 queues for the runway)
+  await wp.run(() => { CFG.auto = false; AIRCRAFT.filter(a => ['ah64', 'ac130', 'a10'].includes(a.spec.key)).forEach(a => a.requestLaunch()); });
+  const up = await wp.until(() => AIRCRAFT.some(a => a.spec.key === 'ah64' && a.aloft) && AIRCRAFT.some(a => a.spec.key === 'ac130' && a.aloft), 600);
+  expect(up.done, JSON.stringify(await wp.states())).toBe(true);
+  await wp.run(() => { CFG.auto = true; __t.forceFight(); STRESS.level = 0.9; });
   const seen = await fight(wp, 300);
   for (const k of ['cruise', 'ballistic', 'armor', 'bandit']) expect(seen.kinds[k] || 0, `${k} at high stress`).toBeGreaterThan(0);
   expect(seen.maxEnemies).toBeLessThan(70);

@@ -79,6 +79,14 @@
       if (a.tank && !H.TANK_STATES.has(a.state)) v.push(`tank event outside a tanker state ${who(a)}`);
       if (a.spec.tanker && a.hoseOut && a.state !== 'tank_pass') v.push(`hose out outside the pass ${who(a)}`);
     }
+    // nobody taxis into anyone else (parked / ready ones may share the last remote stand when the base is over-full)
+    const taxiing = AIRCRAFT.filter(a => a.onGround && a.mesh.visible && a.state !== 'parked' && a.state !== 'ready' && !(a instanceof Helicopter));
+    for (let i = 0; i < taxiing.length; i++) for (let j = i + 1; j < taxiing.length; j++) {
+      const a = taxiing[i], b = taxiing[j], d = Math.hypot(a.mesh.position.x - b.mesh.position.x, a.mesh.position.z - b.mesh.position.z);
+      if (d < 0.3 * (a.spec.len + b.spec.len)) v.push(`ground collision ${who(a)} / ${who(b)} (${d.toFixed(2)} apart at ${a.mesh.position.x.toFixed(0)},${a.mesh.position.z.toFixed(0)})`);
+    }
+    // enemy armour stays outside the fence
+    for (const e of ENEMIES) if (e.kind === 'armor' && !e.dead && insideFence(e.p.x, e.p.z)) v.push(`enemy ${e.type} inside the fence at ${e.p.x.toFixed(0)},${e.p.z.toFixed(0)}`);
     // tanker event
     const ev = TANKER.ev;
     if (ev) {

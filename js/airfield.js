@@ -35,14 +35,16 @@ const AIRFIELD = {
   sheltered: s => !!(s && s.leaves || s && s.panels),       // a shelter or hangar (has doors)
   /* ---- routes: [x, z] points through the corners (followDeck smooths them with a Catmull-Rom curve) ---- */
   // a corner rounded with radius r: the two points r before and after it instead of the corner itself
+  // (two corners closer than 2r meet in the middle of their side: that point only once — a doubled point makes the
+  // centripetal Catmull-Rom curve loop, the aircraft spun round on the spot)
   round(pts, r) {
-    const out = [pts[0]];
+    const out = [pts[0]], put = (x, z) => { const q = out[out.length - 1]; if (Math.hypot(x - q[0], z - q[1]) > 0.05) out.push([x, z]); };
     for (let i = 1; i < pts.length - 1; i++) {
       const [ax, az] = pts[i - 1], [bx, bz] = pts[i], [cx, cz] = pts[i + 1];
       const l1 = Math.hypot(bx - ax, bz - az), l2 = Math.hypot(cx - bx, cz - bz), k1 = Math.min(r, l1 / 2) / l1, k2 = Math.min(r, l2 / 2) / l2;
-      out.push([bx - (bx - ax) * k1, bz - (bz - az) * k1], [bx + (cx - bx) * k2, bz + (cz - bz) * k2]);
+      put(bx - (bx - ax) * k1, bz - (bz - az) * k1); put(bx + (cx - bx) * k2, bz + (cz - bz) * k2);
     }
-    out.push(pts[pts.length - 1]); return out;
+    put(...pts[pts.length - 1]); return out;
   },
   onLane: s => s.row !== 'a',
   /* pushback out of the home: backwards onto the taxiway (front row: ending nose west) or the lane (nose east) */
@@ -53,7 +55,7 @@ const AIRFIELD = {
   /* from the end of the pushback to the holding point (from the lane: east along it, out by the east channel) */
   toHold(s) {
     const pts = [];
-    if (this.onLane(s)) pts.push([s.x - 3.4, LANE], [64, LANE], [64, TWZ]);
+    if (this.onLane(s)) { const ec = BASE_LAYOUT.channels[2]; pts.push([s.x - 3.4, LANE], [ec, LANE], [ec, TWZ]); }
     else pts.push([s.x + 3.4, TWZ]);
     pts.push([HOLD.x, TWZ], [HOLD.x, HOLD.z]);
     return this.round(pts, 2.2);
@@ -100,30 +102,60 @@ const AIRFIELD = {
     }
     return true;
   },
-  /* ---- ground traffic: stop behind whoever is close ahead. Two aircraft blocking each other (crossing at a junction)
-     can't both wait: the one listed first in AIRCRAFT goes. A rarer three-way knot is untied after 25 s. ---- */
+  /* ---- ground traffic: stop behind whoever is close ahead (parked ones sit in their homes, off the routes). Aircraft
+     blocking each other round a cycle (two crossing at a junction, a pushback and one passing behind it) can't all
+     wait: one of the knot goes — a pushback first (it's under way), else the first in AIRCRAFT. Nobody ever drives
+     on through the one in front. ---- */
   blocker(a, dir) {
     const p = a.mesh.position, reach = 1.0 + a.spec.len * 0.9;
+    const ahead = (b, x, z, min = 0.1) => {
+      const dx = x - p.x, dz = z - p.z, along = dx * dir.x + dz * dir.z;
+      if (along <= min || along > reach + b.spec.len * 0.5) return false;
+      // in the way, or close in front whatever the side (one turning off just ahead still has its tail across our path)
+      return Math.abs(dx * dir.z - dz * dir.x) < (a.spec.span + b.spec.span) * 0.32 + 0.3 || Math.hypot(dx, dz) < (a.spec.len + b.spec.len) * 0.4 + 0.5;
+    };
     for (const b of AIRCRAFT) {
-      if (b === a || !b.onGround || !b.mesh.visible) continue;
-      const dx = b.mesh.position.x - p.x, dz = b.mesh.position.z - p.z, along = dx * dir.x + dz * dir.z;
-      if (along <= 0.1 || along > reach + b.spec.len * 0.5) continue;
-      if (Math.abs(dx * dir.z - dz * dir.x) < (a.spec.span + b.spec.span) * 0.32 + 0.3) return b;
+      if (b === a || !b.onGround || !b.mesh.visible || b.state === 'parked') continue;
+      // one waiting to push back for a while: stop short of where its pushback ends and let it out (unless already there)
+      if (b.state === 'ready') { if (a.state !== 'pushback' && this.wantsOut(b) && ahead(b, ...b.pb[b.pb.length - 1], a.blockBy === b ? 0.1 : this.gap(a, b))) return b; continue; }
+      if (ahead(b, b.mesh.position.x, b.mesh.position.z)) return b;
+      if (b.state === 'pushback' && ahead(b, ...b.pb[b.pb.length - 1])) return b;   // keep clear of where a pushback ends
     }
     return null;
   },
+  wantsOut: b => b.state === 'ready' && b.t > 20 && !b.groundBusy && b.pb,
+  gap: (a, b) => (a.spec.len + b.spec.len) * 0.5 + 1,       // nose to tail with room to spare
+  yielding: (b, a) => b.blockBy === a && T - (b.blockAt ?? -1) < 0.2,
   blocked(a, dir, dt) {
-    const b = a.blockBy = this.blocker(a, dir);
+    const b = a.blockBy = this.blocker(a, dir); a.blockAt = T;
     if (!b) { a.blockT = 0; return false; }
     a.blockT = (a.blockT || 0) + dt;
-    if (b.blockBy === a && AIRCRAFT.indexOf(a) < AIRCRAFT.indexOf(b)) return false;
-    return a.blockT < 25;
+    const k = this.knot(a);
+    return !k || this.knotFirst(k) !== a;
   },
-  /* a pushback waits until nothing is moving near where it ends */
+  // the cycle of blockBy links through a (only links set in the last moments: one standing at the hold keeps an old one)
+  knot(a) {
+    const seen = [a];
+    for (let c = a.blockBy; c && T - (c.blockAt ?? -1) < 0.2; c = c.blockBy) {
+      if (c === a) return seen;
+      if (seen.includes(c) || seen.length > 8) return null;
+      seen.push(c);
+    }
+    return null;
+  },
+  knotFirst: k => k.find(c => c.state === 'pushback') || k.reduce((m, c) => AIRCRAFT.indexOf(c) < AIRCRAFT.indexOf(m) ? c : m),
+  /* a pushback waits until nobody is near its path or taxiing toward where it ends (it takes 10-20 s, blocking the lane /
+     taxiway); after 20 s the traffic stops short of it (blocker), those holding for it a gap away don't count */
   pushbackClear(a, pts) {
-    if (a.t > 60) return true;                              // never wait for ever (a queue standing still in front of it)
     const [ex, ez] = pts[pts.length - 1];
-    for (const b of AIRCRAFT) if (b !== a && b.onGround && b.state !== 'parked' && Math.hypot(b.mesh.position.x - ex, b.mesh.position.z - ez) < 7) return false;
+    for (const b of AIRCRAFT) {
+      if (b === a || !b.onGround || b.state === 'parked' || b.state === 'ready' || b instanceof Helicopter) continue;
+      const bp = b.mesh.position, r = this.yielding(b, a) ? (a.spec.len + b.spec.len) * 0.5 : 2 + (a.spec.len + b.spec.len) * 0.6;
+      for (const [x, z] of pts) if (Math.hypot(bp.x - x, bp.z - z) < r) return false;
+      if (b.state === 'pushback' && Math.hypot(b.pb[b.pb.length - 1][0] - ex, b.pb[b.pb.length - 1][1] - ez) < r + 4) return false;
+      const dx = ex - bp.x, dz = ez - bp.z, d = Math.hypot(dx, dz);
+      if (d < 40 && dx * b.fwd.x + dz * b.fwd.z > 0.8 * d && b.v > 0.05) return false;   // moving toward it
+    }
     return true;
   },
   /* ---- shelter / hangar doors: open while their aircraft moves in or out, closed otherwise ---- */

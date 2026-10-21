@@ -214,6 +214,7 @@ class EmergencyScene {
         break;
       }
       case 'tow':                                          // the tug leads the aircraft home (Aircraft.towed state)
+        if (GROUND_OPS.emerg === a && !AIRFIELD.rwy.has(a)) GROUND_OPS.emerg = null;   // off the runway: it reopens (the tow may queue behind departures)
         for (const k of this.trucks) if (k.d.step(dt)) { k.m.visible = false; }
         if (a.state === 'towed') { const ahead = a.mesh.position.clone().addScaledVector(a.fwd, a.spec.len * 0.5 + 0.7); this.tug.position.copy(ahead).setY(0); this.tug.rotation.set(0, Math.atan2(-a.fwd.z, a.fwd.x), 0); }
         else { this.phase = 'back'; this.tugD = new Drive(this.tug, [[this.tug.position.x, this.tug.position.z], [this.tug.position.x, this.tug.position.z + 2], [FIRE_STATION.x + 3, FIRE_STATION.z - 1]], 2.5); GROUND_OPS.done(a); }

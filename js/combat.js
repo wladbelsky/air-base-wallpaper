@@ -103,6 +103,8 @@ function spawnArmor(p, dir, type, stopAt, sq, i) {
   mesh.position.copy(e.p); orientFrom(mesh, e.dir, 0);
   ENEMIES.push(e); return e;
 }
+/* how far the fence is from the base centre along the unit vector u (ground columns stop outside it) */
+function fenceRadius(u) { let r = 120; while (r > 0 && !insideFence(u.x * r, u.z * r)) r -= 1; return r + 1; }
 /* the direction a column comes from: down the road to the gate, or across country from the west / south / east */
 function spawnColumn(meetPos) {
   const st = STRESS.level, sq = pick(ENEMY_NAMES.armor);

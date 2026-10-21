@@ -419,7 +419,7 @@ function updateMounts(dt) {
     mountUpdate(m, dt);
   }
   for (const m of ALL_TANKS) {
-    if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['armor'], 80); if (m.track) aimMountAt(m, m.track.p); } else m.track = null;
+    if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['armor'], 110); if (m.track) aimMountAt(m, m.track.p); } else m.track = null;
     mountUpdate(m, dt);
   }
   for (const m of ALL_SHORAD) {
@@ -738,7 +738,7 @@ function buildList() {
 }
 /* the base's sites on the panel: tower, air defence battery, tank platoon, point defence */
 const SITES = [
-  { tp: 'TWR', name: () => RADIO_NAMES.tower, desc: 'air traffic', fires: ['TOWER', 'OPS', 'RUNWAY', 'HANGAR', 'HAS', 'FUEL'], busy: () => AIRFIELD.rwy.size || AIRFIELD.arrivals.size },
+  { tp: 'TWR', name: () => 'TOWER', desc: 'ATC · runway', fires: ['TOWER', 'OPS', 'RUNWAY', 'HANGAR', 'HAS', 'FUEL'], busy: () => AIRFIELD.rwy.size || AIRFIELD.arrivals.size },
   { tp: 'SAM', name: () => RADIO_NAMES.patriot, desc: 'Patriot · NASAMS', fires: ['PATRIOT'], busy: () => ENEMIES.some(e => (e.kind === 'ballistic' || e.kind === 'bandit') && enemyAlive(e)) },
   { tp: 'ARM', name: () => RADIO_NAMES.armor, desc: 'tank platoon', fires: [], busy: () => ENEMIES.some(e => e.kind === 'armor' && enemyAlive(e)) },
   { tp: 'C-RAM', name: () => RADIO_NAMES.cram, desc: 'point defence', fires: ['FIRE STN'], busy: () => ENEMIES.some(e => (e.kind === 'cruise' || e.kind === 'heli') && enemyAlive(e)) }
