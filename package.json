@@ -1,0 +1,11 @@
+{
+  "name": "forward-air-base-tests",
+  "private": true,
+  "description": "Automated tests for the Forward Air Base wallpaper (the wallpaper itself has no build step)",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
