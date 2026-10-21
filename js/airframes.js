@@ -10,89 +10,9 @@ function glowSprite(g, x, y, z, s, color) {
 }
 function gear(g, pts, h) { const gg = new THREE.Group(); g.add(gg); for (const [x, z] of pts) { box(gg, 0.035, h, 0.035, 0x222, x, h / 2, z); box(gg, 0.08, 0.06, 0.03, 0x1a1a1a, x, 0.03, z); } return gg; }
 
-/* ---------- F/A-18 Hornet ---------- */
-function buildFA18(color, big) {
-  const g = new THREE.Group(), C = M(color || 0x8d959d), C2 = M(0x7b848c), D = M(0x3a4047), CAN = CANOPY();
-  const b = new THREE.Group(); b.position.y = 0.2; g.add(b);
-  taper(b, 0.6, 0.16, 0.18, C, 0.55, 0.02, 0, 0.8, 0.7);
-  const nose = shade(new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.36, 6), C)); nose.rotation.z = -Math.PI / 2; nose.position.set(1.03, 0.02, 0); b.add(nose);
-  taper(b, 0.95, 0.2, 0.34, C, -0.2, 0, 0, 0.92, 0.72);
-  taper(b, 0.38, 0.1, 0.13, CAN, 0.55, 0.13, 0, 0.6, 0.7, -0.04);
-  for (const s of [-1, 1]) box(b, 0.36, 0.12, 0.1, D, 0.12, -0.06, s * 0.2);
-  prism(b, [[0.78, 0.07], [0.12, 0.26], [0.12, 0.08]], 0.0, 0.025, C); prism(b, mirrorZ([[0.78, 0.07], [0.12, 0.26], [0.12, 0.08]]), 0.0, 0.025, C);
-  const inner = [[0.14, 0.17], [-0.2, 0.42], [-0.44, 0.42], [-0.44, 0.17]];
-  prism(b, inner, -0.02, 0.035, C); prism(b, mirrorZ(inner), -0.02, 0.035, C);
-  const pivots = [];
-  for (const s of [1, -1]) {
-    const pv = new THREE.Group(); pv.position.set(0, -0.02, s * 0.42); b.add(pv);
-    const outer = [[-0.2, 0], [-0.38, 0.22], [-0.48, 0.22], [-0.44, 0]];
-    prism(pv, s > 0 ? outer : mirrorZ(outer), 0, 0.03, C);
-    const mi = cyl(pv, 0.022, 0.022, 0.38, 5, 0xe0e0e0, -0.36, 0.02, s * 0.23); mi.rotation.z = Math.PI / 2;
-    pivots.push({ pv, s });
-  }
-  const stab = [[-0.52, 0.13], [-0.72, 0.36], [-0.84, 0.36], [-0.8, 0.13]];
-  prism(b, stab, -0.01, 0.025, C); prism(b, mirrorZ(stab), -0.01, 0.025, C);
-  for (const s of [-1, 1]) { const f = taper(b, 0.36, 0.34, 0.03, C2, -0.5, 0.22, s * 0.13, 0.5, 1, -0.1); f.rotation.x = s * 0.35; }
-  for (const s of [-1, 1]) { const t = cyl(b, 0.055, 0.055, 0.38, 6, 0xb0b4b8, 0.0, -0.12, s * 0.3); t.rotation.z = Math.PI / 2; }
-  for (const s of [-1, 1]) { const n = cyl(b, 0.08, 0.09, 0.12, 6, 0x222, -0.74, 0, s * 0.07); n.rotation.z = Math.PI / 2; }
-  const gr = big ? null : gear(g, [[0.7, 0], [-0.25, 0.2], [-0.25, -0.2]], 0.2);
-  const glow = glowSprite(g, -0.9, 0.2, 0, 0.7);
-  mergeStatic(g, [...pivots.map(p => p.pv), gr]);
-  return {
-    group: g,
-    setFold(f) { for (const p of pivots) p.pv.rotation.x = -p.s * f * 1.7; },
-    tick(dt, st) { if (gr) gr.visible = st.gearDown !== false; glow.material.opacity += ((st.glow || 0) - glow.material.opacity) * Math.min(1, dt * 6); const sc = 0.5 + glow.material.opacity * 0.6; glow.scale.set(sc, sc, 1); }
-  };
-}
-
-/* ---------- F-14 (Super) Tomcat — variable-sweep wings ---------- */
-function buildF14(color, big) {
-  const g = new THREE.Group(), C = M(color || 0x9aa1a8), C2 = M(0x858d95), D = M(0x3a4047), CAN = CANOPY();
-  const b = new THREE.Group(); b.position.y = 0.22; g.add(b);
-  taper(b, 0.72, 0.17, 0.2, C, 0.62, 0.04, 0, 0.8, 0.7);
-  const nose = shade(new THREE.Mesh(new THREE.ConeGeometry(0.095, 0.42, 6), C)); nose.rotation.z = -Math.PI / 2; nose.position.set(1.18, 0.04, 0); b.add(nose);
-  taper(b, 0.42, 0.11, 0.15, CAN, 0.66, 0.16, 0, 0.6, 0.72, -0.05);
-  prism(b, [[0.35, 0.3], [-0.85, 0.36], [-0.85, -0.36], [0.35, -0.3]], -0.04, 0.07, C);          // "pancake"
-  const glove = [[0.62, 0.12], [0.12, 0.37], [0.02, 0.37], [0.02, 0.12]];
-  prism(b, glove, -0.01, 0.04, C); prism(b, mirrorZ(glove), -0.01, 0.04, C);
-  for (const s of [-1, 1]) {
-    taper(b, 1.05, 0.15, 0.17, C, -0.25, -0.03, s * 0.22, 0.95, 0.9);
-    box(b, 0.18, 0.15, 0.17, D, 0.32, -0.03, s * 0.22);
-    const n = cyl(b, 0.08, 0.085, 0.12, 6, 0x222, -0.82, -0.03, s * 0.22); n.rotation.z = Math.PI / 2;
-    const f = taper(b, 0.38, 0.4, 0.03, C2, -0.6, 0.24, s * 0.22, 0.5, 1, -0.12); f.rotation.x = s * 0.1;
-  }
-  const stab = [[-0.55, 0.3], [-0.75, 0.6], [-0.9, 0.6], [-0.87, 0.3]];
-  prism(b, stab, -0.02, 0.025, C); prism(b, mirrorZ(stab), -0.02, 0.025, C);
-  for (const s of [-1, 1]) { const m = cyl(b, 0.03, 0.03, 0.4, 5, 0xe8e8e8, 0.1, -0.1, s * 0.08); m.rotation.z = Math.PI / 2; }
-  const pivots = [];
-  for (const s of [1, -1]) {
-    const pv = new THREE.Group(); pv.position.set(0.06, 0.0, s * 0.36); b.add(pv);
-    const w = [[0.07, 0], [-0.12, 0], [-0.4, 0.95], [-0.29, 0.95]];
-    prism(pv, s > 0 ? w : mirrorZ(w), 0, 0.03, C);
-    pivots.push({ pv, s });
-  }
-  const gr = big ? null : gear(g, [[0.8, 0], [-0.15, 0.3], [-0.15, -0.3]], 0.22);
-  const glow = glowSprite(g, -1.0, 0.19, 0, 0.8);
-  mergeStatic(g, [...pivots.map(p => p.pv), gr]);
-  let sweep = 20, fold = 0;
-  return {
-    group: g,
-    setFold(f) { fold = f; },
-    tick(dt, st) {
-      if (gr) gr.visible = st.gearDown !== false;
-      const flight = st.sweepTarget != null ? st.sweepTarget : 20;
-      const target = lerp(flight, 75, fold);                 // parked: 75° oversweep
-      sweep += clamp(target - sweep, -25 * dt, 25 * dt);
-      for (const p of pivots) p.pv.rotation.y = -p.s * (sweep - 20) * DEG;
-      glow.material.opacity += ((st.glow || 0) - glow.material.opacity) * Math.min(1, dt * 6);
-      const sc = 0.55 + glow.material.opacity * 0.7; glow.scale.set(sc, sc, 1);
-    }
-  };
-}
-
-/* ---------- F-35C Lightning II — stealth, outer wing panels fold up ---------- */
+/* ---------- F-35A Lightning II — stealth (the fold pivots are kept from the carrier version; land jets never fold) ---------- */
 function buildF35(color, big) {
-  const g = new THREE.Group(), C = M(color || 0x737b83), C2 = M(0x646c74), D = M(0x33383d), CAN = M(0x3a3320, { shininess: 90, specular: 0xccaa55 });
+  const g = new THREE.Group(), C = M(color || 0x6c747c), C2 = M(0x5e666e), D = M(0x33383d), CAN = M(0x3a3320, { shininess: 90, specular: 0xccaa55 });
   const b = new THREE.Group(); b.position.y = 0.2; g.add(b);
   taper(b, 0.5, 0.15, 0.2, C, 0.52, 0.03, 0, 0.75, 0.55);                                   // chined forebody
   const nose = shade(new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.3, 4), C)); nose.rotation.set(Math.PI / 4, 0, -Math.PI / 2); nose.position.set(0.92, 0.03, 0); b.add(nose);
@@ -146,31 +66,6 @@ function buildSu25() {
   enemyGlows(g, -0.58, 0.2, [-0.15, 0.15], 0.55);
   mergeStatic(g, []); return g;
 }
-/* Su-33 Flanker-D — naval Flanker: long nose, canards, widely spaced engines, twin fins, tail sting */
-function buildSu33() {
-  const g = new THREE.Group(), C = M(0x5f6c7a), C2 = M(0x4a5663), D = M(0x2c2f33), R = M(0x8f2b22), CAN = CANOPY();
-  const b = new THREE.Group(); b.position.y = 0.22; g.add(b);
-  taper(b, 0.72, 0.15, 0.16, C, 0.62, 0.06, 0, 0.75, 0.7);
-  const nose = shade(new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.34, 6), C)); nose.rotation.z = -Math.PI / 2; nose.position.set(1.15, 0.06, 0); b.add(nose);
-  taper(b, 0.3, 0.1, 0.12, CAN, 0.66, 0.18, 0, 0.6, 0.7, -0.04);
-  prism(b, [[0.4, 0.15], [-0.95, 0.3], [-0.95, -0.3], [0.4, -0.15]], -0.02, 0.1, C);        // lifting body
-  const wing = [[0.45, 0.14], [-0.12, 0.4], [-0.45, 0.8], [-0.6, 0.8], [-0.62, 0.28]];
-  prism(b, wing, 0.03, 0.03, C); prism(b, mirrorZ(wing), 0.03, 0.03, C);
-  const can = [[0.4, 0.14], [0.24, 0.33], [0.15, 0.33], [0.17, 0.14]];
-  prism(b, can, 0.06, 0.02, C); prism(b, mirrorZ(can), 0.06, 0.02, C);
-  for (const s of [-1, 1]) {
-    taper(b, 0.95, 0.15, 0.16, C2, -0.42, -0.07, s * 0.2, 0.95, 0.9);
-    box(b, 0.16, 0.12, 0.14, D, 0.12, -0.08, s * 0.2);                                     // intake
-    const nz = cyl(b, 0.07, 0.075, 0.1, 6, 0x222, -0.94, -0.07, s * 0.2); nz.rotation.z = Math.PI / 2;
-    taper(b, 0.38, 0.42, 0.03, C, -0.68, 0.3, s * 0.3, 0.5, 1, -0.14);
-    box(b, 0.1, 0.06, 0.035, R, -0.85, 0.49, s * 0.3);
-  }
-  const stab = [[-0.7, 0.28], [-0.9, 0.6], [-1.02, 0.6], [-1.0, 0.28]];
-  prism(b, stab, -0.03, 0.025, C); prism(b, mirrorZ(stab), -0.03, 0.025, C);
-  const sting = cyl(b, 0.04, 0.05, 0.25, 6, C2, -1.05, 0.0, 0); sting.rotation.z = Math.PI / 2;
-  enemyGlows(g, -1.02, 0.15, [-0.2, 0.2], 0.6);
-  mergeStatic(g, []); return g;
-}
 /* Su-47 Berkut — forward-swept wings, canards, tail booms, dark finish */
 function buildSu47() {
   const g = new THREE.Group(), C = M(0x34383d), C2 = M(0x26292d), D = M(0x1c1d20), R = M(0x8f2b22), CAN = CANOPY();
@@ -221,128 +116,6 @@ function buildSu57() {
   mergeStatic(g, []); return g;
 }
 
-/* ---------- enemy fast attack craft (~12 m): pointed planing hull, cabin, bow MG, outboards ---------- */
-function buildBoat() {
-  const g = new THREE.Group(), C = M(0x5d6266), C2 = M(0x4a4f53), D = M(0x26292c), CAN = CANOPY();
-  prism(g, [[0.55, 0], [0.32, 0.13], [-0.45, 0.14], [-0.45, -0.14], [0.32, -0.13]], -0.06, 0.12, C);   // hull
-  prism(g, [[0.5, 0], [0.3, 0.11], [-0.43, 0.12], [-0.43, -0.12], [0.3, -0.11]], 0.06, 0.012, C2);     // deck
-  taper(g, 0.3, 0.12, 0.17, C2, -0.02, 0.13, 0, 0.75, 0.85, -0.03);                                       // cabin
-  taper(g, 0.06, 0.07, 0.15, CAN, 0.13, 0.16, 0, 0.5, 0.9, -0.015);                                       // windscreen
-  box(g, 0.012, 0.16, 0.012, D, -0.1, 0.27, 0); box(g, 0.03, 0.012, 0.1, D, -0.1, 0.33, 0);              // mast, radar bar
-  cyl(g, 0.035, 0.04, 0.035, 8, D, 0.33, 0.085, 0);                                                       // bow gun ring
-  for (const z of [-0.012, 0.012]) { const b = cyl(g, 0.007, 0.007, 0.14, 4, D, 0.4, 0.115, z); b.rotation.z = Math.PI / 2 - 0.25; }
-  for (const z of [-0.06, 0.06]) box(g, 0.06, 0.1, 0.045, D, -0.47, 0.06, z);                           // outboard motors
-  mergeStatic(g, []); return g;
-}
-
-/* ---------- a crashed jet floating half sunk, its pilot's life raft beside it (pilot-rescue missions) ----------
-   build = any airframe builder (friendly ones return { group, tick }, enemy ones a group); gear, nav lights and engine
-   glow are stripped, the rest merged into one static template that the missions clone. */
-function buildWreck(build) {
-  const g = new THREE.Group(), m = build(), ac = m.isObject3D ? m : m.group;
-  if (m.tick) { m.setFold(0); m.tick(1, { gearDown: false, glow: 0, sweepTarget: 20 }); }
-  const drop = []; ac.traverse(o => { if (!o.visible || o.isPoints || o.isSprite) drop.push(o); });
-  for (const o of drop) { const i = o.isPoints ? NAV_MATS.indexOf(o.material) : -1; if (i >= 0) NAV_MATS.splice(i, 1); o.removeFromParent(); }
-  ac.scale.setScalar(1.25); ac.position.y = -0.22; ac.rotation.set(0.3, 0, -0.1);   // half sunk, rolled, nose down
-  g.add(ac);
-  cyl(g, 0.27, 0.3, 0.08, 12, 0xf2c21a, 1.7, 0.06, 0.9);                           // life raft
-  mergeStatic(g, []); return g;
-}
-
-/* ---------- E-2D Hawkeye (AWACS) — Sto-Wing fold ---------- */
-function buildE2D(color) {
-  const g = new THREE.Group(), C = M(color || 0xc2c6ca), C2 = M(0xa9aeb3), D = M(0x33383d), CAN = CANOPY();
-  taper(g, 1.3, 0.25, 0.27, C, 0.05, 0.3, 0, 0.9, 0.8);
-  taper(g, 0.36, 0.22, 0.24, C, 0.86, 0.28, 0, 0.6, 0.7, -0.06);
-  taper(g, 0.24, 0.08, 0.24, CAN, 0.83, 0.41, 0, 0.6, 0.85, -0.03);
-  taper(g, 0.55, 0.18, 0.2, C, -0.83, 0.36, 0, 0.8, 0.6, 0.06);
-  prism(g, [[0.19, -0.62], [0.19, 0.62], [-0.08, 0.62], [-0.08, -0.62]], 0.44, 0.04, C);   // wing centre section
-  const props = [];
-  for (const s of [-1, 1]) {
-    taper(g, 0.72, 0.14, 0.14, C2, 0.12, 0.38, s * 0.4, 0.9, 0.9);
-    const sp = shade(new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 6), D)); sp.rotation.z = -Math.PI / 2; sp.position.set(0.53, 0.38, s * 0.4); g.add(sp);
-    const pr = new THREE.Group(); pr.position.set(0.5, 0.38, s * 0.4); g.add(pr);
-    for (let i = 0; i < 4; i++) { const bl = new THREE.Group(); bl.rotation.x = i * Math.PI / 4; pr.add(bl); box(bl, 0.02, 0.4, 0.04, D, 0, 0, 0).castShadow = false; }
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.2, 16), new THREE.MeshBasicMaterial({ color: 0x2a2f34, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
-    disc.rotation.y = Math.PI / 2; pr.add(disc);
-    props.push({ pr, disc });
-  }
-  const pivots = [], qId = new THREE.Quaternion();
-  for (const s of [1, -1]) {
-    const pv = new THREE.Group(); pv.position.set(0.05, 0.44, s * 0.62); g.add(pv);
-    const w = [[0.14, 0], [-0.08, 0], [-0.04, 0.62], [0.08, 0.62]];
-    prism(pv, s > 0 ? w : mirrorZ(w), 0, 0.035, C);
-    const qz = new THREE.Quaternion().setFromAxisAngle(new V3(0, 0, 1), 1.45);     // twist chord upright (leading edge up)
-    const qy = new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), -s * 1.6); // swing aft
-    pivots.push({ pv, qf: qy.multiply(qz) });
-  }
-  // rotodome
-  strut(g, new V3(-0.05, 0.42, 0.05), new V3(-0.2, 0.78, 0.05), 0.02, C2); strut(g, new V3(-0.35, 0.42, -0.05), new V3(-0.22, 0.78, -0.05), 0.02, C2);
-  const dome = new THREE.Group(); dome.position.set(-0.2, 0.82, 0); g.add(dome);
-  cyl(dome, 0.37, 0.37, 0.07, 18, 0xe8eaec, 0, 0, 0); box(dome, 0.5, 0.075, 0.04, 0x44484d, 0, 0, 0);
-  box(g, 0.2, 0.03, 0.95, C, -0.92, 0.46, 0);
-  for (const z of [-0.47, -0.17, 0.17, 0.47]) taper(g, 0.22, 0.32, 0.03, C2, -0.94, 0.62, z, 0.6, 1, -0.05);
-  const gr = gear(g, [[0.7, 0], [0.1, 0.4], [0.1, -0.4]], 0.2);
-  mergeStatic(g, [...props.flatMap(p => [p.pr, ...p.pr.children.filter(c => c.isGroup)]), ...pivots.map(p => p.pv), dome, gr]);
-  let ang = 0, spin = 0;
-  return {
-    group: g,
-    setFold(f) { const k = smoothstep(0, 1, f); for (const p of pivots) p.pv.quaternion.copy(qId).slerp(p.qf, k); },
-    tick(dt, st) {
-      gr.visible = st.gearDown !== false;
-      spin += ((st.engineOn ? 1 : 0) - spin) * Math.min(1, dt * 0.8);
-      ang += spin * 40 * dt;
-      for (const p of props) { p.pr.rotation.x = ang; p.pr.children.forEach(c => { if (c.isGroup) c.visible = spin < 0.7 || Math.random() < 0.5; }); p.disc.material.opacity = 0.25 * smoothstep(0.4, 1, spin); }
-      if (st.airborne) dome.rotation.y += dt * 0.6;
-    }
-  };
-}
-
-/* ---------- MQ-25 Stingray — unmanned tanker: dorsal intake, V-tail, refuelling pod under the left wing ---------- */
-function buildMQ25(color) {
-  const g = new THREE.Group(), C = M(color || 0xaeb3b8), C2 = M(0x9aa0a6), D = M(0x33383d);
-  // fuselage: one six-sided loft (chines on the sides, flattened) — nose, body and tail cone share the section
-  const seg = (rBack, rFront, x0, x1, mat) => { const m = cyl(g, rFront, rBack, x1 - x0, 6, mat, (x0 + x1) / 2, 0.3, 0); m.rotation.z = -Math.PI / 2; m.scale.x = 0.62; return m; };
-  seg(0.08, 0.13, -0.86, -0.5, C); seg(0.13, 0.13, -0.5, 0.42, C); seg(0.13, 0.004, 0.42, 0.88, C);
-  taper(g, 0.42, 0.06, 0.15, C, 0.24, 0.39, 0, 0.55, 0.75, -0.08);                // dorsal hump
-  box(g, 0.07, 0.05, 0.12, D, 0.36, 0.4, 0);                                        // flush intake
-  seg(0.05, 0.07, -0.92, -0.86, 0x2a2a2a);                                          // nozzle
-  const inner = [[0.16, 0.1], [-0.2, 0.6], [-0.38, 0.6], [-0.34, 0.1]];
-  prism(g, inner, 0.27, 0.035, C); prism(g, mirrorZ(inner), 0.27, 0.035, C);
-  const pivots = [];
-  for (const s of [1, -1]) {
-    const pv = new THREE.Group(); pv.position.set(0, 0.27, s * 0.6); g.add(pv);
-    const outer = [[-0.2, 0], [-0.56, 0.52], [-0.66, 0.52], [-0.38, 0]];
-    prism(pv, s > 0 ? outer : mirrorZ(outer), 0, 0.03, C);
-    pivots.push({ pv, s });
-  }
-  for (const s of [-1, 1]) { const f = taper(g, 0.3, 0.3, 0.025, C2, -0.6, 0.47, s * 0.1, 0.5, 1, -0.12); f.rotation.x = s * 0.62; }
-  // refuelling store: the hose reels out of its tail, the drogue rides on the end
-  const PX = -0.36, PY = 0.17, PZ = -0.42, HL = 1.0, HA = 0.14;
-  const pod = cyl(g, 0.045, 0.045, 0.38, 6, 0xc8ccd0, -0.17, PY, PZ); pod.rotation.z = Math.PI / 2;
-  const podNose = shade(new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.1, 6), C2)); podNose.rotation.z = -Math.PI / 2; podNose.position.set(0.07, PY, PZ); g.add(podNose);
-  box(g, 0.12, 0.08, 0.02, C2, -0.14, 0.23, PZ);                                    // pylon
-  const hose = new THREE.Group(); hose.position.set(PX, PY, PZ); hose.rotation.z = HA; g.add(hose);
-  const hm = cyl(hose, 0.01, 0.01, 1, 4, 0x2a2a2a, -0.5, 0, 0); hm.rotation.z = Math.PI / 2; hm.castShadow = false;
-  const drogue = new THREE.Group(); g.add(drogue);
-  const dc = shade(new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.09, 8, 1, true), M(0xd9dde0, { side: THREE.DoubleSide })), false); dc.rotation.z = -Math.PI / 2; drogue.add(dc);
-  const gr = gear(g, [[0.5, 0], [-0.12, 0.3], [-0.12, -0.3]], 0.2);
-  const glow = glowSprite(g, -0.95, 0.3, 0, 0.5);
-  mergeStatic(g, [...pivots.map(p => p.pv), gr, hose, drogue]);
-  let ext = 0;
-  return {
-    group: g,
-    setFold(f) { for (const p of pivots) p.pv.rotation.x = -p.s * f * 1.7; },
-    tick(dt, st) {
-      gr.visible = st.gearDown !== false;
-      glow.material.opacity += ((st.glow || 0) - glow.material.opacity) * Math.min(1, dt * 6); const sc = 0.4 + glow.material.opacity * 0.5; glow.scale.set(sc, sc, 1);
-      ext += ((st.hoseOut || 0) - ext) * Math.min(1, dt * 0.9);
-      const L = HL * ext; hose.visible = ext > 0.02; hose.scale.x = Math.max(L, 1e-3);
-      drogue.position.set(PX - 0.03 - L * Math.cos(HA), PY - L * Math.sin(HA), PZ);
-    }
-  };
-}
-
 /* ---------- Helicopter helpers ---------- */
 function heliRotor(g, x, y, n, len, chord, color) {
   const rotor = new THREE.Group(); rotor.position.set(x, y, 0); g.add(rotor);
@@ -385,219 +158,450 @@ function heliModel(g, R, T, searchPos) {
   };
 }
 
-/* ---------- MH-60R Seahawk (utility / ASW) — real proportions: 15.3 m fuselage, 16.4 m rotor ---------- */
-function buildMH60(color) {
-  const g = new THREE.Group(), C = M(color || 0x6f7880), C2 = M(0x626b73), D = M(0x33383d), CAN = CANOPY();
-  // fuselage: boxy cabin, cockpit with sloped windscreen, short drooping nose
+
+/* ---------- shared pieces ---------- */
+/* a tube along X from x0 (radius r0) to x1 > x0 (radius r1); sy squashes it vertically */
+function tube(g, x0, x1, r0, r1, c, y, z, seg, sy) { const m = cyl(g, r1, r0, x1 - x0, seg || 8, c, (x0 + x1) / 2, y || 0, z || 0); m.rotation.z = -Math.PI / 2; if (sy) m.scale.x = sy; return m; }
+function pair(g, pts, y, t, c) { prism(g, pts, y, t, c); prism(g, mirrorZ(pts), y, t, c); }
+/* vertical fin: chord len at the root, height h, swept back by sweep at the tip; rx cants it (outward = sign of z) */
+function fin(g, x, y, z, len, h, c, sweep, rx, t) { const f = taper(g, len, h, t || 0.03, c, x, y + h / 2, z, 0.5, 1, -(sweep || 0.1)); f.rotation.x = rx || 0; return f; }
+function noseCone(g, x, y, r, len, c, sides) { const n = shade(new THREE.Mesh(new THREE.ConeGeometry(r, len, sides || 6), mm(c))); n.rotation.z = -Math.PI / 2; n.position.set(x + len / 2, y, 0); g.add(n); return n; }
+/* propeller turning about X: n two-bladed bars + a blur disc; returns { pr, disc } (pr is dynamic) */
+function propeller(g, x, y, z, r, n, c) {
+  const pr = new THREE.Group(); pr.position.set(x, y, z); g.add(pr);
+  for (let i = 0; i < n; i++) { const bl = new THREE.Group(); bl.rotation.x = i * Math.PI / n; pr.add(bl); box(bl, 0.02, r * 2, 0.045, c || 0x2a2d30, 0, 0, 0).castShadow = false; }
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 16), new THREE.MeshBasicMaterial({ color: 0x2a2f34, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  disc.rotation.y = Math.PI / 2; pr.add(disc);
+  return { pr, disc, blades: pr.children.filter(o => o.isGroup) };
+}
+function spinProps(props, spin, ang) {
+  for (const p of props) { p.pr.rotation.x = ang; for (const b of p.blades) b.visible = spin < 0.7 || Math.random() < 0.5; p.disc.material.opacity = 0.25 * smoothstep(0.4, 1, spin); }
+}
+/* engine glow: one sprite per nozzle following st.glow */
+function glows(g, list, s) { return list.map(([x, y, z]) => glowSprite(g, x, y, z, s)); }
+function tickGlow(gl, st, dt, base, k) { for (const s of gl) { s.material.opacity += ((st.glow || 0) - s.material.opacity) * Math.min(1, dt * 6); const sc = base + s.material.opacity * k; s.scale.set(sc, sc, 1); } }
+/* a jet's standard model object: gear toggles with st.gearDown, glows follow st.glow */
+function jetModel(g, gr, gl, base, k, extra) {
+  return Object.assign({ group: g, setFold() {}, tick(dt, st) { if (gr) gr.visible = st.gearDown !== false; tickGlow(gl, st, dt, base, k); if (this.more) this.more(dt, st); } }, extra || {});
+}
+
+/* ---------- F-15E Strike Eagle — 19.4 m: big wing, twin fins, conformal tanks, dark grey ---------- */
+function buildF15(color, big) {
+  const g = new THREE.Group(), C = M(color || 0x5a6168), C2 = M(0x4c535a), D = M(0x2c3035), CAN = CANOPY();
+  const b = new THREE.Group(); b.position.y = 0.22; g.add(b);
+  taper(b, 0.72, 0.17, 0.19, C, 0.72, 0.04, 0, 0.8, 0.7);
+  noseCone(b, 1.08, 0.04, 0.09, 0.36, C);
+  taper(b, 0.44, 0.12, 0.15, CAN, 0.7, 0.16, 0, 0.6, 0.72, -0.05);
+  prism(b, [[0.42, 0.17], [-0.98, 0.3], [-0.98, -0.3], [0.42, -0.17]], -0.05, 0.13, C);       // wide lifting body
+  for (const s of [-1, 1]) {
+    box(b, 0.34, 0.16, 0.13, D, 0.3, -0.02, s * 0.25);                                          // square intakes
+    tube(b, -0.95, -0.25, 0.085, 0.095, C2, -0.02, s * 0.13);                                   // engines
+    tube(b, -1.04, -0.95, 0.075, 0.085, 0x2a2a2a, -0.02, s * 0.13);
+    tube(b, -0.55, 0.25, 0.05, 0.05, C, -0.07, s * 0.29, 6);                                     // conformal tank
+    fin(b, -0.78, 0.07, s * 0.2, 0.36, 0.42, C2, 0.12, s * 0.06);
+  }
+  pair(b, [[0.25, 0.3], [-0.42, 0.66], [-0.6, 0.66], [-0.56, 0.3]], -0.02, 0.03, C);              // wings
+  pair(b, [[-0.72, 0.24], [-0.88, 0.5], [-1.0, 0.5], [-0.99, 0.24]], -0.03, 0.025, C);
+  for (const s of [-1, 1]) for (const z of [0.42, 0.55]) tube(b, -0.35, 0.0, 0.025, 0.025, 0x8a8f86, -0.1, s * z, 5);   // bombs under the wings
+  const gr = big ? null : gear(g, [[0.78, 0], [-0.25, 0.22], [-0.25, -0.22]], 0.22);
+  const gl = glows(g, [[-1.08, 0.2, -0.13], [-1.08, 0.2, 0.13]], 0.5);
+  mergeStatic(g, [gr]);
+  return jetModel(g, gr, gl, 0.4, 0.5);
+}
+/* ---------- F-16C Fighting Falcon — 15 m: single engine, belly intake, bubble canopy ---------- */
+function buildF16(color, big) {
+  const g = new THREE.Group(), C = M(color || 0x8a929a), C2 = M(0x7a828a), D = M(0x2c3035), CAN = M(0x4a3f28, { shininess: 90, specular: 0xccaa55 });
+  const b = new THREE.Group(); b.position.y = 0.2; g.add(b);
+  noseCone(b, 0.78, 0.06, 0.07, 0.3, C);
+  taper(b, 0.5, 0.14, 0.15, C, 0.55, 0.05, 0, 0.75, 0.75);
+  taper(b, 0.34, 0.1, 0.11, CAN, 0.52, 0.17, 0, 0.55, 0.7, -0.03);
+  tube(b, -0.66, 0.32, 0.11, 0.1, C, 0.02, 0, 8, 0.9);
+  box(b, 0.36, 0.1, 0.15, D, 0.26, -0.11, 0);                                                     // belly intake
+  pair(b, [[0.45, 0.07], [0.06, 0.14], [-0.28, 0.46], [-0.42, 0.46], [-0.42, 0.1]], 0.0, 0.03, C);  // LERX + wing
+  pair(b, [[-0.48, 0.1], [-0.62, 0.32], [-0.72, 0.32], [-0.7, 0.1]], -0.01, 0.025, C);
+  fin(b, -0.55, 0.1, 0, 0.36, 0.4, C2, 0.13);
+  tube(b, -0.76, -0.66, 0.07, 0.085, 0x2a2a2a, 0.02, 0);
+  for (const s of [-1, 1]) { tube(b, -0.4, -0.05, 0.016, 0.016, 0xe0e0e0, 0.0, s * 0.47, 5); tube(b, -0.25, 0.05, 0.04, 0.04, 0x8a8f86, -0.06, s * 0.27, 6); }   // wingtip AIM-9s, fuel tanks
+  const gr = big ? null : gear(g, [[0.5, 0], [-0.16, 0.14], [-0.16, -0.14]], 0.2);
+  const gl = glows(g, [[-0.82, 0.22, 0]], 0.6);
+  mergeStatic(g, [gr]);
+  return jetModel(g, gr, gl, 0.45, 0.6);
+}
+/* ---------- F-22A Raptor — 18.9 m: diamond wing, canted twin fins, 2D nozzles ---------- */
+function buildF22(color, big) {
+  const g = new THREE.Group(), C = M(color || 0x6e757c), C2 = M(0x5e656c), D = M(0x2a2e33), CAN = M(0x4a3f28, { shininess: 90, specular: 0xccaa55 });
+  const b = new THREE.Group(); b.position.y = 0.2; g.add(b);
+  taper(b, 0.55, 0.13, 0.22, C, 0.78, 0.04, 0, 0.7, 0.5);                                         // chined forebody
+  const n = noseCone(b, 1.05, 0.04, 0.075, 0.3, C, 4); n.rotation.x = Math.PI / 4;
+  taper(b, 0.38, 0.1, 0.13, CAN, 0.72, 0.15, 0, 0.6, 0.7, -0.04);
+  prism(b, [[0.6, 0.12], [0.3, 0.3], [-0.86, 0.33], [-0.86, -0.33], [0.3, -0.3], [0.6, -0.12]], -0.04, 0.12, C);
+  for (const s of [-1, 1]) {
+    taper(b, 0.24, 0.13, 0.1, D, 0.38, -0.01, s * 0.28, 0.75, 1, 0.04);                         // caret intakes
+    box(b, 0.12, 0.08, 0.14, 0x2a2a2a, -0.9, -0.01, s * 0.12);                                   // 2D nozzles
+    fin(b, -0.66, 0.05, s * 0.25, 0.4, 0.36, C2, 0.13, s * 0.45);
+  }
+  pair(b, [[0.22, 0.29], [-0.42, 0.68], [-0.6, 0.68], [-0.63, 0.29]], -0.02, 0.03, C);
+  pair(b, [[-0.64, 0.3], [-0.86, 0.52], [-0.99, 0.49], [-0.93, 0.3]], -0.03, 0.025, C);
+  const gr = big ? null : gear(g, [[0.7, 0], [-0.2, 0.22], [-0.2, -0.22]], 0.2);
+  const gl = glows(g, [[-0.98, 0.19, -0.12], [-0.98, 0.19, 0.12]], 0.5);
+  mergeStatic(g, [gr]);
+  return jetModel(g, gr, gl, 0.4, 0.55);
+}
+/* ---------- A-10C Thunderbolt II — 16.3 m: straight wing, pod engines high at the back, twin fins, the GAU-8 ---------- */
+function buildA10(color, big) {
+  const g = new THREE.Group(), C = M(color || 0x6f767a), C2 = M(0x60676b), D = M(0x2c3035), CAN = CANOPY();
+  const b = new THREE.Group(); b.position.y = 0.2; g.add(b);
+  tube(b, -0.62, 0.55, 0.075, 0.11, C, 0.04, 0, 8);
+  noseCone(b, 0.55, 0.03, 0.11, 0.24, C, 8);
+  tube(b, 0.75, 0.9, 0.015, 0.015, D, -0.05, 0, 6);                                               // the gun
+  const cn = shade(new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6, 0, TAU, 0, Math.PI / 2), CAN)); cn.position.set(0.45, 0.13, 0); cn.scale.set(1.5, 1, 0.9); b.add(cn);
+  pair(b, [[0.14, 0.08], [0.1, 0.86], [-0.08, 0.86], [-0.13, 0.08]], -0.06, 0.035, C);            // straight low wing
+  for (const s of [-1, 1]) {
+    tube(b, -0.48, -0.08, 0.07, 0.075, C2, 0.22, s * 0.17, 10);                                  // engine pods
+    tube(b, -0.08, -0.04, 0.072, 0.075, D, 0.22, s * 0.17, 10);
+    box(b, 0.2, 0.12, 0.03, C, -0.28, 0.13, s * 0.1);                                             // pylons
+    box(b, 0.12, 0.06, 0.08, C2, 0.03, -0.1, s * 0.3);                                            // gear pods
+    for (const z of [0.42, 0.55, 0.7]) tube(b, -0.12, 0.12, 0.022, 0.022, z > 0.6 ? 0xd8d8d0 : 0x8a8f86, -0.11, s * z, 5);
+    fin(b, -0.83, 0.1, s * 0.3, 0.16, 0.28, C2, 0.02);
+  }
+  pair(b, [[-0.66, 0.0], [-0.68, 0.32], [-0.82, 0.32], [-0.82, 0.0]], 0.09, 0.022, C);           // H-tail
+  const gr = big ? null : gear(g, [[0.5, 0.02], [0.05, 0.3], [0.05, -0.3]], 0.16);
+  const gl = glows(g, [[-0.55, 0.42, -0.17], [-0.55, 0.42, 0.17]], 0.3);
+  mergeStatic(g, [gr]);
+  return jetModel(g, gr, gl, 0.25, 0.25);
+}
+
+/* ---------- airliner-type airframes (E-3, KC-46): fuselage, swept low wing, pods, tail ---------- */
+function airlinerBody(g, C, C2, L, r, wing, pods, fy) {
+  tube(g, -L * 0.42, L * 0.38, r, r, C, fy, 0, 10);
+  const nose = tube(g, L * 0.38, L * 0.48, r, r * 0.35, C, fy, 0, 10); nose.position.y = fy - r * 0.15;
+  const tail = tube(g, -L * 0.53, -L * 0.42, r * 0.25, r, C, fy, 0, 10); tail.position.y = fy + r * 0.35; tail.rotation.z = -Math.PI / 2 - 0.14;
+  box(g, 0.2, 0.06, r * 1.7, 0x14202c, L * 0.44, fy + r * 0.45, 0);                              // cockpit windows
+  pair(g, wing, fy - r * 0.55, 0.05, C);
+  for (const [x, z, len, pr] of pods) for (const s of [-1, 1]) {
+    tube(g, x - len, x, pr * 0.9, pr, C2, fy - r * 0.95, s * z, 10); tube(g, x - 0.02, x, pr * 0.8, pr * 0.8, 0x222, fy - r * 0.95, s * z, 10);
+    box(g, len * 0.6, 0.12, 0.04, C, x - len * 0.4, fy - r * 0.62, s * z);
+  }
+  fin(g, -L * 0.47, fy + r * 0.5, 0, L * 0.12, L * 0.17, C, L * 0.05, 0, 0.06);
+  pair(g, [[-L * 0.42, r * 0.8], [-L * 0.5, L * 0.16], [-L * 0.54, L * 0.16], [-L * 0.52, r * 0.8]], fy + r * 0.3, 0.035, C);
+}
+/* ---------- E-3 Sentry (AWACS) — 46.6 m 707 airframe with the 9 m rotodome on two struts ---------- */
+function buildE3(color) {
+  const g = new THREE.Group(), C = M(color || 0xc3c7cb), C2 = M(0xa9aeb3), fy = 0.37;
+  airlinerBody(g, C, C2, 4.66, 0.19, [[0.6, 0.18], [-0.72, 2.2], [-1.0, 2.2], [-0.32, 0.18]], [[0.55, 0.75, 0.42, 0.07], [0.0, 1.42, 0.42, 0.07]], fy);
+  for (const dz of [-0.06, 0.06]) strut(g, new V3(-0.55, fy + 0.18, dz), new V3(-0.75, fy + 0.62, dz * 1.5), 0.035, C2);
+  const dome = new THREE.Group(); dome.position.set(-0.75, fy + 0.68, 0); g.add(dome);
+  cyl(dome, 0.46, 0.46, 0.08, 20, 0xe6e8ea, 0, 0, 0); box(dome, 0.84, 0.085, 0.06, 0x2e3236, 0, 0, 0);
+  const gr = gear(g, [[1.5, 0], [-0.05, 0.36], [-0.05, -0.36]], 0.18);
+  mergeStatic(g, [dome, gr]);
+  return jetModel(g, gr, [], 0, 0, { more(dt, st) { if (st.airborne) dome.rotation.y += dt * 0.6; } });
+}
+/* ---------- KC-46 Pegasus — 50.5 m 767 tanker: the flying boom under the tail (lowered for a refuelling pass) ---------- */
+const KC46_BOOM = { x: -2.32, y: 0.12, len: 1.45, down: 0.5 };   // pivot (model units), length, lowered angle (rad)
+function buildKC46(color) {
+  const g = new THREE.Group(), C = M(color || 0xb4b9be), C2 = M(0x9ca2a8), fy = 0.4;
+  airlinerBody(g, C, C2, 5.05, 0.25, [[0.7, 0.22], [-0.85, 2.4], [-1.12, 2.4], [-0.42, 0.22]], [[0.62, 0.95, 0.52, 0.12]], fy);
+  for (const s of [-1, 1]) tube(g, -0.85, -0.45, 0.04, 0.04, 0xd0d4d8, fy - 0.1, s * 1.75, 6);   // wing refuelling pods
+  const B = KC46_BOOM, boom = new THREE.Group(); boom.position.set(B.x, fy + B.y - 0.28, 0); g.add(boom);
+  const bm = tube(boom, -B.len, 0, 0.022, 0.03, 0x8a9096, 0, 0, 6); bm.castShadow = false;
+  for (const s of [-1, 1]) box(boom, 0.18, 0.012, 0.16, 0x8a9096, -B.len * 0.7, 0, s * 0.09).rotation.x = s * 0.5;   // ruddevators
+  const gr = gear(g, [[1.65, 0], [-0.1, 0.42], [-0.1, -0.42]], 0.18);
+  mergeStatic(g, [gr, boom]);
+  let ext = 0;
+  return jetModel(g, gr, [], 0, 0, { more(dt, st) { ext += ((st.hoseOut || 0) - ext) * Math.min(1, dt * 0.9); boom.rotation.z = lerp(0.12, B.down, ext); boom.scale.x = lerp(0.75, 1, ext); } });
+}
+
+/* ---------- C-130J family — 29.8 m, high wing, four six-bladed turboprops, beaver-tail ramp ----------
+   v: 'c130' (airlifter), 'kc130' (two hose-and-drogue pods under the outer wing), 'ac130' (gunship: guns on the left side) */
+const KC130_POD = { x: -0.42, y: 0.43, z: 1.62, len: 1.2, ang: 0.16 };   // hose exit (model units) on each side
+function buildC130(v, color) {
+  const ac = v === 'ac130', kc = v === 'kc130';
+  const g = new THREE.Group(), C = M(color || (ac ? 0x575d63 : kc ? 0x6c7276 : 0x6f7568)), C2 = M(ac ? 0x4c5257 : 0x5e645a), D = M(0x2c3035), fy = 0.34, r = 0.21;
+  tube(g, -1.0, 1.08, r, r, C, fy, 0, 8, 1.05);
+  tube(g, 1.08, 1.4, r, r * 0.55, C, fy - 0.02, 0, 8, 1.05);
+  noseCone(g, 1.4, fy - 0.06, r * 0.55, 0.12, C, 8);
+  box(g, 0.12, 0.07, 0.3, 0x14202c, 1.3, fy + 0.12, 0);                                          // cockpit
+  const tl = tube(g, -1.75, -1.0, 0.06, r, C, fy + 0.12, 0, 8, 1.05); tl.rotation.z = -Math.PI / 2 - 0.16;   // upswept tail / ramp
+  fin(g, -1.62, fy + 0.2, 0, 0.55, 0.8, C, 0.22, 0, 0.05);
+  pair(g, [[-1.38, 0.08], [-1.55, 0.62], [-1.75, 0.62], [-1.72, 0.08]], fy + 0.2, 0.03, C);
+  const wy = fy + r * 1.02;
+  pair(g, [[0.32, 0.2], [0.13, 2.02], [-0.1, 2.02], [-0.18, 0.2]], wy, 0.05, C);
+  for (const s of [-1, 1]) taper(g, 0.6, 0.14, 0.12, C2, -0.1, fy - 0.14, s * 0.21, 0.9, 1);    // gear sponsons
+  const props = [];
+  for (const z of [0.68, 1.3]) for (const s of [-1, 1]) {
+    tube(g, -0.2, 0.52, 0.06, 0.08, C2, wy - 0.02, s * z, 8);
+    noseCone(g, 0.52, wy - 0.02, 0.05, 0.1, D, 8);
+    props.push(propeller(g, 0.58, wy - 0.02, s * z, 0.22, 3));
+  }
+  const dyn = [...props.flatMap(p => [p.pr, ...p.blades])];
+  let hoses = [];
+  if (kc) for (const s of [-1, 1]) {
+    const P = KC130_POD;
+    tube(g, P.x - 0.05, P.x + 0.4, 0.04, 0.05, 0xd0d4d8, P.y, s * P.z, 6); box(g, 0.25, 0.06, 0.02, C, P.x + 0.15, wy - 0.02, s * P.z);
+    const hose = new THREE.Group(); hose.position.set(P.x - 0.05, P.y, s * P.z); hose.rotation.z = P.ang; g.add(hose);
+    const hm = cyl(hose, 0.01, 0.01, 1, 4, 0x2a2a2a, -0.5, 0, 0); hm.rotation.z = Math.PI / 2; hm.castShadow = false;
+    const drogue = new THREE.Group(); g.add(drogue);
+    const dc = shade(new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.09, 8, 1, true), M(0xd9dde0, { side: THREE.DoubleSide })), false); dc.rotation.z = -Math.PI / 2; drogue.add(dc);
+    hoses.push({ hose, drogue, s }); dyn.push(hose, drogue);
+  }
+  if (ac) {
+    for (const [x, len, rr] of [[-0.45, 0.32, 0.04], [0.15, 0.22, 0.025], [0.45, 0.18, 0.02]]) { const gb = cyl(g, rr, rr, len, 6, D, x, fy - 0.05, -r - len / 2 + 0.05); gb.rotation.x = Math.PI / 2; }   // 105 / 40 / 25 mm out of the left side
+    const ball = shade(new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), D)); ball.position.set(1.12, fy - 0.2, -0.08); g.add(ball);
+  }
+  const gr = gear(g, [[1.12, 0], [-0.15, 0.2], [-0.15, -0.2]], 0.13);
+  dyn.push(gr);
+  navLights(g, [[0.0, wy + 0.03, -2.02, 0xff2a1a], [0.0, wy + 0.03, 2.02, 0x22ff66], [-1.9, fy + 0.3, 0, 0xffffff]], null, 0.9);
+  navLights(g, [[-0.4, fy + 0.25, 0, 0xff2020]], { period: 1.2, duty: 0.15, phase: Math.random() }, 1.0);
+  mergeStatic(g, dyn);
+  let spin = 0, ang = 0, ext = 0;
+  return jetModel(g, gr, [], 0, 0, {
+    more(dt, st) {
+      spin += ((st.engineOn ? 1 : 0) - spin) * Math.min(1, dt * 0.8); ang += spin * 40 * dt; spinProps(props, spin, ang);
+      if (!hoses.length) return;
+      ext += ((st.hoseOut || 0) - ext) * Math.min(1, dt * 0.9);
+      const P = KC130_POD, L = P.len * ext;
+      for (const h of hoses) { h.hose.visible = ext > 0.02; h.hose.scale.x = Math.max(L, 1e-3); h.drogue.position.set(P.x - 0.08 - L * Math.cos(P.ang), P.y - L * Math.sin(P.ang), h.s * P.z); }
+    }
+  });
+}
+/* ---------- C-17 Globemaster III — 53 m: high swept wing with winglets, four turbofans, T-tail ---------- */
+function buildC17(color) {
+  const g = new THREE.Group(), C = M(color || 0x6a7177), C2 = M(0x5c6369), fy = 0.5, r = 0.33;
+  tube(g, -1.9, 1.85, r, r, C, fy, 0, 10, 1.05);
+  tube(g, 1.85, 2.4, r, r * 0.4, C, fy - 0.04, 0, 10, 1.05);
+  box(g, 0.16, 0.08, 0.45, 0x14202c, 2.2, fy + 0.15, 0);
+  const tl = tube(g, -2.65, -1.9, 0.12, r, C, fy + 0.2, 0, 10, 1.05); tl.rotation.z = -Math.PI / 2 - 0.2;
+  fin(g, -2.35, fy + 0.35, 0, 0.75, 1.0, C, 0.32, 0, 0.07);
+  pair(g, [[-2.55, 0.03], [-2.8, 0.85], [-3.02, 0.85], [-2.98, 0.03]], fy + 1.34, 0.04, C);       // T-tail
+  const wy = fy + r * 0.98;
+  pair(g, [[0.75, 0.3], [-0.55, 2.55], [-0.85, 2.55], [-0.42, 0.3]], wy, 0.06, C);
+  for (const s of [-1, 1]) { fin(g, -0.7, wy, s * 2.56, 0.26, 0.28, C, 0.12, 0, 0.03); taper(g, 1.0, 0.2, 0.18, C2, 0.1, fy - 0.22, s * 0.32, 0.9, 1); }
+  for (const [x, z] of [[0.5, 0.95], [-0.08, 1.72]]) for (const s of [-1, 1]) {
+    tube(g, x - 0.58, x, 0.1, 0.12, C2, wy - 0.18, s * z, 10); tube(g, x - 0.03, x, 0.1, 0.1, 0x222, wy - 0.18, s * z, 10);
+    box(g, 0.4, 0.14, 0.04, C, x - 0.25, wy - 0.06, s * z);
+  }
+  const gr = gear(g, [[1.75, 0], [-0.1, 0.3], [-0.1, -0.3]], 0.17);
+  navLights(g, [[-0.7, wy + 0.3, -2.56, 0xff2a1a], [-0.7, wy + 0.3, 2.56, 0x22ff66], [-2.7, fy + 0.4, 0, 0xffffff]], null, 1.0);
+  navLights(g, [[-1.2, fy + 0.36, 0, 0xff2020]], { period: 1.2, duty: 0.15, phase: Math.random() }, 1.1);
+  mergeStatic(g, [gr]);
+  return jetModel(g, gr, [], 0, 0);
+}
+/* ---------- MQ-9 Reaper — 11 m, 20 m wing: bulbous nose, Y-tail, pusher propeller ---------- */
+function buildMQ9(color) {
+  const g = new THREE.Group(), C = M(color || 0x9aa0a6), C2 = M(0x878d93), D = M(0x2c3035), fy = 0.22;
+  tube(g, -0.5, 0.3, 0.045, 0.065, C, fy, 0, 8);
+  const nose = shade(new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), C)); nose.position.set(0.36, fy + 0.02, 0); nose.scale.set(1.6, 1, 1); g.add(nose);
+  const ball = shade(new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), D)); ball.position.set(0.3, fy - 0.07, 0); g.add(ball);
+  pair(g, [[0.06, 0.05], [0.03, 1.0], [-0.06, 1.0], [-0.09, 0.05]], fy + 0.02, 0.02, C);
+  for (const s of [-1, 1]) { fin(g, -0.48, fy, s * 0.03, 0.14, 0.24, C2, 0.06, s * 0.75, 0.015); tube(g, -0.1, 0.1, 0.015, 0.015, 0xd8d8d0, fy - 0.05, s * 0.45, 5); }   // V-tail, Hellfires
+  const vf = fin(g, -0.48, fy - 0.2, 0, 0.12, 0.2, C2, -0.04, 0, 0.015); vf.rotation.z = Math.PI;   // ventral fin
+  const P = propeller(g, -0.53, fy, 0, 0.15, 2, D);
+  const gr = gear(g, [[0.25, 0], [-0.05, 0.14], [-0.05, -0.14]], 0.1);
+  mergeStatic(g, [gr, P.pr, ...P.blades]);
+  let spin = 0, ang = 0;
+  return jetModel(g, gr, [], 0, 0, { more(dt, st) { spin += ((st.engineOn ? 1 : 0) - spin) * Math.min(1, dt * 0.8); ang += spin * 40 * dt; spinProps([P], spin, ang); } });
+}
+
+/* ---------- UH-60 Black Hawk (HH-60 style refuelling probe for the KC-130) — 15.3 m fuselage, 16.4 m rotor ---------- */
+function buildUH60(color) {
+  const g = new THREE.Group(), C = M(color || 0x474d3c), C2 = M(0x3f4535), D = M(0x2a2d2a), CAN = CANOPY();
   taper(g, 0.46, 0.2, 0.24, C, 0.03, 0.14, 0, 1.0, 0.85);                             // cabin
   taper(g, 0.22, 0.2, 0.235, C, 0.37, 0.14, 0, 0.55, 0.8, -0.05);                     // cockpit
   taper(g, 0.14, 0.11, 0.2, C, 0.53, 0.095, 0, 0.6, 0.8, -0.03);                      // nose
   taper(g, 0.12, 0.1, 0.24, CAN, 0.43, 0.2, 0, 0.4, 0.8, -0.035);                     // windscreen
-  for (const s of [-1, 1]) {
-    box(g, 0.15, 0.065, 0.006, CAN, 0.36, 0.175, s * 0.119);                          // cockpit side windows
-    box(g, 0.06, 0.05, 0.006, CAN, 0.17, 0.18, s * 0.121);                            // cabin window
-  }
-  box(g, 0.17, 0.14, 0.006, D, 0.04, 0.12, 0.122);                                     // sliding cabin door (starboard)
-  // engine deck: fairing, twin engines side by side, exhausts angled outboard, rotor mast
+  for (const s of [-1, 1]) { box(g, 0.15, 0.065, 0.006, CAN, 0.36, 0.175, s * 0.119); box(g, 0.06, 0.05, 0.006, CAN, 0.17, 0.18, s * 0.121); box(g, 0.17, 0.14, 0.006, D, 0.04, 0.12, s * 0.122); }
   taper(g, 0.5, 0.07, 0.19, C, -0.01, 0.275, 0, 0.85, 0.75);
   for (const s of [-1, 1]) {
-    const e = cyl(g, 0.045, 0.045, 0.28, 8, C2, -0.05, 0.285, s * 0.1); e.rotation.z = Math.PI / 2;
-    const i = cyl(g, 0.038, 0.038, 0.02, 8, D, 0.095, 0.285, s * 0.1); i.rotation.z = Math.PI / 2;
+    tube(g, -0.19, 0.09, 0.045, 0.045, C2, 0.285, s * 0.1);
     const x = box(g, 0.08, 0.04, 0.05, D, -0.21, 0.29, s * 0.13); x.rotation.y = s * 0.5;
+    box(g, 0.1, 0.015, 0.2, C, -0.05, 0.22, s * 0.2); tube(g, -0.12, 0.05, 0.035, 0.035, C2, 0.17, s * 0.28, 6);   // ESSS stub wings with tanks
   }
   cyl(g, 0.025, 0.035, 0.07, 6, D, 0.0, 0.345, 0);
-  // tail cone: deep at the cabin, slim at the pylon, bottom sweeping up (a taper turned to point aft)
   const tc = taper(g, 0.17, 0.64, 0.16, C, -0.49, 0.145, 0, 0.35, 0.38, 0.05); tc.rotation.z = Math.PI / 2;
-  taper(g, 0.17, 0.32, 0.045, C, -0.86, 0.36, 0, 0.55, 0.8, -0.06);                   // swept tail pylon
-  box(g, 0.06, 0.04, 0.05, D, -0.9, 0.48, 0);                                          // tail gearbox
-  const stab = [[-0.8, 0.0], [-0.82, 0.22], [-0.92, 0.22], [-0.92, 0.0]];
-  prism(g, stab, 0.22, 0.015, C); prism(g, mirrorZ(stab), 0.22, 0.015, C);           // stabilator at the pylon base
-  // landing gear: two main wheels under the cockpit, tail wheel aft of the cabin
-  for (const s of [-1, 1]) {
-    const st = box(g, 0.025, 0.09, 0.025, D, 0.33, 0.07, s * 0.145); st.rotation.x = s * 0.35;
-    const w = cyl(g, 0.035, 0.035, 0.03, 8, 0x1a1a1a, 0.33, 0.035, s * 0.165); w.rotation.x = Math.PI / 2;
-  }
-  box(g, 0.025, 0.06, 0.025, D, -0.42, 0.06, 0);
-  const tw = cyl(g, 0.03, 0.03, 0.025, 8, 0x1a1a1a, -0.43, 0.03, 0); tw.rotation.x = Math.PI / 2;
-  // MH-60R kit: chin FLIR ball, belly radome, weapon pylons (Mk 54 torpedo port, Hellfire rack starboard)
-  const fl =shade(new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), D)); fl.position.set(0.52, 0.045, 0); g.add(fl);
-  const rd = shade(new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 5, 0, TAU, 0, Math.PI / 2), M(0xd8d8d0))); rd.rotation.x = Math.PI; rd.position.set(-0.02, 0.05, 0); g.add(rd);
-  for (const s of [-1, 1]) box(g, 0.1, 0.015, 0.09, C, -0.1, 0.2, s * 0.16);
-  const tp = cyl(g, 0.018, 0.018, 0.22, 6, 0x9a9a92, -0.1, 0.172, -0.2); tp.rotation.z = Math.PI / 2;
-  box(g, 0.14, 0.04, 0.05, D, -0.1, 0.175, 0.2);
-  const R = heliRotor(g, 0.0, 0.38, 4, 0.77, 0.055, 0x2d3237);
-  const th = new THREE.Group(); th.position.set(-0.9, 0.43, 0.04); th.rotation.x = -0.35; g.add(th);   // tail rotor: starboard, canted 20°
-  const T = tailRotor(th, 0, 0, 0, 0.167, 0x2d3237);
+  taper(g, 0.17, 0.32, 0.045, C, -0.86, 0.36, 0, 0.55, 0.8, -0.06);
+  pair(g, [[-0.8, 0.0], [-0.82, 0.22], [-0.92, 0.22], [-0.92, 0.0]], 0.22, 0.015, C);
+  for (const s of [-1, 1]) { const st = box(g, 0.025, 0.09, 0.025, D, 0.33, 0.07, s * 0.145); st.rotation.x = s * 0.35; const w = cyl(g, 0.035, 0.035, 0.03, 8, 0x1a1a1a, 0.33, 0.035, s * 0.165); w.rotation.x = Math.PI / 2; }
+  box(g, 0.025, 0.06, 0.025, D, -0.42, 0.06, 0); const tw = cyl(g, 0.03, 0.03, 0.025, 8, 0x1a1a1a, -0.43, 0.03, 0); tw.rotation.x = Math.PI / 2;
+  const pb = tube(g, 0.4, 0.95, 0.008, 0.01, D, 0.24, 0.12, 5); pb.rotation.y = 0.05;            // refuelling probe (starboard)
+  const R = heliRotor(g, 0.0, 0.38, 4, 0.77, 0.055, 0x2a2d30);
+  const th = new THREE.Group(); th.position.set(-0.9, 0.43, 0.04); th.rotation.x = -0.35; g.add(th);
+  const T = tailRotor(th, 0, 0, 0, 0.167, 0x2a2d30);
   navLights(g, [[0.1, 0.2, -0.13, 0xff2a1a], [0.1, 0.2, 0.13, 0x22ff66], [-0.96, 0.3, 0, 0xffffff]], null, 0.8);
   navLights(g, [[0, 0.03, 0, 0xff2020], [0, 0.33, 0, 0xff3030]], { period: 1.0, duty: 0.18, phase: Math.random() }, 1.0);
   return heliModel(g, R, T, new V3(0.5, 0.08, 0));
 }
-
-/* ---------- CH-53E Super Stallion (heavy transport) — 22.4 m fuselage, 24 m 7-blade rotor ---------- */
-function buildCH53(color) {
-  const g = new THREE.Group(), C = M(color || 0x6a705f), C2 = M(0x5c624f), D = M(0x33383d), CAN = CANOPY();
-  // long boxy cabin, cockpit with sloped windscreen, rounded nose
-  taper(g, 1.05, 0.27, 0.27, C, 0.12, 0.2, 0, 1.0, 0.88);                             // cabin
-  taper(g, 0.26, 0.27, 0.27, C, 0.775, 0.2, 0, 0.55, 0.85, -0.06);                    // cockpit
-  taper(g, 0.12, 0.17, 0.24, C, 0.96, 0.15, 0, 0.6, 0.8, -0.03);                      // nose
-  taper(g, 0.14, 0.12, 0.275, CAN, 0.83, 0.27, 0, 0.4, 0.8, -0.04);                   // windscreen
+/* ---------- AH-64D Apache Longbow — 17.7 m: tandem cockpit, TADS nose, chin gun, stub wings, mast radar ---------- */
+function buildAH64(color) {
+  const g = new THREE.Group(), C = M(color || 0x3e4436), C2 = M(0x363b30), D = M(0x262924), CAN = CANOPY();
+  taper(g, 0.5, 0.17, 0.13, C, 0.3, 0.16, 0, 0.9, 0.8);                                         // forward fuselage
+  taper(g, 0.16, 0.08, 0.11, CAN, 0.43, 0.27, 0, 0.7, 0.75, -0.01);                             // gunner
+  taper(g, 0.18, 0.11, 0.115, CAN, 0.25, 0.29, 0, 0.75, 0.75, -0.02);                           // pilot, raised
+  box(g, 0.1, 0.1, 0.09, D, 0.6, 0.14, 0);                                                        // TADS/PNVS
+  taper(g, 0.4, 0.2, 0.15, C, -0.08, 0.18, 0, 1, 0.8);
+  for (const s of [-1, 1]) { tube(g, -0.25, 0.08, 0.05, 0.05, C2, 0.26, s * 0.13, 8); box(g, 0.08, 0.04, 0.06, D, -0.28, 0.27, s * 0.15).rotation.y = s * 0.6; }   // engine nacelles
+  taper(g, 0.32, 0.08, 0.12, C, 0.02, 0.33, 0, 0.8, 0.7);
+  cyl(g, 0.02, 0.03, 0.08, 6, D, 0.02, 0.39, 0);
+  const lb = shade(new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), C2)); lb.position.set(0.02, 0.52, 0); lb.scale.y = 0.55; g.add(lb);   // Longbow radar over the rotor
+  tube(g, 0.42, 0.56, 0.008, 0.008, D, 0.06, 0, 4);                                              // 30 mm chain gun
+  const ws = [[0.05, 0.06], [0.03, 0.3], [-0.08, 0.3], [-0.1, 0.06]]; pair(g, ws, 0.17, 0.02, C);
   for (const s of [-1, 1]) {
-    box(g, 0.16, 0.07, 0.006, CAN, 0.74, 0.25, s * 0.137);                            // cockpit side windows
-    for (const x of [0.45, 0.3, 0.15, 0.0, -0.15]) box(g, 0.04, 0.035, 0.006, CAN, x, 0.25, s * 0.137);   // cabin portholes
-    taper(g, 0.5, 0.11, 0.1, C, 0.08, 0.12, s * 0.18, 0.9, 0.7);                      // fuel sponson
-    const w = cyl(g, 0.045, 0.045, 0.04, 8, 0x1a1a1a, 0.1, 0.045, s * 0.2); w.rotation.x = Math.PI / 2;   // main wheel
-    const nw = cyl(g, 0.035, 0.035, 0.03, 8, 0x1a1a1a, 0.78, 0.035, s * 0.04); nw.rotation.x = Math.PI / 2; // twin nose wheels
+    tube(g, -0.1, 0.1, 0.028, 0.028, D, 0.12, s * 0.15, 8);                                      // rocket pod
+    for (const dz of [-0.015, 0.015]) for (const dy of [0, 0.03]) tube(g, -0.08, 0.08, 0.01, 0.01, 0xd8d8d0, 0.11 + dy, s * 0.26 + dz, 5);   // Hellfires
   }
-  box(g, 0.025, 0.06, 0.025, D, 0.78, 0.07, 0);
-  box(g, 0.1, 0.16, 0.006, D, 0.55, 0.17, 0.137);                                      // crew door (starboard)
-  const probe = cyl(g, 0.012, 0.012, 0.5, 5, D, 1.03, 0.23, 0.12); probe.rotation.z = Math.PI / 2 - 0.08;  // refuelling probe
-  // rotor pylon with two engines alongside and the third behind the rotor head
-  taper(g, 0.55, 0.1, 0.2, C, 0.18, 0.385, 0, 0.75, 0.7);
+  const tb = taper(g, 0.11, 0.55, 0.08, C, -0.55, 0.2, 0, 0.45, 0.5, 0.04); tb.rotation.z = Math.PI / 2;
+  pair(g, [[-0.82, 0.0], [-0.84, 0.17], [-0.92, 0.17], [-0.92, 0.0]], 0.2, 0.012, C);
+  taper(g, 0.12, 0.28, 0.025, C, -0.84, 0.36, 0, 0.55, 0.8, -0.05);
+  for (const s of [-1, 1]) { const st = box(g, 0.02, 0.1, 0.02, D, 0.36, 0.07, s * 0.12); st.rotation.x = s * 0.4; const w = cyl(g, 0.035, 0.035, 0.025, 8, 0x1a1a1a, 0.36, 0.035, s * 0.15); w.rotation.x = Math.PI / 2; }
+  const tw = cyl(g, 0.025, 0.025, 0.02, 8, 0x1a1a1a, -0.86, 0.025, 0); tw.rotation.x = Math.PI / 2;
+  const R = heliRotor(g, 0.02, 0.43, 4, 0.73, 0.05, 0x262924);
+  const th = new THREE.Group(); th.position.set(-0.88, 0.48, -0.03); g.add(th);
+  const T = tailRotor(th, 0, 0, 0, 0.14, 0x262924);
+  navLights(g, [[-0.02, 0.18, -0.3, 0xff2a1a], [-0.02, 0.18, 0.3, 0x22ff66], [-0.95, 0.3, 0, 0xffffff]], null, 0.8);
+  navLights(g, [[0.03, 0.36, 0, 0xff3030]], { period: 0.9, duty: 0.18, phase: Math.random() }, 1.0);
+  return heliModel(g, R, T, new V3(0.62, 0.1, 0));
+}
+/* ---------- UH-1Y "Huey" — 12.7 m fuselage, two-bladed rotor, skids, door gunners ---------- */
+function buildUH1(color) {
+  const g = new THREE.Group(), C = M(color || 0x4c5440), C2 = M(0x434b38), D = M(0x2a2d2a), CAN = CANOPY();
+  taper(g, 0.42, 0.22, 0.2, C, 0.05, 0.17, 0, 0.95, 0.9);                                        // cabin
+  taper(g, 0.2, 0.2, 0.2, C, 0.36, 0.16, 0, 0.6, 0.85, -0.05);                                    // nose
+  taper(g, 0.12, 0.13, 0.2, CAN, 0.42, 0.22, 0, 0.4, 0.85, -0.035);
+  for (const s of [-1, 1]) { box(g, 0.2, 0.15, 0.006, D, 0.05, 0.16, s * 0.102); box(g, 0.04, 0.02, 0.1, D, 0.05, 0.2, s * 0.13); }   // open doors, door guns
+  taper(g, 0.35, 0.1, 0.15, C, -0.02, 0.32, 0, 0.8, 0.75);
+  tube(g, -0.2, 0.02, 0.04, 0.04, C2, 0.34, 0, 8);
+  cyl(g, 0.02, 0.03, 0.08, 6, D, 0.02, 0.4, 0);
+  const tb = taper(g, 0.1, 0.62, 0.08, C, -0.5, 0.22, 0, 0.45, 0.55, 0.04); tb.rotation.z = Math.PI / 2;
+  taper(g, 0.12, 0.25, 0.03, C, -0.82, 0.36, 0, 0.6, 0.8, -0.05);
+  pair(g, [[-0.5, 0.0], [-0.52, 0.14], [-0.6, 0.14], [-0.6, 0.0]], 0.22, 0.012, C);
   for (const s of [-1, 1]) {
-    const e = cyl(g, 0.055, 0.055, 0.36, 8, C2, 0.2, 0.37, s * 0.165); e.rotation.z = Math.PI / 2;
-    const i = cyl(g, 0.047, 0.047, 0.02, 8, D, 0.38, 0.37, s * 0.165); i.rotation.z = Math.PI / 2;
-    const x = box(g, 0.08, 0.05, 0.06, D, 0.0, 0.38, s * 0.19); x.rotation.y = s * 0.5;
+    const sk = tube(g, -0.25, 0.35, 0.01, 0.01, D, 0.012, s * 0.14, 5); const toe = tube(g, 0.35, 0.41, 0.01, 0.01, D, 0.03, s * 0.14, 5); toe.rotation.z = -Math.PI / 2 + 0.7;
+    for (const x of [-0.12, 0.2]) { const leg = box(g, 0.012, 0.07, 0.012, D, x, 0.045, s * 0.12); leg.rotation.x = s * 0.5; }
   }
-  const e3 = cyl(g, 0.05, 0.05, 0.25, 8, C2, -0.08, 0.41, -0.06); e3.rotation.z = Math.PI / 2;
-  const i3 = cyl(g, 0.042, 0.042, 0.02, 8, D, 0.05, 0.41, -0.06); i3.rotation.z = Math.PI / 2;
-  cyl(g, 0.04, 0.05, 0.08, 6, D, 0.25, 0.47, 0);
-  // rear fuselage with the loading ramp sweeping up into the tail, pylon canted 20° to port
-  const tc = taper(g, 0.27, 0.7, 0.26, C, -0.755, 0.2, 0, 0.42, 0.4, 0.13); tc.rotation.z = Math.PI / 2;
-  const p = taper(g, 0.22, 0.52, 0.07, C, -1.15, 0.6, 0, 0.6, 0.8, -0.07); p.rotation.x = -0.35;
-  const stab = [[-1.1, 0.03], [-1.13, 0.42], [-1.24, 0.42], [-1.23, 0.03]];
-  prism(g, stab, 0.72, 0.02, C);                                                       // gull-wing stabiliser (starboard)
-  const R = heliRotor(g, 0.25, 0.51, 7, 1.15, 0.075, 0x2d3237);
-  const th = new THREE.Group(); th.position.set(-1.17, 0.7, -0.13); th.rotation.x = -0.35; g.add(th);   // tail rotor: port side, canted
-  const T = tailRotor(th, 0, 0, 0, 0.3, 0x2d3237);
-  navLights(g, [[0.4, 0.3, -0.14, 0xff2a1a], [0.4, 0.3, 0.14, 0x22ff66], [-1.24, 0.55, 0, 0xffffff]], null, 0.9);
-  navLights(g, [[0.3, 0.03, 0, 0xff2020], [0.0, 0.46, 0, 0xff3030]], { period: 1.1, duty: 0.18, phase: Math.random() }, 1.1);
-  return heliModel(g, R, T, new V3(0.98, 0.1, 0));
+  const R = heliRotor(g, 0.02, 0.44, 2, 0.73, 0.06, 0x2a2d30);
+  const th = new THREE.Group(); th.position.set(-0.84, 0.42, 0.04); g.add(th);
+  const T = tailRotor(th, 0, 0, 0, 0.13, 0x2a2d30);
+  navLights(g, [[0.05, 0.3, -0.12, 0xff2a1a], [0.05, 0.3, 0.12, 0x22ff66], [-0.88, 0.32, 0, 0xffffff]], null, 0.8);
+  navLights(g, [[0, 0.42, 0, 0xff3030]], { period: 1.1, duty: 0.18, phase: Math.random() }, 1.0);
+  return heliModel(g, R, T, new V3(0.45, 0.08, 0));
 }
 
-/* ---------- AH-1Z Viper (attack) — 13.9 m fuselage, 14.6 m rotor, tandem cockpit on skids ---------- */
-function buildAH1(color) {
-  const g = new THREE.Group(), C = M(color || 0x5c6352), C2 = M(0x50574a), D = M(0x33383d), CAN = CANOPY();
-  // slim fuselage: tandem cockpit (pilot raised behind the gunner), sensor ball on the nose
-  taper(g, 0.45, 0.14, 0.1, C, 0.33, 0.13, 0, 0.9, 0.85);                             // forward fuselage
-  taper(g, 0.08, 0.1, 0.09, C, 0.59, 0.12, 0, 0.6, 0.8, -0.01);                       // nose
-  const tss = shade(new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), D)); tss.position.set(0.64, 0.12, 0); g.add(tss);
-  taper(g, 0.18, 0.07, 0.095, CAN, 0.43, 0.235, 0, 0.7, 0.75, -0.01);                 // gunner canopy
-  taper(g, 0.18, 0.1, 0.095, CAN, 0.26, 0.25, 0, 0.75, 0.75, -0.02);                  // pilot canopy (raised)
-  taper(g, 0.38, 0.17, 0.12, C, -0.08, 0.15, 0, 1.0, 0.8);                            // engine bay
-  // engines either side of the transmission, exhausts turned upward
-  taper(g, 0.3, 0.06, 0.1, C, 0.0, 0.27, 0, 0.8, 0.7);
+/* ---------- more enemies: Su-35, Su-34, Tu-22M3 (static templates; red fin tips) ---------- */
+function buildSu35() {
+  const g = new THREE.Group(), C = M(0x6b7a88), C2 = M(0x56636f), D = M(0x2c2f33), R = M(0x8f2b22), CAN = CANOPY();
+  const b = new THREE.Group(); b.position.y = 0.22; g.add(b);
+  taper(b, 0.72, 0.15, 0.16, C, 0.62, 0.06, 0, 0.75, 0.7); noseCone(b, 0.98, 0.06, 0.075, 0.34, C);
+  taper(b, 0.3, 0.1, 0.12, CAN, 0.66, 0.18, 0, 0.6, 0.7, -0.04);
+  prism(b, [[0.4, 0.15], [-0.95, 0.3], [-0.95, -0.3], [0.4, -0.15]], -0.02, 0.1, C);
+  pair(b, [[0.45, 0.14], [-0.12, 0.4], [-0.45, 0.8], [-0.6, 0.8], [-0.62, 0.28]], 0.03, 0.03, C);
   for (const s of [-1, 1]) {
-    const e = cyl(g, 0.04, 0.04, 0.24, 8, C2, -0.06, 0.25, s * 0.075); e.rotation.z = Math.PI / 2;
-    const x = box(g, 0.07, 0.035, 0.045, D, -0.2, 0.27, s * 0.09); x.rotation.z = 0.5;
+    taper(b, 0.95, 0.15, 0.16, C2, -0.42, -0.07, s * 0.2, 0.95, 0.9); box(b, 0.16, 0.12, 0.14, D, 0.12, -0.08, s * 0.2);
+    tube(b, -1.0, -0.9, 0.07, 0.075, 0x222, -0.07, s * 0.2);
+    taper(b, 0.38, 0.42, 0.03, C, -0.68, 0.3, s * 0.3, 0.5, 1, -0.14); box(b, 0.1, 0.06, 0.035, R, -0.85, 0.49, s * 0.3);
+    tube(b, -0.5, -0.2, 0.02, 0.02, 0x8a8f86, 0.0, s * 0.82, 5);                                   // wingtip pods
   }
-  cyl(g, 0.02, 0.03, 0.06, 6, D, 0.03, 0.33, 0);
-  // chin gun turret
-  const tur = shade(new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), D)); tur.position.set(0.47, 0.045, 0); g.add(tur);
-  const gun = cyl(g, 0.008, 0.008, 0.11, 4, 0x222, 0.53, 0.04, 0); gun.rotation.z = Math.PI / 2;
-  // stub wings: rocket pod (inner), Hellfire rack (outer), AIM-9 on the tips
-  const wing = [[0.05, 0.05], [0.03, 0.3], [-0.07, 0.3], [-0.09, 0.05]];
-  prism(g, wing, 0.16, 0.02, C); prism(g, mirrorZ(wing), 0.16, 0.02, C);
-  for (const s of [-1, 1]) {
-    const pod = cyl(g, 0.03, 0.03, 0.22, 8, D, -0.02, 0.12, s * 0.13); pod.rotation.z = Math.PI / 2;
-    box(g, 0.14, 0.025, 0.05, D, -0.02, 0.135, s * 0.23);
-    for (const dz of [-0.015, 0.015]) { const h = cyl(g, 0.011, 0.011, 0.16, 5, 0xd8d8d0, -0.01, 0.11, s * 0.23 + dz); h.rotation.z = Math.PI / 2; }
-    const sw = cyl(g, 0.01, 0.01, 0.2, 5, 0xd8d8d0, -0.01, 0.17, s * 0.31); sw.rotation.z = Math.PI / 2;
-  }
-  // slim tail boom with elevators and endplates, swept fin, tail rotor on the port side
-  const tb = taper(g, 0.11, 0.5, 0.08, C, -0.52, 0.17, 0, 0.45, 0.5, 0.04); tb.rotation.z = Math.PI / 2;
-  const elev = [[-0.48, 0.0], [-0.5, 0.14], [-0.58, 0.14], [-0.58, 0.0]];
-  prism(g, elev, 0.17, 0.012, C); prism(g, mirrorZ(elev), 0.17, 0.012, C);
-  for (const s of [-1, 1]) box(g, 0.08, 0.07, 0.008, C, -0.55, 0.18, s * 0.14);
-  taper(g, 0.12, 0.24, 0.025, C, -0.74, 0.33, 0, 0.55, 0.8, -0.05);
-  // skids with cross tubes
-  for (const s of [-1, 1]) {
-    const sk = cyl(g, 0.01, 0.01, 0.62, 5, D, 0.06, 0.012, s * 0.12); sk.rotation.z = Math.PI / 2;
-    const toe = cyl(g, 0.01, 0.01, 0.06, 5, D, 0.385, 0.03, s * 0.12); toe.rotation.z = Math.PI / 2 + 0.7;
-    for (const x of [-0.12, 0.2]) { const leg = box(g, 0.012, 0.06, 0.012, D, x, 0.04, s * 0.1); leg.rotation.x = s * 0.6; }
-  }
-  for (const x of [-0.12, 0.2]) box(g, 0.012, 0.012, 0.16, D, x, 0.065, 0);
-  const R = heliRotor(g, 0.03, 0.37, 4, 0.68, 0.05, 0x2d3237);
-  const th = new THREE.Group(); th.position.set(-0.76, 0.38, -0.03); g.add(th);
-  const T = tailRotor(th, 0, 0, 0, 0.15, 0x2d3237);
-  navLights(g, [[-0.02, 0.17, -0.3, 0xff2a1a], [-0.02, 0.17, 0.3, 0x22ff66], [-0.79, 0.3, 0, 0xffffff]], null, 0.8);
-  navLights(g, [[0.03, 0.31, 0, 0xff3030]], { period: 0.9, duty: 0.18, phase: Math.random() }, 1.0);
-  return heliModel(g, R, T, new V3(0.6, 0.06, 0));
+  pair(b, [[-0.7, 0.28], [-0.9, 0.6], [-1.02, 0.6], [-1.0, 0.28]], -0.03, 0.025, C);
+  enemyGlows(g, -1.02, 0.15, [-0.2, 0.2], 0.6);
+  mergeStatic(g, []); return g;
 }
-
-/* ---------- CMV-22B Osprey (COD tiltrotor) — 17.5 m fuselage, 14 m wing, two 11.6 m 3-blade proprotors ----------
-   Nacelles tilt from 90° (VTOL) to 0° (airplane mode) with st.conv. Stow (fold 0 → 1): the blades swing inboard,
-   the nacelles go to 0° (blades then lie along the leading edge) and the wing turns 90° clockwise over the fuselage. */
-function buildCMV22(color) {
-  const g = new THREE.Group(), C = M(color || 0x7a8288), C2 = M(0x6b7379), D = M(0x33383d), CAN = CANOPY();
-  // fuselage: long boxy cabin, cockpit, rounded nose; rear fuselage sweeps up into the loading ramp
-  taper(g, 1.0, 0.25, 0.26, C, 0.05, 0.19, 0, 1.0, 0.9);                              // cabin
-  taper(g, 0.22, 0.25, 0.26, C, 0.66, 0.19, 0, 0.5, 0.85, -0.05);                     // cockpit
-  taper(g, 0.14, 0.15, 0.2, C, 0.83, 0.14, 0, 0.55, 0.8, -0.03);                      // nose
-  taper(g, 0.13, 0.1, 0.262, CAN, 0.7, 0.29, 0, 0.4, 0.8, -0.04);                     // windscreen
-  const rf = taper(g, 0.25, 0.42, 0.26, C, -0.66, 0.19, 0, 0.45, 0.55, 0.07); rf.rotation.z = Math.PI / 2;
-  const probe = cyl(g, 0.01, 0.01, 0.3, 5, D, 0.92, 0.2, 0.1); probe.rotation.z = Math.PI / 2 - 0.05;   // refuelling probe
+/* Su-34 Fullback — side-by-side cockpit in a wide flat "platypus" nose, canards, big Flanker body */
+function buildSu34() {
+  const g = new THREE.Group(), C = M(0x6a7680), C2 = M(0x56606a), D = M(0x2c2f33), R = M(0x8f2b22), CAN = CANOPY();
+  const b = new THREE.Group(); b.position.y = 0.24; g.add(b);
+  taper(b, 0.8, 0.17, 0.26, C, 0.7, 0.06, 0, 0.7, 0.65); const n = noseCone(b, 1.1, 0.04, 0.1, 0.36, C); n.scale.z = 1.4;
+  taper(b, 0.34, 0.12, 0.2, CAN, 0.76, 0.2, 0, 0.6, 0.75, -0.04);
+  prism(b, [[0.45, 0.17], [-1.0, 0.32], [-1.0, -0.32], [0.45, -0.17]], -0.02, 0.11, C);
+  pair(b, [[0.5, 0.16], [-0.12, 0.44], [-0.48, 0.86], [-0.64, 0.86], [-0.66, 0.3]], 0.03, 0.03, C);
+  pair(b, [[0.45, 0.16], [0.28, 0.36], [0.18, 0.36], [0.2, 0.16]], 0.06, 0.02, C);
   for (const s of [-1, 1]) {
-    box(g, 0.14, 0.07, 0.006, CAN, 0.66, 0.255, s * 0.12);                            // cockpit side windows
-    for (const x of [0.4, 0.2, -0.15]) box(g, 0.035, 0.035, 0.006, CAN, x, 0.25, s * 0.132);   // cabin portholes
-    taper(g, 0.48, 0.12, 0.09, C, -0.04, 0.11, s * 0.16, 0.85, 0.6);                  // sponson (extended-range tanks)
+    taper(b, 1.0, 0.16, 0.17, C2, -0.45, -0.07, s * 0.21, 0.95, 0.9); box(b, 0.17, 0.13, 0.15, D, 0.12, -0.08, s * 0.21);
+    tube(b, -1.05, -0.95, 0.075, 0.08, 0x222, -0.07, s * 0.21);
+    taper(b, 0.4, 0.44, 0.03, C, -0.72, 0.31, s * 0.32, 0.5, 1, -0.14); box(b, 0.1, 0.06, 0.035, R, -0.9, 0.51, s * 0.32);
+    for (const z of [0.42, 0.58]) tube(b, -0.3, 0.05, 0.035, 0.035, 0x55554a, -0.02, s * z, 6);       // bombs
   }
-  box(g, 0.08, 0.16, 0.006, D, 0.52, 0.16, 0.132);                                     // crew door (starboard)
-  taper(g, 0.36, 0.1, 0.18, C, 0.03, 0.36, 0, 0.8, 0.8);                              // wing pylon fairing
-  cyl(g, 0.11, 0.11, 0.02, 12, C2, 0.03, 0.41, 0);                                     // wing stow ring
-  // H-tail: horizontal stabiliser with a fin at each tip
-  const hs = [[-0.78, 0], [-0.8, 0.29], [-0.9, 0.29], [-0.89, 0]];
-  prism(g, hs, 0.3, 0.02, C); prism(g, mirrorZ(hs), 0.3, 0.02, C);
-  for (const s of [-1, 1]) taper(g, 0.13, 0.27, 0.02, C, -0.86, 0.42, s * 0.29, 0.7, 1, -0.03);
-  const gr = gear(g, [[0.68, 0], [0.0, 0.17], [0.0, -0.17]], 0.07);
-  // wing on the stow ring; nacelles pivot at the tips
-  const wing = new THREE.Group(); wing.position.set(0.03, 0.42, 0); g.add(wing);
-  prism(wing, [[0.14, -0.66], [0.12, 0], [0.14, 0.66], [-0.1, 0.66], [-0.12, 0], [-0.1, -0.66]], -0.02, 0.035, C);
-  box(wing, 0.04, 0.012, 1.1, D, -0.11, 0.0, 0);                                       // flaperons
-  navLights(wing, [[0.0, 0.1, -0.71, 0xff2a1a], [0.0, 0.1, 0.71, 0x22ff66]], null, 0.8);
-  const sides = [], dyn = [wing, gr];
-  for (const s of [-1, 1]) {
-    const nac = new THREE.Group(); nac.position.set(0.0, 0.0, s * 0.71); wing.add(nac);   // local +Y = proprotor axis
-    cyl(nac, 0.07, 0.065, 0.42, 8, C, 0, 0, 0);                                          // engine nacelle
-    cyl(nac, 0.055, 0.07, 0.06, 8, C2, 0, 0.24, 0);                                      // proprotor gearbox
-    cyl(nac, 0.055, 0.055, 0.03, 8, D, 0, 0.12, s * 0.02);                               // intake
-    cyl(nac, 0.04, 0.05, 0.03, 8, D, 0, -0.22, 0);                                       // exhaust
-    const rotor = new THREE.Group(); rotor.position.set(0, 0.27, 0); nac.add(rotor);
-    const sp = shade(new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.1, 8), D)); sp.position.y = 0.05; rotor.add(sp);
-    const blades = [];
-    for (let i = 0; i < 3; i++) {
-      const base = i * TAU / 3, h = new THREE.Group(); h.rotation.y = base; rotor.add(h);
-      const bl = taper(h, 0.012, 0.5, 0.06, D, 0.3, 0, 0, 1, 0.6); bl.rotation.z = -Math.PI / 2;   // blade along +X, narrowing to the tip
-      bl.castShadow = false;
-      // folded: every blade swings inboard (along the leading edge once the nacelle is down), in a tight fan
-      blades.push({ h, base, fold: base + angleWrap(s * Math.PI / 2 +(i - 1) * 0.06 - base) });
-    }
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.56, 24), new THREE.MeshBasicMaterial({ color: 0x2a2f34, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
-    disc.rotation.x = -Math.PI / 2; rotor.add(disc);
-    sides.push({ s, nac, rotor, blades, disc });
-    dyn.push(nac, rotor, ...blades.map(b => b.h));
-  }
-  navLights(g, [[-0.92, 0.32, 0, 0xffffff]], null, 0.8);
-  navLights(g, [[0.2, 0.05, 0, 0xff2020], [-0.3, 0.33, 0, 0xff3030]], { period: 1.05, duty: 0.18, phase: Math.random() }, 1.1);
-  mergeStatic(g, dyn);
-  let fold = 1, conv = 0;
-  return {
-    group: g, searchPos: new V3(0.82, 0.08, 0),
-    setFold(f) {
-      fold = f;
-      wing.rotation.y = -Math.PI / 2 * smoothstep(0.6, 1, f);
-      const kb = smoothstep(0, 0.35, f);
-      for (const S of sides) for (const b of S.blades) b.h.rotation.y = lerp(b.base, b.fold, kb);
-    },
-    tick(dt, st) {
-      conv += ((st.conv || 0) - conv) * Math.min(1, dt * 0.7);
-      const tilt = Math.max(conv, smoothstep(0.35, 0.6, fold)) * Math.PI / 2, spin = st.rotor || 0;
-      gr.visible = st.gearDown !== false;
-      for (const S of sides) {
-        S.nac.rotation.z = -tilt;
-        S.rotor.rotation.y = fold > 0.001 ? 0 : S.s * (st.rotorAng || 0);   // counter-rotating
-        if (fold <= 0.001) for (const b of S.blades) { b.h.rotation.y = b.base; b.h.visible = spin < 0.85 || Math.random() < 0.5; }
-        S.disc.material.opacity = 0.28 * smoothstep(0.4, 1, spin);
-      }
-    }
-  };
+  pair(b, [[-0.74, 0.3], [-0.95, 0.62], [-1.07, 0.62], [-1.05, 0.3]], -0.03, 0.025, C);
+  tube(b, -1.2, -1.0, 0.04, 0.05, C2, 0.0, 0, 6);
+  enemyGlows(g, -1.07, 0.17, [-0.21, 0.21], 0.6);
+  mergeStatic(g, []); return g;
+}
+/* Tu-22M3 Backfire — long-range swing-wing bomber, ~42 m: big intakes, swept wings, tall fin (scaled up in ENEMY_TYPES) */
+function buildTu22() {
+  const g = new THREE.Group(), C = M(0xb8bcc0), C2 = M(0x9ea3a8), D = M(0x2c2f33), R = M(0x8f2b22), CAN = CANOPY();
+  tube(g, -1.7, 1.2, 0.16, 0.17, C, 0.3, 0, 10);
+  noseCone(g, 1.2, 0.3, 0.17, 0.75, C, 10);
+  taper(g, 0.5, 0.12, 0.2, CAN, 1.25, 0.43, 0, 0.6, 0.7, -0.04);
+  for (const s of [-1, 1]) { taper(g, 1.6, 0.26, 0.2, C2, -0.6, 0.28, s * 0.22, 0.95, 0.9); box(g, 0.2, 0.24, 0.16, D, 0.25, 0.28, s * 0.25); }   // intake trunks
+  pair(g, [[0.6, 0.2], [-0.2, 0.62], [-0.3, 0.62], [-0.3, 0.2]], 0.32, 0.05, C);                    // glove
+  pair(g, [[-0.15, 0.6], [-1.1, 1.75], [-1.3, 1.75], [-0.35, 0.6]], 0.33, 0.035, C);                // swept outer wings
+  fin(g, -1.6, 0.42, 0, 0.9, 0.75, C, 0.35, 0, 0.05); box(g, 0.2, 0.1, 0.06, R, -2.0, 1.12, 0);
+  pair(g, [[-1.3, 0.12], [-1.75, 0.75], [-1.95, 0.75], [-1.9, 0.12]], 0.36, 0.03, C);
+  for (const s of [-1, 1]) tube(g, -2.0, -1.75, 0.1, 0.11, 0x222, 0.28, s * 0.22, 8);
+  enemyGlows(g, -2.05, 0.28, [-0.22, 0.22], 0.8);
+  mergeStatic(g, []); return g;
+}
+/* ---------- enemy attack helicopters (the rotor group is named 'rotor' — combat.js spins it on the clones) ---------- */
+function enemyRotor(g, x, y, n, len, color, name) {
+  const r = new THREE.Group(); r.name = name || 'rotor'; r.position.set(x, y, 0); g.add(r);
+  for (let i = 0; i < n; i++) { const h = new THREE.Group(); h.rotation.y = i * TAU / n; r.add(h); box(h, len, 0.02, 0.05, color, len / 2 + 0.05, 0, 0).castShadow = false; }
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(len + 0.05, 20), new THREE.MeshBasicMaterial({ color: 0x2a2f34, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide }));
+  disc.rotation.x = -Math.PI / 2; r.add(disc);
+  return r;
+}
+/* Ka-52 Alligator — coaxial rotors, side-by-side cockpit, stub wings, no tail rotor */
+function buildKa52() {
+  const g = new THREE.Group(), C = M(0x4e5446), C2 = M(0x444a3c), D = M(0x26292a), R = M(0x8f2b22), CAN = CANOPY();
+  taper(g, 0.55, 0.2, 0.17, C, 0.2, 0.18, 0, 0.9, 0.85); taper(g, 0.22, 0.16, 0.16, C, 0.55, 0.15, 0, 0.6, 0.8, -0.04);
+  taper(g, 0.2, 0.12, 0.17, CAN, 0.42, 0.3, 0, 0.6, 0.8, -0.03);
+  for (const s of [-1, 1]) { tube(g, -0.22, 0.12, 0.05, 0.05, C2, 0.3, s * 0.13, 8); box(g, 0.25, 0.02, 0.22, C, -0.02, 0.2, s * 0.18); tube(g, -0.12, 0.1, 0.028, 0.028, D, 0.15, s * 0.26, 8); }
+  const tb = taper(g, 0.1, 0.6, 0.08, C, -0.58, 0.22, 0, 0.45, 0.5, 0.04); tb.rotation.z = Math.PI / 2;
+  pair(g, [[-0.78, 0.0], [-0.8, 0.18], [-0.9, 0.18], [-0.9, 0.0]], 0.2, 0.015, C);
+  for (const s of [-1, 1]) { taper(g, 0.1, 0.18, 0.02, C, -0.88, 0.26, s * 0.18, 0.6, 1, -0.03); box(g, 0.06, 0.03, 0.025, R, -0.9, 0.36, s * 0.18); }
+  cyl(g, 0.025, 0.025, 0.2, 6, D, 0.02, 0.45, 0);
+  enemyRotor(g, 0.02, 0.42, 3, 0.68, 0x262924, 'rotor'); enemyRotor(g, 0.02, 0.55, 3, 0.68, 0x262924, 'rotor2');
+  mergeStatic(g, g.children.filter(o => o.name)); return g;
+}
+/* Mi-24 Hind — tandem bubble cockpits, troop cabin, stub wings with pylons, five blades */
+function buildMi24() {
+  const g = new THREE.Group(), C = M(0x6a6648), C2 = M(0x5a5640), D = M(0x26292a), R = M(0x8f2b22), CAN = CANOPY();
+  taper(g, 0.6, 0.22, 0.2, C, 0.05, 0.18, 0, 0.9, 0.85); taper(g, 0.28, 0.16, 0.16, C, 0.48, 0.14, 0, 0.6, 0.8, -0.04);
+  for (const [x, y, s] of [[0.58, 0.22, 0.06], [0.4, 0.29, 0.07]]) { const c = shade(new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6, 0, TAU, 0, Math.PI / 2), CAN)); c.position.set(x, y, 0); c.scale.set(1.4, 1, 1); g.add(c); }
+  for (const s of [-1, 1]) { tube(g, -0.2, 0.15, 0.05, 0.05, C2, 0.33, s * 0.11, 8); box(g, 0.24, 0.02, 0.3, C, -0.05, 0.2, s * 0.22).rotation.x = s * -0.2; tube(g, -0.15, 0.08, 0.03, 0.03, D, 0.13, s * 0.3, 8); }
+  const tb = taper(g, 0.1, 0.7, 0.08, C, -0.62, 0.24, 0, 0.45, 0.5, 0.04); tb.rotation.z = Math.PI / 2;
+  taper(g, 0.14, 0.26, 0.025, C, -0.98, 0.36, 0, 0.6, 0.8, -0.05); box(g, 0.07, 0.04, 0.03, R, -1.0, 0.48, 0);
+  const tr = new THREE.Group(); tr.name = 'trotor'; tr.position.set(-1.0, 0.38, 0.04); g.add(tr); box(tr, 0.03, 0.3, 0.02, 0x262924, 0, 0, 0); box(tr, 0.3, 0.03, 0.02, 0x262924, 0, 0, 0);
+  cyl(g, 0.025, 0.03, 0.08, 6, D, 0.0, 0.42, 0);
+  enemyRotor(g, 0.0, 0.46, 5, 0.85, 0x262924, 'rotor');
+  mergeStatic(g, g.children.filter(o => o.name)); return g;
+}
+/* ---------- enemy armour (static templates; the turret group is named 'turret' so combat.js can aim it) ---------- */
+function enemyTurret(g, x, y) { const t = new THREE.Group(); t.name = 'turret'; t.position.set(x, y, 0); g.add(t); return t; }
+/* T-90 — low hull, rounded turret with ERA blocks, long 125 mm gun */
+function buildT90() {
+  const g = new THREE.Group(), C = M(0x4f5638), C2 = M(0x434a30), D = M(0x26292a), R = M(0x8f2b22);
+  taper(g, 2.3, 0.3, 1.15, C, 0, 0.4, 0, 0.9, 0.95, 0.05);
+  for (const s of [-1, 1]) { box(g, 2.4, 0.3, 0.3, D, 0, 0.17, s * 0.55); box(g, 2.3, 0.05, 0.34, C2, 0, 0.34, s * 0.55); }
+  box(g, 0.25, 0.25, 0.9, C2, -1.15, 0.45, 0);                                                    // fuel drums at the back
+  const t = enemyTurret(g, 0.1, 0.55);
+  const tu = shade(new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 6, 0, TAU, 0, Math.PI / 2), C)); tu.scale.set(1.1, 0.55, 1); t.add(tu);
+  for (const s of [-1, 1]) box(t, 0.35, 0.12, 0.25, C2, 0.35, 0.12, s * 0.3).rotation.y = s * 0.4;   // ERA
+  tube(t, 0.4, 2.0, 0.045, 0.04, C2, 0.12, 0, 6);
+  box(t, 0.12, 0.08, 0.12, R, -0.3, 0.28, 0);
+  mergeStatic(g, [t]); return g;
+}
+/* BMP-3 — infantry fighting vehicle: low hull, small turret with the 100 mm / 30 mm pair */
+function buildBMP() {
+  const g = new THREE.Group(), C = M(0x5a5e40), C2 = M(0x4c5036), D = M(0x26292a);
+  taper(g, 2.0, 0.42, 1.05, C, 0, 0.42, 0, 0.85, 0.95, -0.1);
+  for (const s of [-1, 1]) box(g, 2.0, 0.26, 0.28, D, 0, 0.15, s * 0.5);
+  const t = enemyTurret(g, 0.05, 0.66);
+  taper(t, 0.65, 0.2, 0.6, C2, 0, 0.08, 0, 0.8, 0.85); tube(t, 0.3, 1.2, 0.035, 0.03, D, 0.1, 0.05, 6); tube(t, 0.3, 0.9, 0.015, 0.015, D, 0.12, -0.08, 5);
+  mergeStatic(g, [t]); return g;
+}
+/* BTR-82 — eight-wheeled APC with a small MG turret */
+function buildBTR() {
+  const g = new THREE.Group(), C = M(0x5c6244), C2 = M(0x4e5438), D = M(0x26292a);
+  taper(g, 2.3, 0.45, 0.95, C, 0, 0.55, 0, 0.88, 0.85);
+  for (const x of [-0.8, -0.3, 0.3, 0.8]) for (const s of [-1, 1]) { const w = cyl(g, 0.17, 0.17, 0.14, 8, D, x, 0.17, s * 0.45); w.rotation.x = Math.PI / 2; }
+  const t = enemyTurret(g, 0.35, 0.8);
+  cyl(t, 0.22, 0.25, 0.18, 8, C2, 0, 0.09, 0); tube(t, 0.2, 0.75, 0.02, 0.018, D, 0.1, 0, 5);
+  mergeStatic(g, [t]); return g;
 }

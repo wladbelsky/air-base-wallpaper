@@ -43,7 +43,7 @@ test('music arms combat after 5 s, the fight runs, silence holds 5 s and stands 
   // the music stops (the sound counts as gone after 1.6 s): hold — still armed, not fighting — then stand down
   await wp.sim(2, { audio: false });
   expect(await wp.run(() => [AUD.combat, AUD.holding, AUD.fighting])).toEqual([true, true, false]);
-  expect(await wp.run(() => ENEMIES.filter(e => e.kind === 'vampire' && !e.dead).length), 'inbound missiles intercepted in the hold').toBe(0);
+  expect(await wp.run(() => ENEMIES.filter(e => (e.kind === 'cruise' || e.kind === 'ballistic') && !e.dead).length), 'inbound missiles intercepted in the hold').toBe(0);
   await wp.sim(5, { audio: false });
   expect(await wp.run(() => [AUD.combat, AUD.holding])).toEqual([false, false]);
 
@@ -68,7 +68,7 @@ test('sound during the hold resumes the fight; a short ping does not', async ({ 
   expect(lines.length).toBeGreaterThan(0);
 });
 
-test('with enemies off the fight has passes but no waves, missiles or boats', async ({ wp }) => {
+test('with enemies off the fight has passes but no waves, missiles or armour', async ({ wp }) => {
   await wp.run(() => { CFG.enemies = false; __t.forceFight(); });
   const seen = await fight(wp, 120);
   expect(seen.inCombat).toBeGreaterThan(0);
@@ -86,14 +86,25 @@ test('fire intensity 0: combat mode without passes or enemies', async ({ wp }) =
 });
 
 test('a long, heavy fight (high stress) stays within bounds', async ({ wp }) => {
-  // the gunship up first: boats only come in gunship passes
-  await wp.run(() => AIRCRAFT.filter(a => a.spec.key === 'ah1').forEach(a => a.requestLaunch()));
-  const up = await wp.until(() => AIRCRAFT.some(a => a.spec.key === 'ah1' && a.aloft), 300);
+  // the gunships up first: armour comes in on its own and in their passes, the AC-130 circles over it
+  await wp.run(() => AIRCRAFT.filter(a => ['ah64', 'ac130', 'a10'].includes(a.spec.key)).forEach(a => a.requestLaunch()));
+  const up = await wp.until(() => AIRCRAFT.some(a => a.spec.key === 'ah64' && a.aloft) && AIRCRAFT.some(a => a.spec.key === 'ac130' && a.aloft), 400);
   expect(up.done).toBe(true);
   await wp.run(() => { __t.forceFight(); STRESS.level = 0.9; });
   const seen = await fight(wp, 300);
-  expect(seen.kinds.vampire || 0, 'anti-ship missiles at high stress').toBeGreaterThan(0);
-  expect(seen.kinds.boat || 0, 'boats in gunship passes').toBeGreaterThan(0);
-  expect(seen.maxEnemies).toBeLessThan(60);
+  for (const k of ['cruise', 'ballistic', 'armor', 'bandit']) expect(seen.kinds[k] || 0, `${k} at high stress`).toBeGreaterThan(0);
+  expect(seen.maxEnemies).toBeLessThan(70);
+  expect(await wp.run(() => [...__t.log.values()].flat().includes('cbt_orbit')), 'the gunship circled over the fight').toBe(true);
   expect(await wp.stuck()).toEqual([]);
+});
+
+test('the base fires back: tanks at the armour, SAMs and guns into the air; hits leave fires and scorch marks', async ({ wp }) => {
+  await wp.run(() => { __t.forceFight(); STRESS.level = 0.7; window.__shots = { tank: 0, sam: 0, aa: 0 };
+    const t = window.fireTank, s = window.launchSAM, a = window.fireAA;
+    window.fireTank = (m, k) => { __shots.tank++; return t(m, k); }; window.launchSAM = (k) => { __shots.sam++; return s(k); }; window.fireAA = (m, k) => { __shots.aa++; return a(m, k); }; });
+  await fight(wp, 120, { audio: true });
+  const r = await wp.run(() => ({ shots: __shots, scorch: FX.scorch.items.filter(i => i.on).length }));
+  expect(r.shots.tank).toBeGreaterThan(0);
+  expect(r.shots.sam + r.shots.aa).toBeGreaterThan(0);
+  expect(r.scorch, 'scorch marks on the ground').toBeGreaterThan(0);
 });

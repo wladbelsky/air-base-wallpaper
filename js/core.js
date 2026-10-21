@@ -1,5 +1,5 @@
 'use strict';
-/* ===== Shared utils, settings, waves, sun position, textures ===== */
+/* ===== Shared utils, settings, ground & seasons, sun position, textures ===== */
 const V3 = THREE.Vector3;
 const DEG = Math.PI / 180;
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -13,7 +13,7 @@ const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 
 /* Settings (overridden by Wallpaper Engine user properties) */
 const CFG = {
-  zoom: 115,          // %
+  zoom: 90,           // %
   camAngle: 135,      // initial camera azimuth, degrees
   camRotate: false,   // slow automatic orbit (no mouse control)
   camSpeed: 2,        // degrees per second
@@ -27,10 +27,11 @@ const CFG = {
   fire: 100,          // fire intensity, %
   flyby: 5,           // fly-by frequency 0..10
   auto: true,         // automatic flight ops
-  counts: { fa18: 4, f14: 2, f35: 2, e2d: 1, mq25: 1, mh60: 1, ch53: 1, ah1: 1, cmv22: 1 },  // air wing composition
-  ddHelis: true,      // one transport helicopter on each destroyer
-  numbers: { carrier: '07' },  // carrier hull number
-  enemies: true,      // enemy aircraft & anti-ship missiles during combat
+  counts: { f15: 4, f16: 4, f22: 2, f35: 2, a10: 2, e3: 1, kc46: 1, c130: 1, kc130: 1, ac130: 1, c17: 1, mq9: 1, uh60: 2, ah64: 2, uh1: 2 },  // air wing composition
+  baseName: 'SAND ISLAND',   // the base's radio name (tower, panel)
+  season: 'auto',     // auto (PC date) / spring / summer / autumn / winter
+  weather: true,      // snowfall in winter, falling leaves in autumn
+  enemies: true,      // enemy aircraft, missiles and armour during combat
   shake: true,        // subtle camera shake on heavy hits
   missions: 5,        // how often flights leave on missions (0 = never)
   subtitles: true,    // Ace Combat style radio subtitles
@@ -39,36 +40,28 @@ const CFG = {
   showPanel: true,
   panelPos: 'br',
   panelScale: 100,
-  waves: 100,
-  speed: 100,
   uiColor: '120,220,170'
 };
 
-/* ===== Waves (same formula in JS and GLSL) =====
-   component: [kx, kz, omega, amplitude] ; phase = kx*x + kz*z + (kx*flow + omega)*t */
-const WAVE = {
-  amp: 1, flow: 2.2,
-  comps: [[0.16, 0.07, 0.9, 0.34], [-0.05, 0.12, 0.7, 0.24], [0.41, 0.29, 1.7, 0.11], [0.73, -0.52, 2.4, 0.05]],
-  phase: [0, 0, 0, 0]
+/* ===== Ground & wind =====
+   The base stands on flat ground (y = 0); WIND is the drift of smoke and dust (was the sea flowing past the fleet). */
+const WIND = new V3(-1.4, 0, 0.5);
+function groundH(x, z) { return 0; }
+
+/* ===== Seasons: auto from the PC date (northern hemisphere) or fixed in the settings =====
+   ground = base colour of the terrain texture, grass = its speckles, hg = hemisphere bounce from the ground,
+   roof = roof colour (snow in winter), veg = vegetation set (terrain.js)                                     */
+const SEASONS = {
+  spring: { ground: 0x5f7d3a, grass: [0x6f8f44, 0x52702e, 0x7a9a4c, 0x8aa858], hg: 0x343c22, roof: 0x5d636a, veg: 'leaf', leaf: [0x5c8a34, 0x6c9a3c, 0x4f7a2c, 0xd9b8c8, 0x7aa848] },
+  summer: { ground: 0xc8a46a, grass: [0xd6b47c, 0xb8925a, 0xc29c62, 0xa88450], hg: 0x4a3c28, roof: 0x6a6660, veg: 'desert' },
+  autumn: { ground: 0x7a6a3a, grass: [0x8a7440, 0x6a5a30, 0x948048, 0x5e6a32], hg: 0x3a3020, roof: 0x5d636a, veg: 'leaf', leaf: [0xd8a028, 0xc8661e, 0xe0c040, 0xa8401c, 0x8a8a30] },
+  winter: { ground: 0xdfe6ee, grass: [0xeef2f6, 0xccd6e0, 0xf6f8fa, 0xb8c4d0], hg: 0x5a6270, roof: 0xe8eef4, veg: 'fir' }
 };
-function waveAdvance(dt) {
-  for (let i = 0; i < 4; i++) {
-    const c = WAVE.comps[i];
-    WAVE.phase[i] = (WAVE.phase[i] + (c[0] * WAVE.flow + c[2]) * dt) % (Math.PI * 2);
-  }
+function seasonNow() {
+  if (CFG.season && CFG.season !== 'auto') return CFG.season;
+  const m = getNow().getMonth();
+  return m === 11 || m < 2 ? 'winter' : m < 5 ? 'spring' : m < 8 ? 'summer' : 'autumn';
 }
-function waveH(x, z) {
-  let h = 0;
-  for (let i = 0; i < 4; i++) { const c = WAVE.comps[i]; h += c[3] * Math.sin(c[0] * x + c[1] * z + WAVE.phase[i]); }
-  return h * WAVE.amp;
-}
-const WAVE_GLSL = (() => {
-  const c = WAVE.comps, f = v => v.toFixed(4);
-  let s = 'uniform vec4 uPh; uniform float uAmp;\nfloat waveH(vec2 p){ return uAmp*(';
-  s += c.map((k, i) => `${f(k[3])}*sin(${f(k[0])}*p.x+${f(k[1])}*p.y+uPh[${i}])`).join('+');
-  s += '); }\n';
-  return s;
-})();
 
 /* ===== Sun position (simplified algorithm, ~0.5 deg accuracy) ===== */
 function sunPosition(date, lat, lon) {
@@ -98,13 +91,13 @@ function getNow() {
 
 /* ===== Time-of-day palette keyed by sun elevation ===== */
 const SKY_KEYS = [
-  { e: -90, sun: 0x7a90c0, si: 0.45, hs: 0x44557e, hg: 0x141a26, hi: 0.85, fog: 0x0b1424, water: 0x0f2a44, spec: 0x283143, smoke: 0x3a4250 },
-  { e: -10, sun: 0x7a90c0, si: 0.45, hs: 0x44557e, hg: 0x141a26, hi: 0.85, fog: 0x0b1424, water: 0x0f2a44, spec: 0x283143, smoke: 0x3a4250 },
-  { e: -4,  sun: 0x7080a8, si: 0.45, hs: 0x4a5078, hg: 0x161820, hi: 0.80, fog: 0x1c2240, water: 0x13284a, spec: 0x242739, smoke: 0x4a4e5c },
-  { e: 0,   sun: 0xff7a40, si: 0.80, hs: 0x9a7a96, hg: 0x2a2024, hi: 0.85, fog: 0xb86a54, water: 0x2a4a66, spec: 0x3e2415, smoke: 0x6e6262 },
-  { e: 6,   sun: 0xffa860, si: 0.95, hs: 0xaeb2c8, hg: 0x2c2622, hi: 0.72, fog: 0xcf9a7c, water: 0x285676, spec: 0x392b1c, smoke: 0x9a9090 },
-  { e: 20,  sun: 0xfff2dc, si: 1.05, hs: 0xc4dcf0, hg: 0x3a3a36, hi: 0.62, fog: 0x9fc0da, water: 0x1c5a82, spec: 0x242b32, smoke: 0xb8b8b8 },
-  { e: 90,  sun: 0xfff6e8, si: 1.10, hs: 0xc8e0f4, hg: 0x3a3a36, hi: 0.62, fog: 0x9fc0da, water: 0x1c5e88, spec: 0x242b32, smoke: 0xbcbcbc }
+  { e: -90, sun: 0x7a90c0, si: 0.45, hs: 0x44557e, hg: 0x141a26, hi: 0.85, fog: 0x0b1424, smoke: 0x3a4250 },
+  { e: -10, sun: 0x7a90c0, si: 0.45, hs: 0x44557e, hg: 0x141a26, hi: 0.85, fog: 0x0b1424, smoke: 0x3a4250 },
+  { e: -4,  sun: 0x7080a8, si: 0.45, hs: 0x4a5078, hg: 0x161820, hi: 0.80, fog: 0x1c2240, smoke: 0x4a4e5c },
+  { e: 0,   sun: 0xff7a40, si: 0.80, hs: 0x9a7a96, hg: 0x2a2024, hi: 0.85, fog: 0xb86a54, smoke: 0x6e6262 },
+  { e: 6,   sun: 0xffa860, si: 0.95, hs: 0xaeb2c8, hg: 0x2c2622, hi: 0.72, fog: 0xcf9a7c, smoke: 0x9a9090 },
+  { e: 20,  sun: 0xfff2dc, si: 1.05, hs: 0xc4dcf0, hg: 0x3a3a36, hi: 0.62, fog: 0x9fc0da, smoke: 0xb8b8b8 },
+  { e: 90,  sun: 0xfff6e8, si: 1.10, hs: 0xc8e0f4, hg: 0x3a3a36, hi: 0.62, fog: 0x9fc0da, smoke: 0xbcbcbc }
 ];
 const _ca = new THREE.Color(), _cb = new THREE.Color();
 function skyAt(elev) {
@@ -112,7 +105,7 @@ function skyAt(elev) {
   const a = SKY_KEYS[i], b = SKY_KEYS[i + 1];
   const t = clamp((elev - a.e) / (b.e - a.e), 0, 1);
   const out = {};
-  for (const k of ['sun', 'hs', 'hg', 'fog', 'water', 'spec', 'smoke']) {
+  for (const k of ['sun', 'hs', 'hg', 'fog', 'smoke']) {
     _ca.setHex(a[k]); _cb.setHex(b[k]); out[k] = _ca.clone().lerp(_cb, t);
   }
   out.si = lerp(a.si, b.si, t); out.hi = lerp(a.hi, b.hi, t);

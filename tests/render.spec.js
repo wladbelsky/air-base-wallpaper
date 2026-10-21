@@ -6,30 +6,55 @@ test.use({ viewport: { width: 640, height: 360 } });
 
 const lum = c => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 
-test('a day frame renders without GL errors, within the draw-call budget, with the fleet on screen', async ({ wp }) => {
-  await wp.boot();
+test('a day frame renders without GL errors, within the draw-call budget, with the base on screen', async ({ wp }) => {
+  await wp.boot({ query: '?season=spring' });
   await wp.sim(5);
   const r = await wp.run(() => {
     __t.render();
     const gl = renderer.getContext(), err = gl.getError();
     return {
       err, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, programs: renderer.info.programs.length,
-      center: __t.sample(300, 160, 40, 40), sea: __t.sample(10, 10, 40, 40), seaB: __t.sample(590, 310, 40, 40),
-      lost: gl.isContextLost(), lightsOn: ENV.lightsOn, spots: SEARCHLIGHTS.filter(s => s.light && s.light.visible).length
+      center: __t.sample(300, 160, 40, 40), ground: __t.sample(600, 330, 30, 25), lost: gl.isContextLost(), lightsOn: ENV.lightsOn,
+      spots: SEARCHLIGHTS.filter(s => s.light && s.light.visible).length
     };
   });
   expect(r.lost).toBe(false);
   expect(r.err, 'gl.getError()').toBe(0);
-  expect(r.calls, 'draw calls (baseline ~400)').toBeLessThan(700);
+  expect(r.calls, 'draw calls').toBeLessThan(800);
   expect(r.calls).toBeGreaterThan(50);
   expect(r.tris).toBeGreaterThan(10000);
-  expect(r.programs).toBeLessThan(60);
-  // the sea is blue in both corners; the middle (the carrier) is not sea
-  for (const c of [r.sea, r.seaB]) expect(c[2], `sea is blue ${c}`).toBeGreaterThan(c[0]);
-  const d = Math.max(...r.center.map((v, i) => Math.abs(v - r.sea[i])));
-  expect(d, `carrier in the middle ${r.center} vs sea ${r.sea}`).toBeGreaterThan(15);
+  expect(r.programs).toBeLessThan(70);
+  // spring ground is green-ish in the corner; the middle (runway, apron) is not ground-coloured
+  expect(r.ground[1], `green ground ${r.ground}`).toBeGreaterThan(r.ground[2]);
+  const d = Math.max(...r.center.map((v, i) => Math.abs(v - r.ground[i])));
+  expect(d, `the airfield in the middle ${r.center} vs ground ${r.ground}`).toBeGreaterThan(15);
   expect(r.lightsOn).toBe(0);
   expect(r.spots, 'searchlights hidden by day').toBe(0);
+});
+
+test('the seasons change the ground: snow is bright, the desert sandy, spring green', async ({ wp }) => {
+  const col = {};
+  for (const s of ['winter', 'summer', 'spring', 'autumn']) {
+    await wp.boot({ query: `?season=${s}` });
+    await wp.sim(1);
+    col[s] = await wp.run(() => ({ c: __t.sample(600, 330, 30, 25), season: TERRAIN.season, veg: TERRAIN.veg.reduce((n, v) => n + v.count, 0) }));
+    expect(col[s].season).toBe(s);
+    expect(col[s].veg, `${s} vegetation`).toBeGreaterThan(300);
+  }
+  expect(lum(col.winter.c)).toBeGreaterThan(lum(col.spring.c) + 30);
+  expect(col.summer.c[0], 'desert: more red than blue').toBeGreaterThan(col.summer.c[2] + 20);
+  expect(col.spring.c[1]).toBeGreaterThan(col.spring.c[0]);
+});
+
+test('a season change at runtime rebuilds the vegetation without leaking', async ({ wp }) => {
+  await wp.boot({ query: '?season=spring' });
+  await wp.sim(1);
+  const a = await wp.run(() => __t.geometries());
+  for (const s of ['winter', 'summer', 'autumn', 'spring']) await wp.run((s) => { CFG.season = s; updateEnvironment(); }, s);
+  await wp.sim(1);
+  const b = await wp.run(() => __t.geometries());
+  expect(b.leaked, b.leakedTypes.join()).toBe(0);
+  expect(b.reach).toBeLessThan(a.reach + 5);
 });
 
 test('night is darker than day, with nav lights and searchlights on', async ({ wp }) => {
@@ -45,12 +70,12 @@ test('night is darker than day, with nav lights and searchlights on', async ({ w
   expect(night.spots).toBeGreaterThan(0);
 });
 
-test('shadows darken the sea around the ships, and the shadow camera covers the whole screen', async ({ wp }) => {
+test('shadows darken the ground, and the shadow camera covers the whole screen', async ({ wp }) => {
   await wp.boot();
   await wp.sim(3);
   const r = await wp.run(() => {
     const on = __t.sample(160, 90, 320, 180);
-    // the visible sea's corners lie inside the fitted shadow camera (light space)
+    // the visible ground's corners lie inside the fitted shadow camera (light space)
     const sc = sunLight.shadow.camera, inside = [[-1, -1], [1, -1], [1, 1], [-1, 1]].every(([x, y]) => {
       const p = AIRWAR.groundAt(x, y, 0).applyMatrix4(sc.matrixWorldInverse);
       return p.x >= sc.left && p.x <= sc.right && p.y >= sc.bottom && p.y <= sc.top;
@@ -90,7 +115,7 @@ test('GPU memory plateaus over a long fight with fly-bys, missiles and smoke', a
     mem.push(await wp.run(() => Object.assign(__t.geometries(), { t: renderer.info.memory.textures, p: renderer.info.programs.length, calls: renderer.info.render.calls, err: renderer.getContext().getError() })));
   }
   for (const m of mem) {
-    expect(m.err).toBe(0); expect(m.calls).toBeLessThan(900);
+    expect(m.err).toBe(0); expect(m.calls).toBeLessThan(1000);
     expect(m.leaked, `geometries dropped without dispose: ${m.leakedTypes}`).toBe(0);
   }
   const early = mem[6], late = mem[mem.length - 1];

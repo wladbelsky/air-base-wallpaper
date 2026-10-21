@@ -30,7 +30,7 @@
   const weToHex = s => '#' + s.split(' ').map(c => Math.round(clamp(parseFloat(c), 0, 1) * 255).toString(16).padStart(2, '0')).join('');
   const hexToWe = h => [1, 3, 5].map(i => (parseInt(h.substr(i, 2), 16) / 255).toFixed(3)).join(' ');
   const condFn = c => { try { return new Function('v', 'return (' + c.replace(/(\w+)\.value/g, 'v["$1"]') + ');'); } catch (e) { return () => true; } };
-  const GROUPS = [[0, 9, 'Camera & time'], [10, 19, 'Audio & combat'], [20, 29, 'Sea & ships'], [30, 39, 'Control panel'], [40, 49, 'Air wing'], [50, 59, 'Hull number']];
+  const GROUPS = [[0, 9, 'Camera & time'], [10, 19, 'Audio & combat'], [20, 29, 'Terrain & season'], [30, 39, 'Control panel'], [40, 49, 'Air wing'], [50, 59, 'Base']];
 
   /* ---- UI ---- */
   const gear = el('button', 'cfg-gear', '⚙ SETTINGS'); gear.id = 'cfgGear';
@@ -70,7 +70,7 @@
         ctrl = el('input'); ctrl.type = 'color'; ctrl.value = weToHex(vals[k]);
         ctrl.oninput = () => set(hexToWe(ctrl.value));
       } else {
-        ctrl = el('input'); ctrl.type = 'text'; ctrl.maxLength = 4; ctrl.value = vals[k];
+        ctrl = el('input'); ctrl.type = 'text'; ctrl.maxLength = 20; ctrl.value = vals[k];
         ctrl.oninput = () => set(ctrl.value);
       }
       ctrl.classList.add('cfg-ctl');

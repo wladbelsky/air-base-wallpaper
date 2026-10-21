@@ -65,7 +65,7 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
 #pager .chip:hover { opacity: .9; }
 #pager .chip.on { opacity: 1; color: #fff; background: rgba(var(--ui), .2); border-color: rgba(var(--ui), .7); }
 #pgInfo { font-size: 11px; opacity: .7; min-width: 34px; text-align: center; }
-#list .row, #fleet .row { display: grid; grid-template-columns: 50px 1fr 118px 74px; align-items: center; gap: 4px; padding: 3px 0; border-bottom: 1px dashed rgba(var(--ui), .12); }
+#list .row, #sites .row { display: grid; grid-template-columns: 50px 1fr 118px 74px; align-items: center; gap: 4px; padding: 3px 0; border-bottom: 1px dashed rgba(var(--ui), .12); }
 #panel .tp { font-size: 10px; opacity: .7; border: 1px solid rgba(var(--ui), .35); text-align: center; border-radius: 2px; }
 #panel .nm { color: #e8f4ee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #panel .nm i { font-style: normal; font-size: 10px; color: rgb(var(--ui)); opacity: .6; margin-left: 6px; }
@@ -74,9 +74,9 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
 #panel .st.air  { color: #7fd0ff; }
 #panel .st.busy { color: #ffcf6a; }
 #panel .st.wait { color: #ff9a6a; }
-/* ships: callsigns for reference (no action column) */
-#fleet { border-top: 1px dashed rgba(var(--ui), .25); margin-bottom: 4px; }
-#fleet .row { grid-template-columns: 50px 1fr 118px; }
+/* base sites: callsigns for reference (no action column) */
+#sites { border-top: 1px dashed rgba(var(--ui), .25); margin-bottom: 4px; }
+#sites .row { grid-template-columns: 50px 1fr 118px; }
 #list .act { font-size: 11px; padding: 2px 4px !important; }
 #list .act.up { border-color: rgba(120,200,255,.6) !important; }
 #list .act.down { border-color: rgba(255,200,110,.6) !important; color: #ffd68a !important; }

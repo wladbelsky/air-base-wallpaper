@@ -5,14 +5,16 @@
      chase  — a dogfight bandit ahead, our fighters behind it;
      chased — a bandit on a fighter's tail (and the wingman behind the bandit, or a warning from the AWACS);
      sweep  — fighters only;
-     boats / cover — attack helicopters, low: fast attack boats come in to meet them, or they hunt whatever
-                     flies near the fleet (bandits: Sidewinder, vampires: chin gun).
+     cas    — A-10 (and now and then an F-15E with bombs): an armoured column drives in to meet the pass, gun run / bombs;
+     armor / cover — attack helicopters, low: a column comes in to meet them (Hellfires, rockets, door guns), or they
+                     hunt whatever flies near the base (enemy helicopters and bandits: Stinger, cruise missiles: gun).
+   Gunships (AC-130, MQ-9) don't fly passes: they circle over the fight (cbt_orbit) and fire at ground targets below.
    Weapons fire on the beat (AIRWAR.onBeat); radio lines are spoken when the pass comes on screen.        */
 function combatOn() { return AUD.armed && CFG.fire > 0; }
 const _nd = new V3(), _ro = new V3(), _rd = new V3(), _fs = new V3();
 // decoy flares: the glow is one flash sprite flying on its own; FLARES mirrors its motion for a thin smoke trail
 const FLARES = [], FLARE_DRAG = 0.9, FLARE_G = 5;
-const FLARE_STATES = new Set(['orbit', 'climb', 'depart', 'cbt_pass', 'cbt_rtb', 'mission_out', 'mission_back']);
+const FLARE_STATES = new Set(['orbit', 'climb', 'depart', 'go_around', 'cbt_pass', 'cbt_orbit', 'cbt_rtb', 'mission_out', 'mission_back']);
 const CBT = { cat: 'combat', prio: 2 }, CBT0 = { cat: 'combat', prio: 0 };
 const shortType = e => ENEMY_TYPES[e.type].name.split(' ')[0];
 
@@ -60,14 +62,15 @@ const AIRWAR = {
   },
   startJetPass() {
     const idle = this.idle(FixedWing); if (!idle.length) return;
-    const crew = this.crewFrom(idle);
-    const kind = !CFG.enemies ? 'sweep' : wpick([{ k: 'chase', w: 0.45 }, { k: 'chased', w: 0.3 }, { k: 'sweep', w: 0.25 }]).k;
+    const crew = this.crewFrom(idle), cas = crew[0].spec.cas || (crew[0].spec.key === 'f15' && Math.random() < 0.3);
+    if (cas && CFG.enemies) return this.startCasPass(crew);
+    const kind = !CFG.enemies || crew[0].spec.cas ? 'sweep' : wpick([{ k: 'chase', w: 0.45 }, { k: 'chased', w: 0.3 }, { k: 'sweep', w: 0.25 }]).k;
     const v = Math.min(...crew.map(a => a.spec.speed)) * 1.45, gap = kind === 'sweep' ? rand(3, 5) : rand(9, 12);
     const order = kind === 'chase' ? ['bandit', ...crew] : kind === 'chased' ? [crew[0], 'bandit', ...crew.slice(1)] : crew;
     const lead = order.length * gap + 4;
-    const p = { kind, heli: false, crew, bandit: null, boats: [], intro: false, P: this.screenPass(rand(10, 20), 30, lead) };
+    const p = { kind, heli: false, crew, bandit: null, foes: [], intro: false, P: this.screenPass(rand(10, 20), 30, lead) };
     order.forEach((m, i) => {
-      if (m === 'bandit') p.bandit = spawnDuelBandit(pickEnemyType(), p.P, lead - i * gap, v);
+      if (m === 'bandit') p.bandit = spawnDuelBandit(fighterDuelType(), p.P, lead - i * gap, v);
       else this.board(m, p, lead - i * gap, v, kind === 'sweep' && i ? rand(1.5, 2.5) * (Math.random() < 0.5 ? -1 : 1) : 0);
     });
     if (p.bandit) {
@@ -76,28 +79,60 @@ const AIRWAR = {
     }
     this.passes.push(p);
   },
+  /* ground vehicles that meet a pass around its middle: driving in from off-screen toward the base (or the ones already there) */
+  meetColumn(p, v, lead) {
+    const near = ENEMIES.filter(e => e.kind === 'armor' && enemyAlive(e));
+    const sM = rand(0.45, 0.65) * p.P.length, M = p.P.sample(sM).pos.setY(0), tMeet = (sM - lead) / v;
+    if (near.length && Math.random() < 0.6) { p.foes = near.slice(0, 4); return; }
+    const dir = new V3(-M.x, 0, -M.z); if (dir.lengthSq() < 1) dir.set(1, 0, 0); dir.normalize();
+    const sp = rand(2.8, 3.6), perp = new V3(-dir.z, 0, dir.x), n = randi(2, 3), sq = pick(ENEMY_NAMES.armor);
+    for (let i = 0; i < n; i++) {
+      const st = M.clone().addScaledVector(dir, -sp * tMeet).addScaledVector(perp, (i - (n - 1) / 2) * 3).addScaledVector(dir, -i * 3);
+      for (let k = 0; k < 12 && this.onScreen(st, 0.08); k++) st.addScaledVector(dir, -4);   // never pop up on screen
+      const stop = M.clone().addScaledVector(dir, 25).addScaledVector(perp, (i - (n - 1) / 2) * 3);
+      if (Math.hypot(stop.x, stop.z) < 70) stop.setLength(70);                                 // they stop outside the fence
+      const e = spawnArmor(st, dir, i ? pick(['bmp', 'btr', 't90']) : 't90', stop, sq, i); e.speed = sp; p.foes.push(e);
+    }
+    const b0 = p.foes[0].p, bh = Math.atan2(b0.z, b0.x);
+    sayOnce('armorPass', 25, () => { const [w, role] = hq(); RADIO.say(w, radioLine(AIRWAR_LINES.armorContact, { B: bearingWords(bh), D: compassWord(bh) }), { role, cat: 'combat', prio: 1 }); });
+  },
+  /* close air support: low and slow across the screen over a column — the A-10's gun, an F-15E's bombs */
+  startCasPass(crew) {
+    const v = Math.min(...crew.map(a => a.spec.speed)) * (crew[0].spec.cas ? 1.25 : 1.1), gap = rand(5, 7), lead = crew.length * gap + 4;
+    const p = { kind: 'cas', heli: false, crew, bandit: null, foes: [], intro: false, P: this.screenPass(rand(6, 9), 26, lead) };
+    crew.forEach((a, i) => { this.board(a, p, lead - i * gap, v, i ? rand(2, 3) * (Math.random() < 0.5 ? -1 : 1) : 0); a.bombs = a.spec.cas ? 0 : 1; });
+    this.meetColumn(p, v, lead);
+    this.passes.push(p);
+  },
   startHeliPass() {
     const idle = this.idle(Helicopter); if (!idle.length) return;
-    const crew = this.crewFrom(idle), kind = CFG.enemies && Math.random() < 0.65 ? 'boats' : 'cover';
+    const crew = this.crewFrom(idle), kind = CFG.enemies && Math.random() < 0.65 ? 'armor' : 'cover';
     const v = Math.min(...crew.map(a => a.spec.speed)) * 1.3, gap = rand(4, 6), lead = crew.length * gap + 4;
-    const p = { kind, heli: true, crew, bandit: null, boats: [], intro: false, P: this.screenPass(rand(4, 7), 15, lead) };
+    const p = { kind, heli: true, crew, bandit: null, foes: [], intro: false, P: this.screenPass(rand(4, 7), 15, lead) };
     crew.forEach((a, i) => this.board(a, p, lead - i * gap, v, i ? rand(1.5, 2.5) * (Math.random() < 0.5 ? -1 : 1) : 0));
-    if (kind === 'boats') {
-      // the boats come in from off-screen and meet the helicopters around the middle of the pass,
-      // heading past the fleet; their start allows for the current (the sea flows by at WAVE.flow)
-      const sM = rand(0.45, 0.65) * p.P.length, M = p.P.sample(sM).pos.setY(0), tMeet = (sM - lead) / v;
-      const aim = new V3(rand(-25, 25), 0, rand(-25, 25)), dir = aim.sub(M); if (dir.lengthSq() < 1) dir.set(1, 0, 0); dir.normalize();
-      const sp = rand(6, 8), wv = dir.clone().multiplyScalar(sp); wv.x -= WAVE.flow;
-      const perp = new V3(-dir.z, 0, dir.x), n = randi(1, 3);
-      for (let i = 0; i < n; i++) {
-        const st = M.clone().addScaledVector(wv, -tMeet).addScaledVector(perp, (i - (n - 1) / 2) * 2.5).addScaledVector(dir, -i * 1.5);
-        for (let k = 0; k < 12 && this.onScreen(st, 0.08); k++) st.addScaledVector(wv, -1);   // never pop up on screen
-        p.boats.push(spawnBoat(st, dir, sp));
-      }
-      const b0 = p.boats[0].p, bh = Math.atan2(b0.z, b0.x);
-      sayOnce('boats', 25, () => { const [w, role] = hq(); RADIO.say(w, radioLine(AIRWAR_LINES.boatContact, { B: bearingWords(bh), D: compassWord(bh) }), { role, cat: 'combat', prio: 1 }); });
+    if (kind === 'armor') this.meetColumn(p, v, lead);
+    else if (CFG.enemies && Math.random() < 0.45) {        // an enemy gunship crossing the other way: a helicopter duel
+      const s = p.P.sample(Math.min(p.P.length, lead + 30)), dir = s.dir.clone().setY(0).normalize();
+      p.foes.push(spawnHeli(s.pos.clone().addScaledVector(dir, 40).setY(rand(5, 7)), dir.clone().negate(), s.pos.clone().setY(6)));
     }
     this.passes.push(p);
+  },
+  /* gunships: a left-hand circle over the fight, partly on screen (a column if there is one, else the base's flank) */
+  toGunOrbit(a) {
+    const col = ENEMIES.find(e => e.kind === 'armor' && enemyAlive(e)), c = col ? col.p.clone().setY(0) : new V3(rand(-30, 30), 0, rand(-20, 30));
+    a.gun = { c, R: a.spec.key === 'mq9' ? 26 : 22, alt: a.orbit.alt, th: Math.atan2(a.mesh.position.z - c.z, a.mesh.position.x - c.x), cd: 0 };
+    a.introDone = false;
+    const g = a.gun, start = new V3(c.x + g.R * Math.cos(g.th), g.alt, c.z + g.R * Math.sin(g.th));
+    a.fly(new FlightPath().addDubins(a.mesh.position, headingOf(a.fwd), start, g.th - Math.PI / 2, a.spec.turnR), a.orbit.v, a.spec.speed);
+  },
+  gunOrbitStep(a, dt) {
+    const g = a.gun, v = a.spec.speed;
+    const col = nearestEnemy(g.c, ['armor'], 80); if (col) g.c.lerp(_fs.copy(col.p).setY(0), Math.min(1, dt * 0.15));   // the centre drifts toward a live column
+    g.th -= v / g.R * dt;                                  // a left-hand orbit (the guns are on the left)
+    a.mesh.position.set(g.c.x + g.R * Math.cos(g.th), g.alt, g.c.z + g.R * Math.sin(g.th));
+    a.v = v; a.orientFlight(_nd.set(Math.sin(g.th), 0, -Math.cos(g.th)), -a.bankFor(v, g.R) * 1.4, dt);
+    g.cd = Math.max(0, g.cd - dt);
+    if (!a.introDone && this.onScreen(a.mesh.position, -0.1)) { a.introDone = true; sayOnce('gunship' + a.callsign, 40, () => a.say(radioLine(AIRWAR_LINES.gunshipIn), CBT)); }
   },
 
   /* --- per frame --- */
@@ -128,7 +163,7 @@ const AIRWAR = {
       }
     }
     if (enemyAlive(b) && b.gunT > 0) this.enemyGuns(b, b.cbtTgt, dt);
-    for (const e of p.boats) if (enemyAlive(e) && e.gunT > 0) this.enemyGuns(e, e.gunAt, dt);
+    for (const e of p.foes) if (enemyAlive(e) && e.gunT > 0) this.enemyGuns(e, e.gunAt, dt);
     return live.length > 0 || enemyAlive(b);
   },
   introLines(p) {
@@ -141,17 +176,18 @@ const AIRWAR = {
         if (Math.random() < 0.5) enemySay(p.bandit.cs, ENEMY_LINES.chasing, null, { delay: 1.8 });
         break;
       case 'sweep': if (Math.random() < 0.35) a.say(radioLine(L.sweep), CBT0); break;
-      case 'boats': a.say(radioLine(L.boatsIntro), CBT); { const bt = p.boats.find(enemyAlive); if (bt && Math.random() < 0.5) enemySay(bt.cs, ENEMY_LINES.boats, null, { delay: 1.4 }); } break;
+      case 'armor': a.say(radioLine(L.armorIntro), CBT); { const bt = p.foes.find(enemyAlive); if (bt && Math.random() < 0.5) enemySay(bt.cs, ENEMY_LINES.armor, null, { delay: 1.4 }); } break;
+      case 'cas': a.say(radioLine(L.casIntro, { D: compassWord(Math.atan2(-a.fwd.z, -a.fwd.x)) }), CBT); break;
       case 'cover': if (Math.random() < 0.4) a.say(radioLine(L.cover), CBT0); break;
     }
   },
-  /* enemy gunfire (dogfight bandit at its quarry, boats at the helicopters): aimed a little off — it misses */
+  /* enemy gunfire (dogfight bandit at its quarry, armour / helicopters at ours): aimed a little off — it misses */
   enemyGuns(e, tgt, dt) {
     e.gunT -= dt; e.gunAcc = (e.gunAcc || 0) + dt;
     while (e.gunAcc > 1 / 30) {
       e.gunAcc -= 1 / 30;
       if (!tgt || !tgt.mesh.visible) continue;
-      const from = e.p.clone(); if (e.kind === 'bandit') from.addScaledVector(_rd.copy(e.v).normalize(), 1.2); else from.y += 0.2;
+      const from = e.p.clone(); if (e.kind === 'bandit') from.addScaledVector(_rd.copy(e.v).normalize(), 1.2); else from.y += 0.8;
       const to = tgt.mesh.position.clone().add(new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize().multiplyScalar(rand(1.2, 2.5)));
       const v = to.sub(from).normalize().multiplyScalar(80).add(e.v);
       FX.tracers.spawn(from, v, { life: 0.9, len: 1.6, w: 0.11, color: 0xff7050 });
@@ -174,7 +210,7 @@ const AIRWAR = {
       const f = FLARES[i];
       if ((f.life -= dt) <= 0) { FLARES.splice(i, 1); continue; }
       f.v.multiplyScalar(Math.max(0, 1 - FLARE_DRAG * dt)); f.v.y -= FLARE_G * dt; f.p.addScaledVector(f.v, dt);   // same motion as the sprite
-      if ((f.tt -= dt) <= 0) { f.tt += 0.3; FX.smoke.spawn(f.p, { s0: 0.4, s1: 1.5, life: 1.0, a0: 0.45, smoke: true, v: new V3(-WAVE.flow * 0.5, 0.2, 0), drag: 0.5 }); }
+      if ((f.tt -= dt) <= 0) { f.tt += 0.3; FX.smoke.spawn(f.p, { s0: 0.4, s1: 1.5, life: 1.0, a0: 0.45, smoke: true, v: new V3(WIND.x * 0.5, 0.2, WIND.z * 0.5), drag: 0.5 }); }
     }
   },
   /* flares on the snare: one aircraft at a time (at most one burst per 1.8 s, 5 s per aircraft), on screen only */
@@ -195,16 +231,17 @@ const AIRWAR = {
     let shots = 0;
     for (const p of this.passes) for (const a of p.crew) {
       if (a.pass !== p || a.state !== 'cbt_pass' || !this.onScreen(a.mesh.position, -0.05)) continue;
-      if (p.heli) this.heliWeapons(a, band, f); else shots += this.jetWeapons(a, p, band, f, shots);
+      if (p.heli) this.heliWeapons(a, band, f); else if (p.kind === 'cas') this.casWeapons(a, band, f); else shots += this.jetWeapons(a, p, band, f, shots);
     }
+    for (const a of AIRCRAFT) if (a.state === 'cbt_orbit' && this.onScreen(a.mesh.position, 0.1)) this.gunshipWeapons(a, band, f);
     if (band !== 'mid') return;
     for (const p of this.passes) {                       // return fire
       const b = p.bandit;
       if (enemyAlive(b) && b.cbtTgt && b.cbtTgt.pass === p && this.onScreen(b.p, -0.05) && Math.random() < 0.6 * f) b.gunT = 0.35;
-      for (const e of p.boats) {
+      for (const e of p.foes) {
         if (!enemyAlive(e) || !this.onScreen(e.p, -0.05) || Math.random() > 0.5 * f) continue;
         const h = p.crew.find(a => a.pass === p && a.mesh.position.distanceTo(e.p) < 40); if (!h) continue;
-        e.gunT = 0.4; e.gunAt = h; sayOnce('boatFire', 10, () => h.say(radioLine(AIRWAR_LINES.boatFire), CBT0));
+        e.gunT = 0.4; e.gunAt = h; sayOnce('armorFire', 10, () => h.say(radioLine(AIRWAR_LINES.armorFire), CBT0));
       }
     }
   },
@@ -232,16 +269,43 @@ const AIRWAR = {
     return 0;
   },
   heliWeapons(a, band, f) {
-    const pos = a.mesh.position, L = AIRWAR_LINES;
-    const boat = nearestEnemy(pos, ['boat'], 45), vamp = nearestEnemy(pos, ['vampire'], 30);
+    const pos = a.mesh.position, L = AIRWAR_LINES, S = a.spec;
+    const tank = nearestEnemy(pos, ['armor'], 45), cm = nearestEnemy(pos, ['cruise'], 30), heli = nearestEnemy(pos, ['heli'], 50);
     if (band === 'low') {
-      const bandit = boat ? null : nearestEnemy(pos, ['bandit'], 60);
-      if (boat && Math.random() < 0.55 * f) { a.fireMissileAt(boat, 40, 0.8); sayOnce('hellfire', 6, () => a.say(radioLine(L.hellfire), CBT0)); }
-      else if (bandit && this.onScreen(bandit.p, 0) && Math.random() < 0.3 * f) { a.fireMissileAt(bandit, 55, 0.55); sayOnce('sidewinder', 6, () => a.say(radioLine(L.sidewinder), CBT0)); }
+      const air = heli || (tank ? null : nearestEnemy(pos, ['bandit'], 60));
+      if (tank && S.key === 'ah64' && Math.random() < 0.55 * f) { a.fireMissileAt(tank, 40, 0.8); sayOnce('hellfire', 6, () => a.say(radioLine(L.hellfire), CBT0)); }
+      else if (air && this.onScreen(air.p, 0) && Math.random() < 0.35 * f) { a.fireMissileAt(air, 55, 0.6); sayOnce('stinger', 6, () => a.say(radioLine(L.stinger), CBT0)); }
+      else if (tank && Math.random() < 0.5 * f) { a.fireRockets(tank); sayOnce('rockets', 5, () => a.say(radioLine(L.rockets), CBT0)); }
     } else if (band === 'mid') {
-      if (boat && boat.p.distanceTo(pos) < 35 && Math.random() < 0.6 * f) { a.fireRockets(boat); sayOnce('rockets', 5, () => a.say(radioLine(L.rockets), CBT0)); }
-      else if (vamp && !(a.gunT > 0) && Math.random() < 0.7 * f) { a.startGuns(vamp, 0.45, 0.4); sayOnce('vampGun', 6, () => a.say(radioLine(L.vampGun), CBT0)); }
+      const tg = tank && tank.p.distanceTo(pos) < 35 ? tank : heli && heli.p.distanceTo(pos) < 30 ? heli : null;
+      if (tg && S.doorGuns && !(a.gunT > 0) && Math.random() < 0.6 * f) { a.startGuns(tg, 0.6, 0.3, { side: (Math.random() < 0.5 ? -1 : 1) * 0.15, speed: 55, rate: 30 }); sayOnce('doorGuns', 6, () => a.say(radioLine(L.doorGuns), CBT0)); }
+      else if (tg && Math.random() < 0.6 * f) { a.fireRockets(tg); sayOnce('rockets', 5, () => a.say(radioLine(L.rockets), CBT0)); }
+      else if (cm && !(a.gunT > 0) && Math.random() < 0.7 * f) { a.startGuns(cm, 0.45, 0.4); sayOnce('missileGun', 6, () => a.say(radioLine(L.missileGun), CBT0)); }
     }
+  },
+  /* close air support: the A-10's gun on the beat (long bursts at the column ahead), an F-15E drops one stick */
+  casWeapons(a, band, f) {
+    const L = AIRWAR_LINES, tg = ENEMIES.filter(e => e.kind === 'armor' && enemyAlive(e) && this.ahead(a, e, 6, 55)).sort((x, y) => x.p.distanceTo(a.mesh.position) - y.p.distanceTo(a.mesh.position))[0];
+    if (!tg) return;
+    if (a.spec.cas) {
+      if (band === 'mid' && !(a.gunT > 0) && Math.random() < 0.8 * f) { a.startGuns(tg, 0.7, 0.75, { speed: 70, rate: 60, color: 0xffe0a0, w: 0.14, splash: 0.9, range: 60, dmg: 2 }); sayOnce('brrt', 5, () => a.say(radioLine(L.brrt), CBT0)); }
+      else if (band === 'low' && Math.random() < 0.35 * f) { a.fireMissile(tg); sayOnce('maverick', 6, () => a.say(radioLine(L.fox), CBT0)); }
+    } else if (a.bombs > 0 && band === 'low' && this.ahead(a, tg, 8, 26)) { a.bombs--; a.dropBombs(tg, 4); sayOnce('bombs', 6, () => a.say(radioLine(L.bombs), CBT0)); }
+  },
+  /* gunships over the fight: AC-130 105 / 40 / 25 mm out of the left side, MQ-9 Hellfires */
+  gunshipWeapons(a, band, f) {
+    const L = AIRWAR_LINES, g = a.gun; if (!g || g.cd > 0) return;
+    const tg = nearestEnemy(a.mesh.position, ['armor', 'heli'], 50); if (!tg) return;
+    if (a.spec.key === 'mq9') {
+      if (band === 'low' && Math.random() < 0.3 * f) { g.cd = 4; a.fireMissile(tg); sayOnce('drone' + a.callsign, 8, () => a.say(radioLine(L.droneStrike), CBT0)); }
+      return;
+    }
+    const side = { side: 0.45, speed: 60, range: 60, splash: 1.0 };
+    if (band === 'low' && Math.random() < 0.5 * f) {          // 105 mm: one heavy round
+      g.cd = 1.2; a.startGuns(tg, 0.05, 0.6, Object.assign({}, side, { rate: 20, w: 0.3, len: 1.4, color: 0xffd080, splash: 2.2, dmg: 3 }));
+      sayOnce('gunfire' + a.callsign, 7, () => a.say(radioLine(L.gunshipFire), CBT0));
+    } else if (band === 'mid' && Math.random() < 0.6 * f) a.startGuns(tg, 0.5, 0.45, Object.assign({}, side, { rate: 8, w: 0.2, color: 0xffc070, splash: 1.2 }));    // 40 mm
+    else if (band === 'high' && Math.random() < 0.4 * f) a.startGuns(tg, 0.6, 0.3, Object.assign({}, side, { rate: 50, w: 0.1, color: 0xffb060, splash: 0.4 }));   // 25 mm
   },
 
   /* --- hooks from the aircraft state machine --- */

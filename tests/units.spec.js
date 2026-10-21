@@ -98,7 +98,7 @@ test('mission texts: every order / done pair fills all its placeholders', async 
     })(MISSIONS, []);
     const out = [];
     for (const k of keys) for (let i = 0; i < 30; i++) {
-      const { order, done } = makeMission(k, { V: 'a container feeder', T: 'Su-33 Flanker' });
+      const { order, done } = makeMission(k, { T: 'Su-35 Flanker' });
       for (const s of [order, done]) if (/\{\w+\}/.test(s)) out.push(`${k}: ${s}`);
     }
     return { keys, out: [...new Set(out)] };
@@ -109,37 +109,65 @@ test('mission texts: every order / done pair fills all its placeholders', async 
 
 test('callsigns: flights of 4 / 2 / 1, the pool wraps with a suffix, csNum and flightOf', async ({ wp }) => {
   const r = await wp.run(() => ({
-    fa18: callsignsFor('fa18', 5), e2d: callsignsFor('e2d', 2), mh60: callsignsFor('mh60', 3),
-    wrap: callsignsFor('fa18', CALLSIGNS.fa18.length * 4 + 1).pop(), pool: CALLSIGNS.fa18[0],
-    num: [csNum({ callsign: 'JOKER 3' }), csNum({ callsign: 'SKYEYE' })], flight: [flightOf({ callsign: 'JOKER 3' }), flightOf({ callsign: 'SEA GOBLIN 2' })]
+    f16: callsignsFor('f16', 5), e3: callsignsFor('e3', 2), uh60: callsignsFor('uh60', 3),
+    wrap: callsignsFor('f16', CALLSIGNS.f16.length * 4 + 1).pop(), pool: CALLSIGNS.f16[0],
+    num: [csNum({ callsign: 'MAGE 3' }), csNum({ callsign: 'SKYEYE' })], flight: [flightOf({ callsign: 'MAGE 3' }), flightOf({ callsign: 'GHOST EYE 2' })]
   }));
   const J = r.pool;
-  expect(r.fa18).toEqual([`${J} 1`, `${J} 2`, `${J} 3`, `${J} 4`, expect.stringMatching(/ 1$/)]);
-  expect(r.fa18[4].startsWith(J)).toBe(false);
-  expect(r.e2d.every(c => !/\d$/.test(c))).toBe(true);
-  expect(r.mh60[0].replace(/ \d$/, '')).toBe(r.mh60[1].replace(/ \d$/, ''));
-  expect(r.mh60[2].replace(/ \d$/, '')).not.toBe(r.mh60[0].replace(/ \d$/, ''));
+  expect(r.f16).toEqual([`${J} 1`, `${J} 2`, `${J} 3`, `${J} 4`, expect.stringMatching(/ 1$/)]);
+  expect(r.f16[4].startsWith(J)).toBe(false);
+  expect(r.e3.every(c => !/\d$/.test(c))).toBe(true);
+  expect(r.uh60[0].replace(/ \d$/, '')).toBe(r.uh60[1].replace(/ \d$/, ''));
+  expect(r.uh60[2].replace(/ \d$/, '')).not.toBe(r.uh60[0].replace(/ \d$/, ''));
   expect(r.wrap).toBe(`${J}-2 1`);
   expect(r.num).toEqual([3, 0]);
-  expect(r.flight).toEqual(['JOKER', 'SEA GOBLIN']);
+  expect(r.flight).toEqual(['MAGE', 'GHOST EYE']);
 });
 
 test('pickMission respects allow-lists and eligibility', async ({ wp }) => {
   const r = await wp.run(() => {
     const picks = {};
     for (const key of Object.keys(AIRCRAFT_TYPES)) {
-      const a = AIRCRAFT.find(x => x.spec.key === key && x.host === CARRIER); if (!a) continue;
+      const a = AIRCRAFT.find(x => x.spec.key === key); if (!a) continue;
       const s = new Set(); for (let i = 0; i < 300; i++) { const M = pickMission(a); s.add(M ? M.key : null); }
       picks[key] = [...s].sort();
     }
     return { picks, types: Object.keys(MISSION_TYPES).sort() };
   });
-  expect(r.types).toEqual(expect.arrayContaining(['patrol', 'cod', 'sling', 'ship', 'pilot']));
-  expect(r.picks.cmv22).toEqual(['cod']);
-  for (const k of ['fa18', 'f14', 'f35', 'e2d', 'ah1']) for (const bad of ['cod', 'sling', 'ship', 'pilot']) expect(r.picks[k], `${k} never gets ${bad}`).not.toContain(bad);
-  expect(r.picks.mh60).toEqual(expect.arrayContaining(['patrol', 'ship', 'pilot', 'sling']));
-  expect(r.picks.ch53).toContain('sling');
-  for (const bad of ['ship', 'pilot', 'cod']) expect(r.picks.ch53).not.toContain(bad);
+  expect(r.types).toEqual(['airlift', 'patrol']);
+  expect(r.picks.c130).toEqual(['airlift']);
+  expect(r.picks.c17).toEqual(['airlift']);
+  expect(r.picks.kc46).toEqual([null]);
+  for (const k of ['f15', 'f16', 'f22', 'f35', 'a10', 'e3', 'ac130', 'mq9', 'uh60', 'ah64', 'uh1']) expect(r.picks[k], k).toEqual(['patrol']);
+});
+
+test('airfield: every home is reachable — taxi routes start at the home and end at the holding point / back home', async ({ wp }) => {
+  const r = await wp.run(() => {
+    const out = [], near = (p, x, z) => Math.hypot(p[0] - x, p[1] - z) < 0.01;
+    for (const s of [...PARKING.stands, ...PARKING.shelters, ...PARKING.hangars, ...PARKING.remote]) {
+      const pb = AIRFIELD.pushback(s), th = AIRFIELD.toHold(s);
+      if (!near(pb[0], s.x, s.z)) out.push(`pushback from ${s.x},${s.z} starts elsewhere`);
+      if (!near(th[0], ...pb[pb.length - 1])) out.push(`taxi out from ${s.x},${s.z} doesn't continue the pushback`);
+      if (!near(th[th.length - 1], HOLD.x, HOLD.z)) out.push(`taxi out from ${s.x},${s.z} doesn't end at the hold`);
+      for (const x0 of [-40, -10, 20]) {
+        const lk = AIRFIELD.exitFor(s, x0), hr = AIRFIELD.homeRoute(s, x0, lk);
+        if (!BASE_LAYOUT.links.includes(lk) || lk < x0) out.push(`exit ${lk} for a stop at ${x0}`);
+        if (!near(hr[hr.length - 1], s.x, s.z)) out.push(`route home to ${s.x},${s.z} ends elsewhere`);
+      }
+    }
+    return out;
+  });
+  expect(r).toEqual([]);
+});
+
+test('seasons: the PC date picks the season unless one is set', async ({ wp }) => {
+  const r = await wp.run(() => {
+    const out = {}, real = getNow;
+    for (const [m, want] of [[0, 'winter'], [3, 'spring'], [6, 'summer'], [9, 'autumn'], [11, 'winter']]) { window.getNow = () => new Date(Date.UTC(2026, m, 15, 12)); CFG.season = 'auto'; out[m] = seasonNow(); }
+    window.getNow = real; CFG.season = 'summer'; out.fixed = seasonNow(); CFG.season = 'auto';
+    return out;
+  });
+  expect(r).toEqual({ 0: 'winter', 3: 'spring', 6: 'summer', 9: 'autumn', 11: 'winter', fixed: 'summer' });
 });
 
 test('sun position and sky palette: day above the horizon, night below', async ({ wp }) => {
@@ -156,39 +184,24 @@ test('sun position and sky palette: day above the horizon, night below', async (
   expect(r.si[0]).toBeGreaterThan(r.si[1]);
 });
 
-test('waves: the generated GLSL matches the JS wave function', async ({ wp }) => {
-  const r = await wp.run(() => {
-    WAVE.amp = 1.3; for (let i = 0; i < 37; i++) waveAdvance(0.1);
-    const terms = [...WAVE_GLSL.matchAll(/(-?[\d.]+)\*sin\((-?[\d.]+)\*p\.x\+(-?[\d.]+)\*p\.y\+uPh\[(\d)\]\)/g)].map(m => m.slice(1).map(Number));
-    const glsl = (x, z) => WAVE.amp * terms.reduce((s, [a, kx, kz, i]) => s + a * Math.sin(kx * x + kz * z + WAVE.phase[i]), 0);
-    let err = 0; for (let k = 0; k < 200; k++) { const x = rand(-150, 150), z = rand(-150, 150); err = Math.max(err, Math.abs(glsl(x, z) - waveH(x, z))); }
-    return { n: terms.length, err };
-  });
-  expect(r.n).toBe(4);
-  expect(r.err).toBeLessThan(1e-9);
-});
-
 test('models: every builder runs, mergeStatic keeps dynamic nodes, disposeTree spares shared materials', async ({ wp }) => {
   const r = await wp.run(() => {
     const out = { built: [], fail: [] };
-    const air = { buildFA18, buildF14, buildF35, buildE2D, buildMQ25, buildMH60, buildCH53, buildAH1, buildCMV22, buildSu25, buildSu33, buildSu47, buildSu57 };
+    const air = { buildF15, buildF16, buildF22, buildF35, buildA10, buildE3, buildKC46, c130: () => buildC130('c130'), kc130: () => buildC130('kc130'), ac130: () => buildC130('ac130'), buildC17, buildMQ9,
+      buildUH60, buildAH64, buildUH1, buildSu25, buildSu35, buildSu47, buildSu57, buildSu34, buildTu22, buildKa52, buildMi24, buildT90, buildBMP, buildBTR, buildCruise, buildBallistic };
     for (const [n, f] of Object.entries(air)) {
       try {
         const m = f(), grp = m.group || m; if (!grp.isObject3D) throw new Error('no group');   // enemy builders return the group itself
         if (m.setFold) { m.setFold(1); m.setFold(0); }
-        if (m.tick) m.tick(0.05, { rotor: 1, fold: 0, gear: 1, glow: 0, v: 10 });
+        if (m.tick) m.tick(0.05, { rotor: 1, fold: 0, gear: 1, glow: 0, v: 10, hoseOut: 1, engineOn: true, airborne: true });
         let meshes = 0; grp.traverse(o => { if (o.isMesh) meshes++; });
         out.built.push([n, meshes]); disposeTree(grp);
       } catch (e) { out.fail.push(n + ': ' + e.message); }
     }
-    for (const [n, f] of Object.entries({ buildFeeder, buildTrawler, buildCorvette, buildDestroyerTemplate, buildBoat, buildVampire, wreck: () => buildWreck(buildF14) })) {
-      try { const g = f(); const grp = g.group || g; if (!grp.isObject3D) throw new Error('no group'); out.built.push([n, 1]); disposeTree(grp); }
-      catch (e) { out.fail.push(n + ': ' + e.message); }
-    }
-    // the live carrier: radars / lifts / CIWS mounts are still separate, movable nodes inside its group
-    const inTree = o => { let p = o; while (p && p !== CARRIER.group) p = p.parent; return !!p; };
-    out.dyn = [...CARRIER.radars, ...CARRIER.lifts.map(L => L.grp), ...CARRIER.ciws.map(c => c.yawG)].every(inTree);
-    let carrierMeshes = 0; CARRIER.group.traverse(o => { if (o.isMesh) carrierMeshes++; }); out.carrierMeshes = carrierMeshes;
+    // the live base: the radar, the mounts and the doors are still separate, movable nodes inside its group
+    const inTree = o => { let p = o; while (p && p !== BASE.group) p = p.parent; return !!p; };
+    out.dyn = [...BASE.radars, ...ALL_CIWS.map(c => c.yawG), ...ALL_TANKS.map(m => m.barrelG), ...PARKING.shelters.flatMap(s => s.leaves.map(l => l.g)), ...PARKING.hangars.flatMap(s => s.panels.map(q => q.g))].every(inTree);
+    let baseMeshes = 0; BASE.group.traverse(o => { if (o.isMesh) baseMeshes++; }); out.baseMeshes = baseMeshes;
     // mergeStatic on a hand-made group
     const root = new THREE.Group(), dyn = new THREE.Group(); root.add(dyn);
     for (let i = 0; i < 3; i++) box(root, 1, 1, 1, 0x123456, i * 2, 0, 0);
@@ -203,9 +216,9 @@ test('models: every builder runs, mergeStatic keeps dynamic nodes, disposeTree s
     return out;
   });
   expect(r.fail).toEqual([]);
-  expect(r.built.length).toBe(20);
+  expect(r.built.length).toBe(28);
   expect(r.dyn).toBe(true);
-  expect(r.carrierMeshes).toBeLessThan(400);
+  expect(r.baseMeshes).toBeLessThan(400);
   expect(r.merge).toEqual({ rootMeshes: 1, dynKept: true, dynMeshes: 1 });
   expect(r.disposed).toEqual(['geo', 'own']);
 });

@@ -26,16 +26,16 @@ test.describe('aircraft list that does not fit (1280x720)', () => {
     expect((await st()).info).toBe(`${pages}/${pages}`);
     // a chip jumps to the page of its type and is highlighted
     const chips = await page.locator('#pgTypes .chip').allTextContents();
-    expect(chips).toEqual(expect.arrayContaining(['F/A-18', 'MH-60', 'CMV-22B']));
-    await page.locator('#pgTypes .chip', { hasText: 'CMV-22B' }).click();
+    expect(chips).toEqual(expect.arrayContaining(['F-15E', 'UH-60', 'AH-64D']));
+    await page.locator('#pgTypes .chip', { hasText: 'AH-64D' }).click();
     const c = await st();
-    expect(c.on).toContain('CMV-22B');
-    expect(await wp.run(() => PAGER.rows.some(r => r.style.display !== 'none' && r.querySelector('.tp').textContent === 'CMV-22B'))).toBe(true);
+    expect(c.on).toContain('AH-64D');
+    expect(await wp.run(() => PAGER.rows.some(r => r.style.display !== 'none' && r.querySelector('.tp').textContent === 'AH-64D'))).toBe(true);
   });
 });
 
-test.describe('aircraft list that fits (1280x1080)', () => {
-  test.use({ viewport: { width: 1280, height: 1080 } });
+test.describe('aircraft list that fits (1280x2100)', () => {
+  test.use({ viewport: { width: 1280, height: 2100 } });
   test('shows every row and no pager', async ({ wp }) => {
     await wp.boot();
     await wp.sim(1);
@@ -57,13 +57,13 @@ test('collapse, per-row LAUNCH / RECOVER buttons and the counters', async ({ wp,
   const btn = page.locator('#list .row', { hasText: cs }).locator('button.act');
   expect(await btn.textContent()).toBe('LAUNCH');
   await btn.click();
-  const up = await wp.until(new Function(`return AIRCRAFT.find(a => a.callsign === ${JSON.stringify(cs)}).state === 'orbit'`), 600);
+  const up = await wp.until(new Function(`return AIRCRAFT.find(a => a.callsign === ${JSON.stringify(cs)}).state === 'orbit'`), 900);
   expect(up.done).toBe(true);
   await wp.sim(0.5);
   expect(await btn.textContent()).toBe('RECOVER');
   expect(await page.textContent('#count')).toMatch(/^1\/\d+$/);
   await btn.click();
-  const down = await wp.until(new Function(`return /parked|hangar/.test(AIRCRAFT.find(a => a.callsign === ${JSON.stringify(cs)}).state)`), 600);
+  const down = await wp.until(new Function(`return AIRCRAFT.find(a => a.callsign === ${JSON.stringify(cs)}).state === 'parked'`), 900);
   expect(down.done).toBe(true);
 });
 
@@ -85,9 +85,12 @@ test('panel position, size and visibility follow the properties', async ({ wp })
     const p = document.getElementById('panel'), out = {};
     __t.props({ panelposition: 'tl' }); out.tl = p.className;
     __t.props({ panelscale: 150 }); out.scale = p.style.getPropertyValue('--scale');
+    __t.props({ basename: 'tyler island' }); out.title = document.querySelector('#panel .title').textContent; out.tower = RADIO_NAMES.tower;
     __t.props({ showpanel: false }); out.hidden = getComputedStyle(p).display === 'none' || p.hidden || p.style.display === 'none';
     return out;
   });
+  expect(r.title).toBe('◆ TYLER ISLAND · BASE OPS');
+  expect(r.tower).toBe('TYLER ISLAND TOWER');
   expect(r.tl).toContain('pos-tl');
   expect(parseFloat(r.scale)).toBeCloseTo(1.5, 5);
   expect(r.hidden).toBe(true);

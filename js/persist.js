@@ -4,14 +4,14 @@
    calls PERSIST.restore(): aircraft that were up go straight into an orbit, mission flights are put back out of
    sight already away (Mission.resume). localStorage (WE keeps it per wallpaper); off with CFG.saveState.
    A new airborne aircraft state must be added to AIR_STATES (or start with cbt_) to be remembered. */
-const AIR_STATES = new Set(['orbit', 'climb', 'depart', 'approach', 'final', 'ret', 'tank_out', 'tank_wait', 'tank_pass', 'tank_back']);
+const AIR_STATES = new Set(['orbit', 'climb', 'depart', 'approach', 'final', 'go_around', 'ret', 'tank_out', 'tank_wait', 'tank_pass', 'tank_back']);
 const PERSIST = {
   KEY: 'fab.airwing.v1', timer: 10, announced: false, stressBack: false, last: null,   // last: the JSON last written
   state(a) { return a.mission ? 'mission' : AIR_STATES.has(a.state) || a.inCombat ? 'air' : null; },
   save() {
     if (!CFG.saveState || !ready) return;
     const air = [];
-    for (const a of AIRCRAFT) { const s = this.state(a); if (s && !a.retiring) air.push({ key: a.spec.key, cs: a.callsign, host: SHIPS.indexOf(a.host), mission: s === 'mission' }); }
+    for (const a of AIRCRAFT) { const s = this.state(a); if (s && !a.retiring) air.push({ key: a.spec.key, cs: a.callsign, mission: s === 'mission' }); }
     // stress in 0.05 steps: a change is written about every 10-30 s while it builds or eases, then not at all
     const json = JSON.stringify({ v: 1, air, stress: Math.round(STRESS.level * 20) / 20 }); if (json === this.last) return;   // only when something changed
     try { localStorage.setItem(this.KEY, json); this.last = json; } catch (e) {}
@@ -25,18 +25,18 @@ const PERSIST = {
   restore() {
     const d = CFG.saveState && this.load(); if (!d) return false;
     if (!this.stressBack && typeof d.stress === 'number') { this.stressBack = true; STRESS.level = clamp(d.stress, 0, 1); }   // once per page load
-    const find = e => AIRCRAFT.find(a => a.spec.key === e.key && a.callsign === e.cs && SHIPS.indexOf(a.host) === e.host);
+    const find = e => AIRCRAFT.find(a => a.spec.key === e.key && a.callsign === e.cs);
     const air = [], away = new Map();
     for (const e of d.air) {
       const a = find(e); if (!a) continue;                   // counts changed since: no such aircraft any more
-      if (e.mission) { const f = flightOf(a) + '|' + e.host; (away.get(f) || away.set(f, []).get(f)).push(a); }
+      if (e.mission) { const f = flightOf(a); (away.get(f) || away.set(f, []).get(f)).push(a); }
       else air.push(a);
     }
     for (const a of air) this.toOrbit(a);
     for (const flight of away.values()) {
       flight.sort((a, b) => csNum(a) - csNum(b));
       const lead = flight[0], T0 = lead.spec.missions ? MISSION_TYPES[lead.spec.missions[0]] || Mission : Mission;
-      const size = AIRCRAFT.filter(a => flightOf(a) === flightOf(lead) && a.host === lead.host).length;
+      const size = AIRCRAFT.filter(a => flightOf(a) === flightOf(lead)).length;
       for (const a of flight) this.leaveDeck(a);
       new T0(flight, size).resume();
     }
@@ -50,10 +50,9 @@ const PERSIST = {
     }
     return true;
   },
-  /* off the deck / out of the hangar: free what it held there and open the folds */
+  /* off the ground (its home stays its own while it flies) */
   leaveDeck(a) {
-    if (a instanceof FixedWing && a.spot) { if (a.spot.occ === a) a.spot.occ = null; a.spot = null; }   // jets pick a spot on landing
-    a.mesh.visible = true; a.fold = 0; a.model.setFold(0); a.t = 0;
+    a.mesh.visible = true; a.t = 0;
     if (a instanceof Helicopter) { a.rotor = 1; a.searchlights[0].enabled = 1; }
   },
   toOrbit(a) {

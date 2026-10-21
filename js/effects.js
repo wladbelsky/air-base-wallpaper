@@ -1,5 +1,5 @@
 'use strict';
-/* ===== Effects: tracers, sprites (flashes/smoke), splashes, foam, flash lights ===== */
+/* ===== Effects: tracers, sprites (flashes/smoke), scorch marks, flash lights ===== */
 
 class Tracers {
   constructor(scene, n) {
@@ -33,7 +33,7 @@ class Tracers {
       const it = this.items[i]; if (!it.on) continue;
       changed = true;
       it.v.y -= it.grav * dt; it.p.addScaledVector(it.v, dt); it.life -= dt;
-      if (it.splash && it.p.y < waveH(it.p.x, it.p.z)) { if (this.onSplash) this.onSplash(it.p, it.splash); it.life = 0; }
+      if (it.splash && it.p.y < groundH(it.p.x, it.p.z)) { if (this.onSplash) this.onSplash(it.p, it.splash); it.life = 0; }
       if (it.life <= 0) { it.on = false; this._m.makeScale(0, 0, 0); this.mesh.setMatrixAt(i, this._m); continue; }
       active++;
       this._d.copy(it.v).normalize(); this._q.setFromUnitVectors(this._x, this._d);
@@ -123,69 +123,30 @@ class SpriteFX {
   }
 }
 
-class Splashes {
+/* scorch marks where shells and bombs hit the ground: one instanced mesh, a ring buffer; old marks shrink away */
+class Scorch {
   constructor(scene, n) {
-    this.items = [];
-    const geo = new THREE.ConeGeometry(0.55, 1, 7, 1, true); geo.translate(0, 0.5, 0);
-    const rg = new THREE.RingGeometry(0.6, 1.0, 14); rg.rotateX(-Math.PI / 2);
-    for (let i = 0; i < n; i++) {
-      const m = new THREE.MeshPhongMaterial({ color: 0xf2f6f8, transparent: true, opacity: 0, flatShading: true, depthWrite: false });
-      const cone = new THREE.Mesh(geo, m); cone.visible = false; scene.add(cone);
-      const rm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
-      const ring = new THREE.Mesh(rg, rm); ring.visible = false; scene.add(ring);
-      this.items.push({ cone, ring, on: false, t: 0, big: 1, x: 0, z: 0 });
+    const geo = new THREE.CircleGeometry(1, 12); geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x1c1814, transparent: true, opacity: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    this.mesh = new THREE.InstancedMesh(geo, mat, n); this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false; this.mesh.renderOrder = 1; this.mesh.count = n;
+    this.items = []; const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let i = 0; i < n; i++) { this.mesh.setMatrixAt(i, zero); this.items.push({ on: false, p: new V3(), r: 1, t: 0, max: 1, rot: 0 }); }
+    this.next = 0; this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new V3(); this._y = new V3(0, 1, 0);
+    scene.add(this.mesh);
+  }
+  spawn(p, r, life) { const it = this.items[this.next]; this.next = (this.next + 1) % this.items.length; it.on = true; it.p.set(p.x, groundH(p.x, p.z) + 0.05, p.z); it.r = r; it.t = it.max = life || 45; it.rot = rand(0, TAU); }
+  update(dt) {
+    let changed = false;
+    for (let i = 0; i < this.items.length; i++) {
+      const it = this.items[i]; if (!it.on) continue;
+      it.t -= dt; changed = true;
+      const k = it.t <= 0 ? 0 : Math.min(1, it.t / (it.max * 0.25));
+      if (it.t <= 0) it.on = false;
+      this._q.setFromAxisAngle(this._y, it.rot); this._s.set(it.r * k, 1, it.r * k * 0.8);
+      this.mesh.setMatrixAt(i, this._m.compose(it.p, this._q, this._s));
     }
-    this.next = 0;
-  }
-  spawn(p, big) {
-    const it = this.items[this.next]; this.next = (this.next + 1) % this.items.length;
-    it.on = true; it.t = 0; it.big = big; it.x = p.x; it.z = p.z; it.cone.visible = it.ring.visible = true;
-  }
-  update(dt, flowSpeed, tint) {
-    for (const it of this.items) {
-      if (!it.on) continue;
-      it.t += dt; it.x -= flowSpeed * dt;
-      const T = 1.8;
-      if (it.t > T) { it.on = false; it.cone.visible = it.ring.visible = false; continue; }
-      const k = it.t / T, y = waveH(it.x, it.z);
-      const h = it.big * 3.2 * Math.sin(Math.min(1, k * 1.6) * Math.PI) + 0.01;
-      it.cone.position.set(it.x, y - 0.2, it.z); it.cone.scale.set(it.big * (0.6 + k), h, it.big * (0.6 + k));
-      it.cone.material.opacity = 0.85 * (1 - k); it.cone.material.color.copy(tint);
-      const r = it.big * (0.5 + k * 3.5);
-      it.ring.position.set(it.x, y + 0.05, it.z); it.ring.scale.set(r, 1, r); it.ring.material.opacity = 0.5 * (1 - k);
-      it.ring.material.color.copy(tint);
-    }
-  }
-}
-
-class Foam {
-  constructor(scene, n) {
-    this.n = n; this.pos = new Float32Array(n * 3); this.col = new Float32Array(n * 3);
-    this.v = new Float32Array(n * 2); this.life = new Float32Array(n); this.max = new Float32Array(n).fill(1);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
-    g.setAttribute('color', new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage));
-    this.mat = new THREE.PointsMaterial({ size: 10, map: TEX.soft, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false, fog: false });
-    this.pts = new THREE.Points(g, this.mat); this.pts.frustumCulled = false; this.pts.renderOrder = 2; scene.add(this.pts);
-    this.geo = g; this.next = 0; this.bright = 0.5;
-  }
-  emit(x, z, vx, vz, life) {
-    const i = this.next; this.next = (this.next + 1) % this.n;
-    this.pos[i * 3] = x; this.pos[i * 3 + 2] = z; this.v[i * 2] = vx; this.v[i * 2 + 1] = vz; this.life[i] = this.max[i] = life;
-  }
-  update(dt, flow) {
-    for (let i = 0; i < this.n; i++) {
-      if (this.life[i] <= 0) { this.col[i * 3] = this.col[i * 3 + 1] = this.col[i * 3 + 2] = 0; continue; }
-      this.life[i] -= dt;
-      const damp = Math.max(0, 1 - dt * 0.35); this.v[i * 2] *= damp; this.v[i * 2 + 1] *= damp;
-      const x = this.pos[i * 3] += (this.v[i * 2] - flow) * dt;
-      const z = this.pos[i * 3 + 2] += this.v[i * 2 + 1] * dt;
-      this.pos[i * 3 + 1] = waveH(x, z) + 0.12;
-      const t = this.life[i] / this.max[i];
-      const a = this.bright * Math.min(1, t * 1.4) * Math.min(1, (1 - t) * 8 + 0.3);
-      this.col[i * 3] = a; this.col[i * 3 + 1] = a; this.col[i * 3 + 2] = a;
-    }
-    this.geo.attributes.position.needsUpdate = true; this.geo.attributes.color.needsUpdate = true;
+    if (changed) this.mesh.instanceMatrix.needsUpdate = true;
   }
 }
 

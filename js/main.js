@@ -1,16 +1,17 @@
 'use strict';
-/* ===== Scene, audio, gunfire, flight-deck panel, Wallpaper Engine properties ===== */
-let scene, camera, renderer, sunLight, hemi, water, waterUniforms, CARRIER;
-let SHIPS = [], AIRCRAFT = [], FLYBYS = [], ALL_CIWS = [], ALL_GUNS = [];
+/* ===== Scene, audio, base weapons, control panel, Wallpaper Engine properties ===== */
+let scene, camera, renderer, sunLight, hemi, BASE;
+let AIRCRAFT = [], FLYBYS = [], ALL_CIWS = [], ALL_AA = [], ALL_TANKS = [], ALL_SAMS = [], ALL_SHORAD = [];
 const FX = {};
 let airWingDirty = false;
 let T = 0, paused = false, fpsLimit = 0, lastMs = 0, ready = false;
-const ENV = { elev: 30, lightsOn: 0, night: 0, ppu: 10, smokeTint: new THREE.Color(0xbbbbbb), splashTint: new THREE.Color(0xffffff) };
+const ENV = { elev: 30, lightsOn: 0, night: 0, ppu: 10, smokeTint: new THREE.Color(0xbbbbbb), dustTint: new THREE.Color(0xa89878) };
 
 /* ---- URL test parameters (for browser preview) ---- */
 const QS = new URLSearchParams(location.search);
 if (QS.has('hour')) { CFG.timeMode = 'fixed'; CFG.fixedHour = parseFloat(QS.get('hour')); }
 if (QS.has('zoom')) CFG.zoom = parseFloat(QS.get('zoom'));
+if (QS.has('season')) CFG.season = QS.get('season');
 
 /* ---- Wallpaper Engine properties ---- */
 function rgbFromWE(str) { return str.split(' ').map(c => Math.round(clamp(parseFloat(c), 0, 1) * 255)).join(','); }
@@ -31,17 +32,16 @@ window.wallpaperPropertyListener = {
     if (has('showpanel')) CFG.showPanel = p.showpanel.value;
     if (has('panelposition')) CFG.panelPos = p.panelposition.value;
     if (has('panelscale')) CFG.panelScale = p.panelscale.value;
-    if (has('waveheight')) CFG.waves = p.waveheight.value;
-    if (has('shipspeed')) CFG.speed = p.shipspeed.value;
+    if (has('season') && !QS.has('season')) CFG.season = p.season.value;
+    if (has('weather')) CFG.weather = p.weather.value;
     if (has('uicolor')) CFG.uiColor = rgbFromWE(p.uicolor.value);
     if (has('subtitles')) CFG.subtitles = p.subtitles.value;
     if (has('savestate')) { CFG.saveState = p.savestate.value; if (!CFG.saveState) PERSIST.clear(); }
     if (has('missionfrequency')) CFG.missions = p.missionfrequency.value;
     if (has('camerashake')) CFG.shake = p.camerashake.value;
     if (has('enemies')) CFG.enemies = p.enemies.value;
-    if (has('carriernumber')) CFG.numbers.carrier = p.carriernumber.value;
+    if (has('basename')) CFG.baseName = String(p.basename.value || '').trim().toUpperCase().slice(0, 20) || 'SAND ISLAND';
     for (const k of Object.keys(AIRCRAFT_TYPES)) if (has(k + 'count')) { const v = Math.round(p[k + 'count'].value); if (CFG.counts[k] !== v) { CFG.counts[k] = v; airWingDirty = true; } }
-    if (has('ddhelis') && CFG.ddHelis !== p.ddhelis.value) { CFG.ddHelis = p.ddhelis.value; airWingDirty = true; }
     applySettings();
   },
   applyGeneralProperties(p) { if (p.fps !== undefined) fpsLimit = p.fps; },
@@ -57,9 +57,9 @@ function applySettings() {
     panel.style.setProperty('--scale', CFG.panelScale / 100);
     const chk = document.getElementById('autoChk'); if (chk) chk.checked = CFG.auto;
   }
-  const title = document.querySelector('#panel .title'); if (title) title.textContent = `◆ CV-${CFG.numbers.carrier} · FLIGHT DECK CONTROL`;
+  const title = document.querySelector('#panel .title'); if (title) title.textContent = `◆ ${CFG.baseName} · BASE OPS`;
   if (!ready) return;
-  setShipNumbers();
+  for (const s of SITES) if (s.ui) s.ui.nm.textContent = s.name();
   sunLight.castShadow = CFG.shadows;
   updateCamera(); updateEnvironment();
 }
@@ -81,30 +81,25 @@ function init() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.03;
   scene.add(sunLight); scene.add(sunLight.target);
 
-  buildWater();
-  CARRIER = buildCarrier(); scene.add(CARRIER.group);
-  const d1 = buildDestroyer(-1); d1.group.position.set(5, 0, -21);
-  const d2 = buildDestroyer(1); d2.group.position.set(-6, 0, 20);
-  scene.add(d1.group); scene.add(d2.group);
-  SHIPS = [CARRIER, d1, d2];
-  SHIPS.forEach(s => { s.base = s.group.position.clone(); s.ciws.forEach(m => m.ship = s); s.guns.forEach(m => m.ship = s); ALL_CIWS.push(...s.ciws); ALL_GUNS.push(...s.guns); });
-  [...ALL_CIWS, ...ALL_GUNS].forEach(m => { mountRetarget(m); m.yaw = m.tYaw; m.pitch = m.tPitch; });
+  BASE = buildBase(); scene.add(BASE.group); BASE.group.updateMatrixWorld(true);
+  const M = BASE.mounts;
+  ALL_CIWS = M.ciws; ALL_AA = M.aa; ALL_TANKS = M.tanks; ALL_SAMS = M.sams; ALL_SHORAD = M.shorad;
+  [...ALL_CIWS, ...ALL_AA, ...ALL_TANKS, ...ALL_SHORAD].forEach(m => { mountRetarget(m); m.yaw = m.tYaw; m.pitch = m.tPitch; mountUpdate(m, 0); });
+  ALL_SAMS.forEach(m => mountUpdate(m, 0));
+  ALL_CIWS.forEach(m => m.radio = RADIO_NAMES.cram); ALL_AA.forEach(m => m.radio = RADIO_NAMES.cram); ALL_TANKS.forEach(m => m.radio = RADIO_NAMES.armor);
+  ALL_SAMS.forEach(m => m.radio = RADIO_NAMES.patriot); ALL_SHORAD.forEach(m => m.radio = RADIO_NAMES.patriot);
+  TERRAIN.build(seasonNow());
 
-  FX.tracers = new Tracers(scene, 1000);
-  FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 120);
-  FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 220, true);
-  FX.splash = new Splashes(scene, 20);
-  FX.foam = new Foam(scene, 2800);
+  FX.tracers = new Tracers(scene, 1200);
+  FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);
+  FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 320, true);
+  FX.scorch = new Scorch(scene, 60);
   FX.lights = new FlashLights(scene, 4);
+  // shells, rockets and bombs that reach the ground: dust, or a bomb hitting a structure
   FX.tracers.onSplash = (p, big) => {
-    FX.splash.spawn(p, big);
-    for (let i = 0; i < 2; i++) FX.smoke.spawn(new V3(p.x, p.y + 0.5, p.z), { s0: big * 1.2, s1: big * 3, life: 1.4, a0: 0.4, color: 0xffffff, v: new V3(-WAVE.flow, 1.2, 0) });
+    if (big >= 2.3) { const t = BASE.targets.find(t => Math.hypot(t.p.x - p.x, t.p.z - p.z) < 5); if (t) { baseImpact(t.p, 1.1, t.name); return; } }
+    groundHit(p, big);
   };
-
-  CARRIER.group.updateMatrixWorld(true);
-  CARRIER.deckY = CARRIER_DECK_Y; CARRIER.radio = RADIO_NAMES.carrier;
-  CARRIER.rams = [{ pos: new V3(8.2, 2.4, -3.75), dir: new V3(0.3, 0.4, -1) }, { pos: new V3(-13.5, 2.4, 3.6), dir: new V3(-0.3, 0.4, 1) }];
-  [d1, d2].forEach((d, i) => { d.deckY = 1.13; d.vls = [new V3(3.5, 1.2, -0.1), new V3(3.9, 1.2, 0.1), new V3(4.2, 1.2, -0.1)]; d.radio = RADIO_NAMES.escorts[i]; d.pad = { x: -6.75, z: 0, yaw: 0 }; });
 
   ready = true;
   window.addEventListener('resize', resize);
@@ -112,33 +107,20 @@ function init() {
   requestAnimationFrame(frame);
 }
 
-/* ---- air wing from the per-type counts (a fresh build: everything starts on deck / in the hangar) ---- */
+/* ---- air wing from the per-type counts (a fresh build: everything starts at its home) ---- */
 let airWingBuiltAt = 0;
 function buildAirWing() {
   airWingDirty = false; airWingBuiltAt = T;
   AIRCRAFT.forEach(a => a.dispose()); AIRCRAFT = []; AIRWAR.passes.length = 0; missionWorldReset();
   HELI_LIGHTS.n = 0;
-  resetDeck();
-  const fixedSpots = DECK.fixedSpots.slice(0, DECK.INITIAL_DECK), heliSpots = DECK.heliSpots.slice();
-  // deck spots go round-robin across types, everything else lives in the hangar
+  AIRFIELD.reset();
+  // homes go round-robin across types (the shelters are shared out between the fighter types)
   const plan = [];
-  const queues = FIXED_ORDER.map(k => ({ k, n: CFG.counts[k] || 0, i: 0, cs: callsignsFor(k, CFG.counts[k] || 0) }));
+  const queues = [...FIXED_ORDER, ...HELI_ORDER].map(k => ({ k, n: CFG.counts[k] || 0, i: 0, cs: callsignsFor(k, CFG.counts[k] || 0) }));
   let left = true;
   while (left) { left = false; for (const q of queues) if (q.i < q.n) { plan.push({ k: q.k, cs: q.cs[q.i++] }); left = true; } }
-  for (const it of plan) {
-    const spot = fixedSpots.shift();
-    AIRCRAFT.push(new AIRCRAFT_TYPES[it.k]({ callsign: it.cs, host: CARRIER, home: spot ? 'deck' : 'hangar', spot }));
-  }
-  for (const k of HELI_ORDER) {
-    const n = CFG.counts[k] || 0, cs = callsignsFor(k, n);
-    for (let i = 0; i < n; i++) {
-      const spot = heliSpots.shift();
-      AIRCRAFT.push(new AIRCRAFT_TYPES[k]({ callsign: cs[i], host: CARRIER, home: spot ? 'deck' : 'hangar', spot: spot || DECK.heliPad }));
-    }
-    if (k === 'mh60' && CFG.ddHelis) {       // one transport helicopter per destroyer
-      SHIPS.slice(1).forEach((d, i) => AIRCRAFT.push(new MH60({ callsign: CALLSIGNS.ddheli[i], host: d, home: 'deck', spot: d.pad })));
-    }
-  }
+  for (const it of plan) AIRCRAFT.push(new AIRCRAFT_TYPES[it.k]({ callsign: it.cs }));
+  AIRFIELD.updateMarks();
   buildList();
   // the last session's aircraft in the air / on missions come back (js/persist.js); otherwise part of the air wing
   // goes up right away: two flights (or lead sections)
@@ -146,61 +128,29 @@ function buildAirWing() {
   if (CFG.auto && !restored) { autoLaunch(); autoLaunch(); }
   autoTimer = rand(8, 14);
 }
-/* A count changed: the air wing adapts in place. New aircraft join in the hangar (callsigns continue the flights);
-   aircraft over the new count retire — they land first and leave once on deck / in the hangar (retireAircraft).
+/* A count changed: the air wing adapts in place. New aircraft join at a free home (callsigns continue the flights);
+   aircraft over the new count retire — they land first and leave once parked (retireAircraft).
    Right after a fresh build (settings applied at start-up) it simply rebuilds. */
 function syncAirWing() {
   if (T - airWingBuiltAt < 3) { buildAirWing(); return; }
   airWingDirty = false;
   for (const k of [...FIXED_ORDER, ...HELI_ORDER]) {
-    const cs = callsignsFor(k, CFG.counts[k] || 0), mine = AIRCRAFT.filter(a => a.spec.key === k && a.host === CARRIER);
+    const cs = callsignsFor(k, CFG.counts[k] || 0), mine = AIRCRAFT.filter(a => a.spec.key === k);
     for (const a of mine) a.retiring = !cs.includes(a.callsign);                 // back in if it was retiring
-    for (const c of cs) if (!mine.some(a => a.callsign === c))
-      AIRCRAFT.push(new AIRCRAFT_TYPES[k]({ callsign: c, host: CARRIER, home: 'hangar', spot: AIRCRAFT_TYPES[k].prototype instanceof Helicopter ? DECK.heliPad : null }));
+    for (const c of cs) if (!mine.some(a => a.callsign === c)) AIRCRAFT.push(new AIRCRAFT_TYPES[k]({ callsign: c }));
   }
-  SHIPS.slice(1).forEach((d, i) => {                                             // the destroyers' helicopters
-    const a = AIRCRAFT.find(x => x.host === d);
-    if (a) a.retiring = !CFG.ddHelis;
-    else if (CFG.ddHelis) AIRCRAFT.push(new MH60({ callsign: CALLSIGNS.ddheli[i], host: d, home: 'deck', spot: d.pad }));
-  });
+  AIRFIELD.updateMarks();
   buildList();
 }
-/* retiring aircraft come back and leave the air wing once they are down (no lift, catapult or pass is held then) */
+/* retiring aircraft come back and leave the air wing once they are parked (nothing on the runway is held then) */
 function retireAircraft() {
   let gone = false;
   for (let i = AIRCRAFT.length - 1; i >= 0; i--) {
     const a = AIRCRAFT[i]; if (!a.retiring) continue;
-    if (isDown(a)) { a.dispose(); AIRCRAFT.splice(i, 1); gone = true; }
+    if (isDown(a) && a.t > 1) { a.dispose(); AIRCRAFT.splice(i, 1); gone = true; }
     else if (a.canLand()) a.requestLand();
   }
-  if (gone) buildList();
-}
-
-/* Faceted water. The facet normal is computed in the vertex shader from the three
-   displaced corners of each triangle (passed as attributes) instead of screen-space
-   derivatives — those lose precision on mobile GPUs and caused washed-out water. */
-function buildWater() {
-  let geo = new THREE.PlaneGeometry(900, 900, 180, 180); geo.rotateX(-Math.PI / 2); geo = geo.toNonIndexed();
-  const pos = geo.attributes.position, n = pos.count;
-  const tri = [new Float32Array(n * 2), new Float32Array(n * 2), new Float32Array(n * 2)];
-  for (let t = 0; t < n; t += 3) for (let k = 0; k < 3; k++) for (let c = 0; c < 3; c++) {
-    tri[c][(t + k) * 2] = pos.getX(t + c); tri[c][(t + k) * 2 + 1] = pos.getZ(t + c);
-  }
-  geo.setAttribute('triA', new THREE.BufferAttribute(tri[0], 2));
-  geo.setAttribute('triB', new THREE.BufferAttribute(tri[1], 2));
-  geo.setAttribute('triC', new THREE.BufferAttribute(tri[2], 2));
-  waterUniforms = { uPh: { value: new THREE.Vector4() }, uAmp: { value: 1 } };
-  const mat = new THREE.MeshPhongMaterial({ color: 0x1c5a82, specular: 0x506070, shininess: 60 });
-  mat.onBeforeCompile = sh => {
-    sh.uniforms.uPh = waterUniforms.uPh; sh.uniforms.uAmp = waterUniforms.uAmp;
-    sh.vertexShader = 'attribute vec2 triA;\nattribute vec2 triB;\nattribute vec2 triC;\n' + WAVE_GLSL + sh.vertexShader
-      .replace('#include <beginnormal_vertex>', `
-        vec3 wA = vec3(triA.x, waveH(triA), triA.y), wB = vec3(triB.x, waveH(triB), triB.y), wC = vec3(triC.x, waveH(triC), triC.y);
-        vec3 objectNormal = normalize(cross(wB - wA, wC - wA));
-        if (objectNormal.y < 0.0) objectNormal = -objectNormal;`)
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n transformed.y += waveH(position.xz);');
-  };
-  water = new THREE.Mesh(geo, mat); water.receiveShadow = true; scene.add(water);
+  if (gone) { AIRFIELD.updateMarks(); buildList(); }
 }
 
 function resize() {
@@ -216,7 +166,7 @@ function updateCamera() {
   scene.fog.near = CAM_D - 30; scene.fog.far = CAM_D + 260;
   updateCameraPose();
 }
-const CAM_D = 160, CAM_TGT = new V3(0, 2.5, 1);
+const CAM_D = 160, CAM_TGT = new V3(0, 2.5, -4);
 let camAz = CFG.camAngle * DEG;
 function updateCameraPose() {
   const el = CFG.camElev * DEG;
@@ -228,8 +178,11 @@ function updateCameraPose() {
   camera.lookAt(CAM_TGT);
 }
 
-/* ---- time of day & lighting ---- */
+/* ---- time of day, season & lighting ---- */
+const _hg = new THREE.Color();
 function updateEnvironment() {
+  const season = seasonNow(); if (season !== TERRAIN.season) TERRAIN.build(season);   // a new month, or the setting changed
+  const S = SEASONS[season];
   const sp = sunPosition(getNow(), CFG.lat, CFG.lon);
   ENV.elev = sp.elev;
   const k = skyAt(sp.elev);
@@ -238,20 +191,20 @@ function updateEnvironment() {
   const dir = sunDir.lerp(moonDir, smoothstep(-2, -7, sp.elev)).normalize();
   sunLight.position.copy(dir).multiplyScalar(150); sunLight.target.position.set(0, 0, 0);
   sunLight.color.copy(k.sun); sunLight.intensity = k.si;
-  hemi.color.copy(k.hs); hemi.groundColor.copy(k.hg); hemi.intensity = k.hi;
+  // the ground's bounce light takes the season's colour (snow: bright), as dark as the hour wants
+  _hg.setHex(S.hg).multiplyScalar(lerp(0.35, 1, smoothstep(-8, 12, sp.elev)));
+  hemi.color.copy(k.hs); hemi.groundColor.copy(k.hg).lerp(_hg, 0.6); hemi.intensity = k.hi;
   scene.fog.color.copy(k.fog); renderer.setClearColor(k.fog);
-  water.material.color.copy(k.water); water.material.specular.copy(k.spec);
   ENV.smokeTint.copy(k.smoke);
-  ENV.splashTint.copy(k.smoke).lerp(new THREE.Color(0xffffff), 0.35);
+  ENV.dustTint.setHex(S.ground).lerp(k.smoke, 0.45);
   ENV.lightsOn = 1 - smoothstep(-3, 5, sp.elev);
   ENV.night = 1 - smoothstep(-10, 1, sp.elev);
-  FX.foam.bright = lerp(0.13, 0.3, smoothstep(-8, 10, sp.elev));
-  SHIPS.forEach(s => s.winMat.emissive.setHex(0xffc27a).multiplyScalar(0.75 * ENV.lightsOn));
+  BASE.winMat.emissive.setHex(0xffc27a).multiplyScalar(0.75 * ENV.lightsOn);
 }
 
 /* ---- audio ---- */
-/* Sound must last ARM_DELAY seconds before the fleet opens fire — short notification sounds never trigger it.
-   Combat is latched (updateArming): when the sound stops, the fleet holds for DISARM_DELAY seconds ("no more
+/* Sound must last ARM_DELAY seconds before the base opens fire — short notification sounds never trigger it.
+   Combat is latched (updateArming): when the sound stops, the base holds for DISARM_DELAY seconds ("no more
    contacts" — no new enemies, passes or missions) and only then stands down; sound lasting RESUME_DELAY seconds in the
    meantime resumes the fight (a notification ping doesn't). */
 const ARM_DELAY = 5, DISARM_DELAY = 5, RESUME_DELAY = 1;
@@ -337,53 +290,59 @@ function demoAudio() {
   onAudio(arr);
 }
 
-/* ---- gunfire ---- */
+/* ---- base weapons ---- */
 const _p = new V3(), _d = new V3();
-let gunTurn = 0;
-function fireGun(m, strength) {
+const muzzleSmoke = (p, d, k) => FX.smoke.spawn(p.clone().addScaledVector(d, 0.4), { s0: 0.9 * k, s1: 4 * k, life: 2.2, a0: 0.5, smoke: true, v: d.clone().multiplyScalar(3).add(new V3(WIND.x * 1.3, 0.5, WIND.z * 1.3)), drag: 0.9 });
+let aaTurn = 0, tankTurn = 0;
+/* twin 35 mm: a pair of shells at the tracked target's lead point, or a burst into the sky */
+function fireAA(m, strength) {
+  m.mi = (m.mi + 1) % 2; m.muzzle = m.muzzles[m.mi];
   mountMuzzle(m, _p, _d);
-  const tgt = m.track && enemyAlive(m.track) && Math.random() < 0.7 ? m.track : null;
-  if (tgt) {                                       // AA mode: shell flies straight at the lead point
-    const speed = 80, aim = leadPoint(tgt, _p, speed), tt = aim.distanceTo(_p) / speed, dir = aim.sub(_p).normalize();
-    FX.tracers.spawn(_p, dir.clone().multiplyScalar(speed), { life: tt, len: 1.6, w: 0.3, color: 0xffb050 });
-    FX.flash.spawn(_p.clone().addScaledVector(dir, 0.5), { s0: 2.4 * Math.min(1.5, strength), s1: 3.6, life: 0.13, a0: 1 });
-    for (let i = 0; i < 2; i++) FX.smoke.spawn(_p.clone().addScaledVector(dir, 0.4 + i * 0.5), { s0: 0.9, s1: 4, life: 2.2, a0: 0.5, smoke: true, v: dir.clone().multiplyScalar(3).add(new V3(-WAVE.flow * 1.3, 0.5, 0)), drag: 0.9 });
-    FX.lights.flash(_p, 4, 0.16);
-    queueHit(tgt, { chance: 0.5, dmg: 1, src: m.ship, delay: tt });
-    m.recoil = 1; return;
-  }
-  const v = _d.clone().multiplyScalar(rand(38, 50));
-  FX.tracers.spawn(_p, v, { life: 6, len: 1.5, w: 0.3, color: 0xffb050, grav: 12, splash: 1.1 });
-  FX.flash.spawn(_p.clone().addScaledVector(_d, 0.5), { s0: 2.4 * Math.min(1.5, strength), s1: 3.6, life: 0.13, a0: 1 });
-  FX.flash.spawn(_p.clone().addScaledVector(_d, 1.4), { s0: 1.4, s1: 2.2, life: 0.09, a0: 0.8 });
-  for (let i = 0; i < 3; i++) FX.smoke.spawn(_p.clone().addScaledVector(_d, 0.4 + i * 0.5), { s0: 0.9, s1: 4.5, life: 2.4, a0: 0.55, smoke: true, v: _d.clone().multiplyScalar(rand(2, 4.5)).add(new V3(-WAVE.flow * 1.3, 0.5, 0)), drag: 0.9 });
-  FX.lights.flash(_p, 4, 0.16);
-  m.recoil = 1; mountRetarget(m);
+  const tgt = m.track && enemyAlive(m.track) ? m.track : null, speed = 80;
+  const aim = tgt ? leadPoint(tgt, _p, speed) : _p.clone().addScaledVector(_d, 50), tt = aim.distanceTo(_p) / speed, dir = aim.sub(_p).normalize();
+  FX.tracers.spawn(_p, dir.clone().multiplyScalar(speed), { life: tt, len: 1.4, w: 0.25, color: 0xffb050 });
+  FX.flash.spawn(_p.clone().addScaledVector(dir, 0.4), { s0: 2.0 * Math.min(1.5, strength), s1: 3, life: 0.11, a0: 1 });
+  muzzleSmoke(_p, dir, 0.8); FX.lights.flash(_p, 3, 0.14);
+  if (tgt) queueHit(tgt, { chance: 0.45, dmg: 1, src: m, delay: tt }); else FLAK.push({ at: T + tt, p: _p.clone().addScaledVector(dir, 50) });
+  m.recoil = 1;
 }
-/* ---- heavy-music weapons: flak airbursts, VLS and RAM missiles ---- */
+/* tank gun: at a column in range (a flat, fast round, the hit rolled on arrival); otherwise a round far out past the wire */
+function fireTank(m, strength) {
+  mountMuzzle(m, _p, _d);
+  const tgt = m.track && enemyAlive(m.track) ? m.track : null;
+  let v;
+  if (tgt) { const tt = tgt.p.distanceTo(_p) / 75; v = tgt.p.clone().setY(tgt.p.y + 0.5).sub(_p).normalize().multiplyScalar(75); FX.tracers.spawn(_p, v, { life: tt, len: 1.6, w: 0.22, color: 0xffd090 }); queueHit(tgt, { chance: 0.55, dmg: 2, src: m, delay: tt }); }
+  else { v = _d.clone().multiplyScalar(70); v.y += 2; FX.tracers.spawn(_p, v, { life: 4, len: 1.6, w: 0.22, color: 0xffd090, grav: 1.5, splash: 1.4 }); }
+  FX.flash.spawn(_p.clone().addScaledVector(_d, 0.6), { s0: 3.0 * Math.min(1.4, strength), s1: 4.5, life: 0.14, a0: 1 });
+  for (let i = 0; i < 3; i++) FX.smoke.spawn(_p.clone().addScaledVector(_d, 0.5 + i * 0.6), { s0: 1, s1: 4.5, life: 2.4, a0: 0.55, smoke: true, v: _d.clone().multiplyScalar(rand(2, 4)).add(new V3(WIND.x, 0.5, WIND.z)), drag: 0.9 });
+  const g = m.yawG.position; for (let i = 0; i < 3; i++) FX.smoke.spawn(new V3(g.x + rand(-1, 1), 0.3, g.z + rand(-1, 1)), { s0: 0.8, s1: 2.6, life: 1.6, a0: 0.35, color: ENV.dustTint, v: drift(1, 0.6), drag: 0.8 });   // the blast kicks up dust
+  FX.lights.flash(_p, 4, 0.18);
+  m.recoil = 1; if (!tgt) mountRetarget(m);
+  if (Math.random() < 0.15) RADIO.say(RADIO_NAMES.armor, radioLine(COMBAT.tank), { role: 'ground', cat: 'combat', prio: 0 });
+}
+/* ---- heavy-music weapons: flak airbursts, Patriot / NASAMS, Stingers ---- */
 const FLAK = [];
 let camShake = 0;
 function fireFlak() {
-  const g = pick(ALL_GUNS); if (!g || g.flakCd > 0) return;
+  const g = pick(ALL_AA); if (!g || g.flakCd > 0) return;
   g.flakCd = 0.35;
-  // aim high into the sky over a random bearing, burst at altitude
-  g.tYaw = g.center + rand(-g.half, g.half); g.tPitch = rand(0.7, 1.1);
+  g.tYaw = g.center + rand(-g.half, g.half); g.tPitch = rand(0.8, 1.2);       // high into the sky over a random bearing, burst at altitude
+  g.mi = (g.mi + 1) % 2; g.muzzle = g.muzzles[g.mi];
   mountMuzzle(g, _p, _d);
   const dir = _d.clone(); dir.y = Math.max(dir.y, 0.55); dir.normalize();
   const dist = rand(35, 60), speed = 70, tt = dist / speed;
-  const burst = _p.clone().addScaledVector(dir, dist);
   FX.tracers.spawn(_p, dir.clone().multiplyScalar(speed), { life: tt, len: 1.3, w: 0.25, color: 0xffc070 });
   FX.flash.spawn(_p.clone().addScaledVector(_d, 0.5), { s0: 2.0, s1: 3.0, life: 0.1, a0: 1 });
-  FX.smoke.spawn(_p.clone(), { s0: 0.8, s1: 3.5, life: 1.8, a0: 0.45, smoke: true, v: new V3(-WAVE.flow * 1.3, 0.6, 0), drag: 0.9 });
+  FX.smoke.spawn(_p.clone(), { s0: 0.8, s1: 3.5, life: 1.8, a0: 0.45, smoke: true, v: new V3(WIND.x * 1.3, 0.6, WIND.z * 1.3), drag: 0.9 });
   g.recoil = 1;
-  FLAK.push({ at: T + tt, p: burst });
+  FLAK.push({ at: T + tt, p: _p.clone().addScaledVector(dir, dist) });
 }
 function updateFlak(dt) {
-  for (const g of ALL_GUNS) g.flakCd = Math.max(0, (g.flakCd || 0) - dt);
+  for (const g of ALL_AA) g.flakCd = Math.max(0, (g.flakCd || 0) - dt);
   for (let i = FLAK.length - 1; i >= 0; i--) {
     const f = FLAK[i]; if (T < f.at) continue;
     FX.flash.spawn(f.p, { s0: 3.2, s1: 5.5, life: 0.18, a0: 1 });
-    for (let k = 0; k < 3; k++) FX.smoke.spawn(f.p.clone().add(new V3(rand(-0.8, 0.8), rand(-0.5, 0.5), rand(-0.8, 0.8))), { s0: 1.4, s1: 4.8, life: 3.2, a0: 0.7, color: 0x2e3034, v: new V3(-WAVE.flow * 0.6, 0.15, 0), drag: 0.6 });
+    for (let k = 0; k < 3; k++) FX.smoke.spawn(f.p.clone().add(new V3(rand(-0.8, 0.8), rand(-0.5, 0.5), rand(-0.8, 0.8))), { s0: 1.4, s1: 4.8, life: 3.2, a0: 0.7, color: 0x2e3034, v: drift(0.6, 0.15), drag: 0.6 });
     FX.lights.flash(f.p, 3, 0.15);
     FLAK.splice(i, 1);
   }
@@ -391,28 +350,29 @@ function updateFlak(dt) {
 function spawnGuidedMissile(p, v, turnAt, dir, speed, life, big, target, chance, src) {
   MISSILES.push({ p, v, life, smokeT: 0, guided: { turnAt, dir, speed, age: 0 }, big, target: target || null, chance: chance || 0.75, dmg: 2, src, speed });
 }
-function launchVLS() {
-  const ships = SHIPS.filter(s => s.vls && (s.vlsCd || 0) <= 0); if (!ships.length) return;
-  const s = pick(ships); s.vlsCd = 3.2;
-  const cell = pick(s.vls), p = cell.clone(); s.group.localToWorld(p);
-  const out = s.side;   // always away from the carrier
-  const ang = rand(0, TAU), dir = new V3(Math.cos(ang), rand(0.15, 0.45), Math.sin(ang) * 0.6 + out * 0.8).normalize();
-  const bandits = CFG.enemies ? ENEMIES.filter(e => e.kind === 'bandit' && !e.duel && enemyAlive(e)) : [];
-  spawnGuidedMissile(p, new V3(0, 16, 0), 0.7, dir, 45, 6, true, bandits.length ? pick(bandits) : null, 0.82, s);
-  for (let i = 0; i < 6; i++) FX.smoke.spawn(p.clone().add(new V3(rand(-0.5, 0.5), rand(0, 0.6), rand(-0.5, 0.5))), { s0: 1.2, s1: 4.5, life: 2.6, a0: 0.7, smoke: true, v: new V3(rand(-1, 1) - WAVE.flow, rand(0.5, 1.5), rand(-1, 1)), drag: 0.8 });
+/* Patriot (ballistic missiles first, then bombers / bandits) or NASAMS (cruise missiles, helicopters, bandits): out of a canister */
+function launchSAM(kind) {
+  const cands = ALL_SAMS.filter(m => m.sam === kind && (m.cd || 0) <= 0); if (!cands.length) return;
+  const m = pick(cands); m.cd = kind === 'patriot' ? 3.2 : 2.2;
+  m.muzzle = pick(m.cells); mountMuzzle(m, _p, _d);
+  const p = _p.clone(), out = _d.clone();
+  const kinds = kind === 'patriot' ? [['ballistic'], ['bandit']] : [['cruise', 'heli'], ['bandit']];
+  const tgt = CFG.enemies ? nearestEnemy(p, kinds[0], 160) || nearestEnemy(p, kinds[1], 120) : null;
+  const dir = tgt ? tgt.p.clone().sub(p).normalize() : out.clone();
+  spawnGuidedMissile(p, out.clone().multiplyScalar(18), kind === 'patriot' ? 0.6 : 0.35, dir, kind === 'patriot' ? 55 : 48, 6, kind === 'patriot', tgt, kind === 'patriot' ? 0.85 : 0.78, m);
+  for (let i = 0; i < 6; i++) FX.smoke.spawn(p.clone().add(new V3(rand(-0.5, 0.5), rand(-0.3, 0.3), rand(-0.5, 0.5))), { s0: 1.2, s1: 4.5, life: 2.6, a0: 0.7, smoke: true, v: out.clone().multiplyScalar(-rand(1, 3)).add(new V3(WIND.x, 0.5, WIND.z)), drag: 0.8 });
   FX.flash.spawn(p, { s0: 3, s1: 4, life: 0.25, a0: 1 }); FX.lights.flash(p, 4, 0.4);
-  if (Math.random() < 0.5) RADIO.say(s.radio || RADIO_NAMES.carrier, radioLine(COMBAT.vls), { role: 'ship', cat: 'combat', prio: 0 });
+  if (Math.random() < 0.5) RADIO.say(m.radio, radioLine(COMBAT.patriot), { role: 'ground', cat: 'combat', prio: 0 });
 }
-function launchRAM() {
-  if (!CARRIER.rams || (CARRIER.ramCd || 0) > 0) return;
-  CARRIER.ramCd = 1.2;
-  const l = pick(CARRIER.rams), p = l.pos.clone(); CARRIER.group.localToWorld(p);
-  const dir = l.dir.clone(); dir.x += rand(-0.4, 0.4); dir.y = rand(0.25, 0.6); dir.normalize();
-  const tgt = CFG.enemies ? (nearestEnemy(p, ['vampire'], 90) || nearestEnemy(p, ['bandit'], 90)) : null;
-  spawnGuidedMissile(p, dir.clone().multiplyScalar(20), 0.2, dir, 60, 4, false, tgt, 0.75, CARRIER);
+/* Avenger: a Stinger at the nearest helicopter / cruise missile / low bandit */
+function launchStinger() {
+  const m = ALL_SHORAD.filter(s => (s.cd || 0) <= 0).sort((a, b) => !!b.track - !!a.track)[0]; if (!m) return;
+  m.cd = 1.4; m.mi = (m.mi + 1) % 2; m.muzzle = m.muzzles[m.mi];
+  mountMuzzle(m, _p, _d);
+  const p = _p.clone(), dir = _d.clone(), tgt = CFG.enemies ? m.track || nearestEnemy(p, ['heli', 'cruise', 'bandit'], 80) : null;
+  spawnGuidedMissile(p, dir.clone().multiplyScalar(20), 0.2, dir, 60, 4, false, tgt, 0.72, m);
   FX.flash.spawn(p, { s0: 1.6, s1: 2.2, life: 0.12, a0: 1 });
 }
-
 let ciwsGap = 0;
 function startCIWS(dur) {
   if (RT() < ciwsGap) return;                                           // short pause between new bursts
@@ -430,38 +390,52 @@ function onBeat(band, strength) {
   resolveHits(true);                     // projectiles that reached a target score on the beat
   const heavy = AUD.heavy;
   if (band === 'low' && strength > 1.5 && CFG.shake) camShake = Math.min(1, camShake + 0.35 + heavy * 0.4);
-  // heavy passages: vertical missile launches and RAM salvos on the biggest hits
-  if (band === 'low' && heavy > 0.55 && strength > 1.6 && Math.random() < 0.5 * f) launchVLS();
-  if (band !== 'low' && heavy > 0.6 && Math.random() < 0.12 * f) launchRAM();
-  // flak barrage over the fleet while it's heavy
+  // heavy passages: Patriot launches on the biggest hits (always at an incoming ballistic missile), NASAMS and Stingers
+  const tbm = ENEMIES.some(e => e.kind === 'ballistic' && enemyAlive(e));
+  if (band === 'low' && ((heavy > 0.55 && strength > 1.6 && Math.random() < 0.5 * f) || (tbm && Math.random() < 0.7))) launchSAM('patriot');
+  if (band !== 'low' && heavy > 0.55 && Math.random() < 0.1 * f) launchSAM('nasams');
+  if (band === 'high' && heavy > 0.5 && Math.random() < 0.14 * f) launchStinger();
+  // flak barrage over the base while it's heavy
   if (band === 'mid' && heavy > 0.45 && Math.random() < (0.35 + heavy * 0.5) * f) fireFlak();
   if (band === 'low') {
     if (Math.random() < Math.min(1, f)) {
-      const g = ALL_GUNS[gunTurn++ % ALL_GUNS.length]; fireGun(g, strength);
-      if ((strength > 1.8 && Math.random() < 0.5) || f > 1.5) fireGun(ALL_GUNS[gunTurn++ % ALL_GUNS.length], strength);
+      const t = ALL_TANKS[tankTurn++ % ALL_TANKS.length]; if (t) fireTank(t, strength);
+      if (((strength > 1.8 && Math.random() < 0.5) || f > 1.5) && ALL_TANKS.length) fireTank(ALL_TANKS[tankTurn++ % ALL_TANKS.length], strength);
     }
     for (const fb of FLYBYS) if (Math.random() < 0.45) fb.fireMissile();
   } else if (band === 'mid') {
     startCIWS(rand(0.12, 0.28) * Math.max(0.5, f));
+    const aa = ALL_AA.filter(m => m.track); if (aa.length && Math.random() < 0.8 * f) fireAA(aa[aaTurn++ % aa.length], strength);
     for (const fb of FLYBYS) fb.fireGuns(0.28);
   } else if (band === 'high') {
     if (Math.random() < 0.35 * f) startCIWS(0.1);
   }
-  AIRWAR.onBeat(band, f);               // fighters and attack helicopters on their passes (js/airwar.js)
+  AIRWAR.onBeat(band, f);               // fighters, gunships and attack helicopters on their passes (js/airwar.js)
 }
 function updateMounts(dt) {
   const hunting = CFG.enemies && ENEMIES.length;
-  for (const m of ALL_GUNS) {
-    if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['bandit'], 85); if (m.track) aimMountAt(m, leadPoint(m.track, _p, 80)); } else m.track = null;
+  for (const m of ALL_AA) {
+    if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['bandit', 'heli'], 85); if (m.track) aimMountAt(m, leadPoint(m.track, _p, 80)); } else m.track = null;
     mountUpdate(m, dt);
+  }
+  for (const m of ALL_TANKS) {
+    if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['armor'], 80); if (m.track) aimMountAt(m, m.track.p); } else m.track = null;
+    mountUpdate(m, dt);
+  }
+  for (const m of ALL_SHORAD) {
+    if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['heli', 'cruise'], 70) || nearestEnemy(_p, ['bandit'], 60); if (m.track) aimMountAt(m, m.track.p); } else m.track = null;
+    mountUpdate(m, dt); m.cd = Math.max(0, (m.cd || 0) - dt);
+  }
+  for (const m of ALL_SAMS) {             // the launchers slew toward the threat sector, at their fixed elevation
+    const t = hunting && (nearestEnemy(m.yawG.position, m.sam === 'patriot' ? ['ballistic', 'bandit'] : ['cruise', 'heli', 'bandit'], 150));
+    if (t) { _al.copy(t.p); m.yawG.parent.worldToLocal(_al); const a = Math.atan2(-(_al.z - m.yawG.position.z), _al.x - m.yawG.position.x); m.tYaw = m.center + clamp(angleWrap(a - m.center), -m.half, m.half); }
+    mountUpdate(m, dt); m.cd = Math.max(0, (m.cd || 0) - dt);
   }
   if (hunting) for (const m of ALL_CIWS) {
     mountMuzzle(m, _p, _d);
-    m.track = nearestEnemy(_p, ['vampire'], 60) || nearestEnemy(_p, ['bandit'], 45);
+    m.track = nearestEnemy(_p, ['cruise'], 60) || nearestEnemy(_p, ['heli'], 50) || nearestEnemy(_p, ['bandit'], 45);
     if (m.track) aimMountAt(m, leadPoint(m.track, _p, 95));
   }
-  SHIPS.forEach(s => { s.vlsCd = Math.max(0, (s.vlsCd || 0) - dt); s.ramCd = Math.max(0, (s.ramCd || 0) - dt); });
-
   for (const m of ALL_CIWS) {
     mountUpdate(m, dt);
     m.cd = Math.max(0, (m.cd || 0) - dt);
@@ -478,9 +452,9 @@ function updateMounts(dt) {
         if (Math.random() < 0.6) FX.flash.spawn(_p.clone().addScaledVector(_d, 0.2), { s0: 0.8, s1: 1.0, life: 0.05, a0: 0.95 });
       }
       if (shots && Math.random() < 0.3) FX.lights.flash(_p, 2.2, 0.06);
-      if (Math.random() < dt * 14) FX.smoke.spawn(_p.clone(), { s0: 0.4, s1: 1.8, life: 1.2, a0: 0.35, smoke: true, v: new V3(-WAVE.flow * 1.3, 0.4, 0) });
+      if (Math.random() < dt * 14) FX.smoke.spawn(_p.clone(), { s0: 0.4, s1: 1.8, life: 1.2, a0: 0.35, smoke: true, v: new V3(WIND.x * 1.3, 0.4, WIND.z * 1.3) });
       if (m.burst <= 0) {
-        if (enemyAlive(m.burstTarget) && m.burstTarget.p.distanceTo(_p) < 65) queueHit(m.burstTarget, { chance: m.burstTarget.kind === 'vampire' ? (m.lastDitch ? 0.85 : 0.65) : 0.25, dmg: 1, src: m.ship });
+        if (enemyAlive(m.burstTarget) && m.burstTarget.p.distanceTo(_p) < 65) queueHit(m.burstTarget, { chance: m.burstTarget.kind === 'cruise' ? (m.lastDitch ? 0.85 : 0.65) : 0.25, dmg: 1, src: m });
         m.lastDitch = false;
         m.burstTarget = null; mountRetarget(m); m.cd = rand(0.5, 1.1);
       }
@@ -498,31 +472,31 @@ function flightGroups() {
   for (const list of g.values()) list.sort((a, b) => csNum(a) - csNum(b));
   return g;
 }
-const isDown = a => a.state === 'parked' || a.state === 'hangar';
+const isDown = a => a.state === 'parked';
 // not launching or landing right now (an aircraft holding in orbit for its turn to land is landing)
 const settled = a => isDown(a) || ((a.state === 'orbit' || a.onMission || a.inCombat) && !a.landReq);
 function wpick(cands) { let r = Math.random() * cands.reduce((s, c) => s + c.w, 0); for (const c of cands) if ((r -= c.w) <= 0) return c; return cands[cands.length - 1]; }
 const flightSize = n => n >= 4 && Math.random() < 0.5 ? 2 : n;   // a four-ship flight goes as a pair or as all four
 // in combat: flights come back to rearm now and then (a try on 30 % of the ticks, after 2 min up), the AWACS and a tanker already up stay up
 const CBT_RECOVER_P = 0.3, CBT_SORTIE = 120;
-const TANKER_STATION = 300;   // in peace the tanker stays up at least 5 min (refuelling passes need it on station)
+const TANKER_STATION = 300;   // in peace a tanker stays up at least 5 min (refuelling passes need it on station)
 const engaged = a => a.inCombat && !a.landReq && !a.tank;   // a flight away refuelling isn't fighting
 function autoLaunch(joinOnly) {
   const cands = [], armed = AUD.armed;
   for (const all of flightGroups().values()) {
-    if (!all.every(settled) || all[0].spec.tanker) continue;   // the tanker goes up for refuelling passes only (TANKER / scrambleSupport)
+    if (!all.every(settled) || all[0].spec.tanker) continue;   // tankers go up for refuelling passes only (TANKER / scrambleSupport)
     const down = all.filter(isDown); if (!down.length) continue;
     const split = down.length < all.length;     // part of the flight is already up: send the rest to join it
     if (joinOnly && !split) continue;
     const n = split ? down.length : flightSize(down.length);
-    const w = (split ? 4 : 1) + down.filter(a => a.state === 'parked').length * 0.5;
+    const w = (split ? 4 : 1) + down.length * 0.5;
     cands.push({ list: down.slice(0, n), w: armed && down[0].spec.armed ? w * 3 : w });   // in combat fighters go first
   }
   if (!cands.length) return false;
   for (const a of wpick(cands).list) a.requestLaunch();
   return true;
 }
-/* combat: the AWACS goes up first if it is on deck (one type per call); the tanker isn't scrambled (no refuelling in combat) */
+/* combat: the AWACS goes up first if it is down (one type per call); the tankers aren't scrambled (no refuelling in combat) */
 function scrambleSupport() {
   const sup = AIRCRAFT.filter(a => a.isAwacs && !a.retiring);
   for (const key of new Set(sup.map(a => a.spec.key))) {
@@ -542,8 +516,8 @@ function autoRecover() {
   for (const all of groups) {
     if (!all.every(settled) || all.some(a => a.onMission || a.tank) || (armed && all.some(a => a.isSupport))) continue;
     const air = all.filter(a => (a.state === 'orbit' || a.inCombat) && !a.landReq);
-    // a pair whose flight-mates are still on deck waits for them to join instead of being recovered
-    // the tanker isn't recovered while a refuelling pass is due (TANKER.update would launch it again right away)
+    // a pair whose flight-mates are still down waits for them to join instead of being recovered
+    // a tanker isn't recovered while a refuelling pass is due (TANKER.update would launch it again right away)
     const minUp = armed ? CBT_SORTIE : all[0].spec.tanker ? (TANKER.timer < 120 ? Infinity : TANKER_STATION) : 25;
     if (!air.length || air.length < all.length || air.some(a => a.airT < minUp)) continue;
     // an armed flight leaves the fight only while another one stays engaged
@@ -581,9 +555,9 @@ function updateFlybys(dt) {
   for (let i = MISSILES.length - 1; i >= 0; i--) {
     const m = MISSILES[i]; m.life -= dt; m.smokeT += dt;
     const boosting = m.guided && m.guided.age < m.guided.turnAt;
-    if (m.guided) {                      // vertical launch, then pitch over toward the target bearing
+    if (m.guided) {                      // out of the canister, then pitch over toward the target bearing
       const gd = m.guided; gd.age += dt;
-      if (boosting) m.v.y += 10 * dt;
+      if (boosting) m.v.addScaledVector(m.v.clone().normalize(), 22 * dt);
       else if (!enemyAlive(m.target)) m.v.lerp(gd.dir.clone().multiplyScalar(gd.speed), Math.min(1, dt * 2.2));
     }
     if (m.target && !boosting) {         // homing on an enemy; the hit itself is resolved on the beat
@@ -600,43 +574,33 @@ function updateFlybys(dt) {
     // motor glow at a fixed 30 Hz: per-frame spawns ate the shared flash pool (cutting explosions short) and scaled with FPS
     if ((m.guided || m.glow) && (m.glowT = (m.glowT || 0) - dt) <= 1e-4) { m.glowT += 1 / 30; FX.flash.spawn(m.p, { s0: m.big ? 1.3 : 0.9, s1: m.big ? 1.1 : 0.7, life: 0.075, a0: 1 }); }
     m.p.addScaledVector(m.v, dt);
-    const iv = m.small ? 0.06 : m.big ? 0.018 : 0.025;
-    while (m.smokeT > iv) { m.smokeT -= iv; FX.smoke.spawn(m.p.clone(), m.big ? { s0: 0.8, s1: 3.2, life: 3.0, a0: 0.6, smoke: true, v: new V3(-WAVE.flow, 0.3, 0) } : m.small ? { s0: 0.3, s1: 1.3, life: 1.2, a0: 0.4, smoke: true, v: new V3(-WAVE.flow, 0.2, 0) } : { s0: 0.5, s1: 2.4, life: 2.2, a0: 0.5, smoke: true, v: new V3(-WAVE.flow, 0.3, 0) }); }
-    if (m.life <= 0 || m.p.y < waveH(m.p.x, m.p.z)) MISSILES.splice(i, 1);
+    const iv = m.small ? 0.06 : m.big ? 0.018 : 0.025, sv = new V3(WIND.x, 0.3, WIND.z);
+    while (m.smokeT > iv) { m.smokeT -= iv; FX.smoke.spawn(m.p.clone(), m.big ? { s0: 0.8, s1: 3.2, life: 3.0, a0: 0.6, smoke: true, v: sv } : m.small ? { s0: 0.3, s1: 1.3, life: 1.2, a0: 0.4, smoke: true, v: sv } : { s0: 0.5, s1: 2.4, life: 2.2, a0: 0.5, smoke: true, v: sv }); }
+    if (m.life <= 0 || m.p.y < groundH(m.p.x, m.p.z)) { if (m.p.y < groundH(m.p.x, m.p.z) && !m.arrived) groundHit(m.p, m.small ? 0.8 : 1.2); MISSILES.splice(i, 1); }
   }
 }
 
-/* ---- ships: motion, radars, searchlights, wake ---- */
-const _w = new V3(), _sq = new THREE.Quaternion();
-function updateShips(dt) {
-  for (const s of SHIPS) {
-    const b = s.base, L = s.len / 2, k = s.bob;
-    const h0 = waveH(b.x, b.z), hb = waveH(b.x + L, b.z), hs = waveH(b.x - L, b.z), hp = waveH(b.x, b.z - 2.5), hst = waveH(b.x, b.z + 2.5);
-    s.group.position.y = h0 * k * 0.6;
-    s.group.rotation.z = Math.atan((hb - hs) / (2 * L)) * k;
-    s.group.rotation.x = -Math.atan((hst - hp) / 5) * k * 0.6;
-    s.group.updateMatrixWorld(true);
-    s.radars.forEach((r, i) => r.rotation.y += dt * (i ? 0.9 : 1.6));
-    for (const e of s.wakeEmit) {
-      e.acc = (e.acc || 0) + e.rate * dt * clamp(WAVE.flow / 2.2, 0.2, 2);
-      while (e.acc > 1) {
-        e.acc -= 1; _w.copy(e.p); s.group.localToWorld(_w);
-        FX.foam.emit(_w.x + rand(-0.3, 0.3), _w.z + rand(-0.25, 0.25), rand(-0.3, 0.3), rand(e.vz[0], e.vz[1]), e.life * rand(0.7, 1.1));
-      }
-    }
-    for (const f of s.floods) { _w.copy(f.localAim); s.group.localToWorld(_w); f.holder.lookAt(_w); }
-    if (s.searchlights) for (const sl of s.searchlights) {
-      const sw = sl.sweep, ang = sw.base + Math.sin(T * sw.speed + sw.ph) * sw.amp;
-      _w.set(Math.cos(ang), 0, -Math.sin(ang)).multiplyScalar(sw.dist); _w.y = -3;
-      _w.applyQuaternion(s.group.quaternion).add(s.group.position); _w.y = 0;
-      sl.holder.lookAt(_w);
-    }
+/* ---- the base: radar, searchlights (guard towers sweep the ground outside, the sky lights the sky) ---- */
+const _w = new V3();
+function updateSite(dt) {
+  for (const r of BASE.radars) r.rotation.y += dt * 1.4;
+  for (const sl of BASE.guards) {
+    const sw = sl.sweep, ang = sw.base + Math.sin(T * sw.speed + sw.ph) * sw.amp, h = sl.holder.position;
+    sl.holder.lookAt(_w.set(h.x + Math.cos(ang) * sw.dist, 0, h.z - Math.sin(ang) * sw.dist));
+  }
+  const bandit = AUD.armed && ENEMIES.find(e => (e.kind === 'bandit' || e.kind === 'heli') && enemyAlive(e) && !e.duel);
+  for (const sl of BASE.skyLights) {
+    const s = sl.sky, h = sl.holder.position;
+    if (bandit && (sl.trackT = (sl.trackT || 0) + dt) > 0) { sl.aim = (sl.aim || _w.clone()).lerp(bandit.p, Math.min(1, dt * 1.5)); sl.holder.lookAt(sl.aim); continue; }
+    const a = T * s.speed + s.ph, el = s.elev + Math.sin(T * 0.13 + s.ph) * 0.25;
+    sl.aim = (sl.aim || new V3()).set(h.x + Math.cos(a) * Math.cos(el) * 40, h.y + Math.sin(el) * 40, h.z + Math.sin(a) * Math.cos(el) * 40);
+    sl.holder.lookAt(sl.aim);
   }
 }
 function updateLights() {
   for (const m of NAV_MATS) {
     let a = ENV.lightsOn; const b = m.userData.blink;
-    if (b) { const ph = ((T / b.period) + (b.phase || 0)) % 1; a *= ph < b.duty ? 1 : 0; }
+    if (b) { const ph = ((T / b.period) + (b.phase || 0)) % 1; a *= ((ph + 1) % 1) < b.duty ? 1 : 0; }
     m.opacity = a; m.size = m.userData.scale * ENV.ppu;
   }
   for (const s of SEARCHLIGHTS) {
@@ -645,13 +609,11 @@ function updateLights() {
     if (s.light) { s.light.intensity = s.o.intensity * on; s.light.visible = ENV.lightsOn > 0; }
     if (s.cone) s.cone.material.uniforms.uOpacity.value = s.o.coneOpacity * on * (0.45 + 0.55 * ENV.night);
   }
-  FX.foam.mat.size = 1.05 * ENV.ppu;
 }
 
 /* ---- missions beyond the screen edge (only while there is no music) ---- */
 let missionTimer = rand(25, 45);
-const LAUNCHING = new Set(['lift_wait', 'lift_prep', 'roll_out', 'lift_up', 'queued', 'taxi_out', 'hold', 'launch', 'climb',
-  'tow_pad', 'unfold', 'spinup', 'lift', 'depart']);
+const LAUNCHING = new Set(['ready', 'pushback', 'taxi_out', 'hold_short', 'lineup', 'takeoff_roll', 'climb', 'spinup', 'lift', 'depart']);
 function updateMissions(dt) {
   if (CFG.missions <= 0 || AUD.armed) return;
   missionTimer -= dt; if (missionTimer > 0) return;
@@ -664,12 +626,12 @@ function dispatchFlight() {
     if (all.some(a => LAUNCHING.has(a.state))) continue;
     const ready = all.filter(a => !isDown(a) && !a.onMission);
     if (!ready.length || ready.some(a => a.state !== 'orbit' || a.landReq)) continue;
-    if (ready[0].spec.missions && !ready[0].spec.missions.length) continue;   // no missions (tanker): not a flight on station either
+    if (ready[0].spec.missions && !ready[0].spec.missions.length) continue;   // no missions (tankers): not a flight on station either
     onStation++;                                             // counts a pair left behind while the other is away
-    // never send part of a flight while its other part is away; members on deck don't block (manual ops)
+    // never send part of a flight while its other part is away; members on the ground don't block (manual ops)
     if (!all.some(a => a.onMission) && ready.every(a => a.airT > 15)) cands.push({ base, ready, full: ready.length === all.length, size: all.length });
   }
-  // several flights can be away at once, but one flight always stays on station over the fleet
+  // several flights can be away at once, but one flight always stays on station over the base
   if (!cands.length || onStation <= 1) return false;
   // assembled flights first; a partly launched flight only goes when no flight is complete
   const full = cands.filter(c => c.full), g = pick(full.length ? full : cands);
@@ -686,34 +648,34 @@ let chatterTimer = 3;
 function updateChatter(dt) {
   const armed = AUD.armed;
   const awacs = AIRCRAFT.find(a => a.isAwacs && a.airborne);
-  const hq = awacs ? [awacs.callsign, 'awacs'] : [RADIO_NAMES.carrier, 'ship'];
+  const hqs = awacs ? [awacs.callsign, 'awacs'] : [RADIO_NAMES.tower, 'tower'];
   const C = { cat: 'combat', prio: 0 };
   // the 5-second safety check before combat: unknown contacts... then either combat or a false alarm
   const arming = AUD.active && AUD.soundStart >= 0 && !armed;
   if (arming && !AUD.wasArming) RADIO.q = RADIO.q.filter(m => m.cat !== 'alert');   // a pending "false alarm" is obsolete now
   if (arming && !AUD.wasArming && T > (AUD.alertCd || 0)) {
     AUD.alertCd = T + 6; AUD.alerted = true;
-    RADIO.say(hq[0], radioLine(LINES.unknownContacts, { B: bearingWords(rand(0, TAU)) }), { role: hq[1], cat: 'alert', prio: 3 });
+    RADIO.say(hqs[0], radioLine(LINES.unknownContacts, { B: bearingWords(rand(0, TAU)) }), { role: hqs[1], cat: 'alert', prio: 3 });
   }
   if (!arming && AUD.wasArming && !armed && AUD.alerted) {
     AUD.alerted = false;
-    RADIO.say(hq[0], radioLine(LINES.falseAlarm), { role: hq[1], cat: 'alert', prio: 3 });
+    RADIO.say(hqs[0], radioLine(LINES.falseAlarm), { role: hqs[1], cat: 'alert', prio: 3 });
   }
   if (armed && !AUD.wasArmed) RADIO.q = RADIO.q.filter(m => m.cat !== 'alert');
   if (armed) AUD.alerted = false;
   AUD.wasArming = arming;
-  if (armed && !AUD.wasArmed) { RADIO.say(hq[0], radioLine(COMBAT.start), { role: hq[1], cat: 'combat', prio: 3 }); chatterTimer = rand(3, 5); }
-  if (!armed && AUD.wasArmed) RADIO.say(hq[0], radioLine(COMBAT.end), { role: hq[1], prio: 2, delay: 1 });
+  if (armed && !AUD.wasArmed) { RADIO.say(hqs[0], radioLine(COMBAT.start), { role: hqs[1], cat: 'combat', prio: 3 }); chatterTimer = rand(3, 5); }
+  if (!armed && AUD.wasArmed) RADIO.say(hqs[0], radioLine(COMBAT.end), { role: hqs[1], prio: 2, delay: 1 });
   AUD.wasArmed = armed;
   if (!AUD.fighting) return;
   chatterTimer -= dt; if (chatterTimer > 0) return;
   chatterTimer = rand(3.5, 7) * (1 - 0.45 * STRESS.level);       // more radio traffic as stress builds
   if (RADIO.q.filter(m => m.cat === 'combat').length > 1) return;
-  // fighters and helicopters talk about their own passes (js/airwar.js); here the AWACS, the ships and the enemy
+  // fighters and helicopters talk about their own passes (js/airwar.js); here the AWACS, the base's defences and the enemy
   const foes = CFG.enemies ? ENEMIES.filter(e => e.cs && enemyAlive(e)) : [];
   if (foes.length && Math.random() < 0.15 + 0.25 * STRESS.level) enemySay(pick(foes).cs, ENEMY_LINES.chatter, null, { prio: 1 });
   else if (awacs && Math.random() < 0.45) awacs.say(radioLine(COMBAT.awacs), C);
-  else RADIO.say(pick(RADIO_NAMES.escorts), radioLine(COMBAT.ship), { role: 'ship', cat: 'combat', prio: 0 });
+  else RADIO.say(pick(RADIO_NAMES.defense), radioLine(COMBAT.base), { role: 'ground', cat: 'combat', prio: 0 });
 }
 
 /* ---- control panel ---- */
@@ -723,7 +685,7 @@ let uiTimer = 0, meterTimer = 0, envTimer = 0;
 const PAGER = { page: 0, size: 0, rowH: 0, shownH: 0, rows: [], chips: [] };   // shownH: the row height the page was laid out with
 function pageSize() {
   const r = PAGER.rows.find(r => r.offsetHeight > 0); if (r) PAGER.rowH = r.offsetHeight;   // measured while shown (none while collapsed)
-  return Math.max(4, Math.floor(innerHeight * 0.42 / (CFG.panelScale / 100) / (PAGER.rowH || 23)));
+  return Math.max(4, Math.floor(innerHeight * 0.38 / (CFG.panelScale / 100) / (PAGER.rowH || 23)));
 }
 function showPage() {
   const n = PAGER.rows.length, size = PAGER.size = pageSize(), pages = Math.max(1, Math.ceil(n / size)); PAGER.shownH = PAGER.rowH;
@@ -737,7 +699,7 @@ function showPage() {
 }
 function buildList() {
   const list = document.getElementById('list'); list.innerHTML = '';
-  // group flights together: by type, then callsign (JOKER 1, JOKER 2, … QUEEN 1 …)
+  // group flights together: by type, then callsign (MOBIUS 1, MOBIUS 2, … GARUDA 1 …)
   const typeOrder = [...FIXED_ORDER, ...HELI_ORDER];
   const csKey = cs => { const m = /^(.*?)(?:\s+(\d+))?$/.exec(cs); return [m[1], +(m[2] || 0)]; };
   const sorted = AIRCRAFT.slice().sort((a, b) => {
@@ -750,7 +712,7 @@ function buildList() {
   sorted.forEach(a => {
     const row = document.createElement('div'); row.className = 'row';
     row.innerHTML = `<span class="tp">${a.spec.tag}</span><span class="nm"></span><span class="st"></span><button class="act"></button>`;
-    row.querySelector('.nm').textContent = a.callsign + (a.host !== CARRIER ? ' ⚓' : '');
+    row.querySelector('.nm').textContent = a.callsign;
     const btn = row.querySelector('button');
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -774,6 +736,13 @@ function buildList() {
   showPage();
   updateUI();
 }
+/* the base's sites on the panel: tower, air defence battery, tank platoon, point defence */
+const SITES = [
+  { tp: 'TWR', name: () => RADIO_NAMES.tower, desc: 'air traffic', fires: ['TOWER', 'OPS', 'RUNWAY', 'HANGAR', 'HAS', 'FUEL'], busy: () => AIRFIELD.rwy.size || AIRFIELD.arrivals.size },
+  { tp: 'SAM', name: () => RADIO_NAMES.patriot, desc: 'Patriot · NASAMS', fires: ['PATRIOT'], busy: () => ENEMIES.some(e => (e.kind === 'ballistic' || e.kind === 'bandit') && enemyAlive(e)) },
+  { tp: 'ARM', name: () => RADIO_NAMES.armor, desc: 'tank platoon', fires: [], busy: () => ENEMIES.some(e => e.kind === 'armor' && enemyAlive(e)) },
+  { tp: 'C-RAM', name: () => RADIO_NAMES.cram, desc: 'point defence', fires: ['FIRE STN'], busy: () => ENEMIES.some(e => (e.kind === 'cruise' || e.kind === 'heli') && enemyAlive(e)) }
+];
 function buildUI() {
   document.getElementById('allUp').onclick = () => { AIRCRAFT.forEach(a => a.canLaunch() && a.requestLaunch()); updateUI(); };
   document.getElementById('allDown').onclick = () => { AIRCRAFT.forEach(a => a.canLand() && a.requestLand()); updateUI(); };
@@ -787,18 +756,14 @@ function buildUI() {
   };
   const meter = document.getElementById('meter');
   for (let i = 0; i < 28; i++) meter.appendChild(document.createElement('i'));
-  // ship callsigns, for reference
-  const fleet = document.getElementById('fleet');
-  SHIPS.forEach(s => {
+  const sites = document.getElementById('sites');
+  for (const s of SITES) {
     const row = document.createElement('div'); row.className = 'row';
-    row.innerHTML = '<span class="tp"></span><span class="nm"></span><span class="st"></span>';
-    row.querySelector('.tp').textContent = s === CARRIER ? 'CVN' : 'DDG';
-    row.querySelector('.nm').innerHTML = '<b></b><i></i>';
-    row.querySelector('.nm b').textContent = s.radio;
-    row.querySelector('.nm i').textContent = s === CARRIER ? 'carrier' : s.side < 0 ? 'escort · port' : 'escort · stbd';
-    s.ui = { st: row.querySelector('.st') };
-    fleet.appendChild(row);
-  });
+    row.innerHTML = '<span class="tp"></span><span class="nm"><b></b><i></i></span><span class="st"></span>';
+    row.querySelector('.tp').textContent = s.tp; row.querySelector('.nm b').textContent = s.name(); row.querySelector('.nm i').textContent = s.desc;
+    s.ui = { st: row.querySelector('.st'), nm: row.querySelector('.nm b') };
+    sites.appendChild(row);
+  }
 }
 function updateUI() {
   // window / panel size or the row height changed: lay the pages out again (read before the writes below: no forced reflow)
@@ -806,18 +771,18 @@ function updateUI() {
   const now = getNow();
   document.getElementById('clock').textContent = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   const e = ENV.elev;
-  document.getElementById('daystate').textContent = (e > 6 ? 'DAY' : e > -6 ? 'TWILIGHT' : 'NIGHT');
+  document.getElementById('daystate').textContent = (e > 6 ? 'DAY' : e > -6 ? 'TWILIGHT' : 'NIGHT') + ' · ' + TERRAIN.season.toUpperCase();
   const as = document.getElementById('audiostate');
   const arming = AUD.active && !AUD.armed && AUD.soundStart >= 0;
-  // fleet status: patrol in silence, unknown contacts while the sound arms, combat once armed
-  as.textContent = (AUD.holding ? `◐ NO CONTACTS · ${Math.max(0, AUD.holdUntil - RT()).toFixed(0)}s` : AUD.armed ? '● COMBAT' : arming ? `◌ UNKNOWN CONTACTS · ${Math.max(0, ARM_DELAY - (RT() - AUD.soundStart)).toFixed(0)}s` : '○ ON PATROL') + (FILE_AUDIO.playing ? ' (FILE)' : AUD.demo && DEMO.on ? ' (DEMO)' : '');
+  // base status: on alert in silence, unknown contacts while the sound arms, air raid once armed
+  as.textContent = (AUD.holding ? `◐ NO CONTACTS · ${Math.max(0, AUD.holdUntil - RT()).toFixed(0)}s` : AUD.armed ? '● AIR RAID' : arming ? `◌ UNKNOWN CONTACTS · ${Math.max(0, ARM_DELAY - (RT() - AUD.soundStart)).toFixed(0)}s` : '○ ON ALERT') + (FILE_AUDIO.playing ? ' (FILE)' : AUD.demo && DEMO.on ? ' (DEMO)' : '');
   as.className = AUD.armed ? 'on' : '';
   const th = document.getElementById('threat');
   if (th) { const n = Math.round(STRESS.level * 10); th.textContent = '▮'.repeat(n) + '▯'.repeat(10 - n) + '  ' + STRESS.label; th.className = 'lv' + Math.min(3, Math.floor(STRESS.level * 4)); }
   let airN = 0;
   for (const a of AIRCRAFT) {
     const [txt, cls] = a.retiring ? ['RETIRING', 'wait'] : a.status; a.ui.st.textContent = txt; a.ui.st.className = 'st ' + cls;
-    if (a.state !== 'parked' && a.state !== 'hangar') airN++;
+    if (a.state !== 'parked') airN++;
     const b = a.ui.btn;
     if (a.canLaunch()) { b.textContent = 'LAUNCH'; b.disabled = false; b.className = 'act up'; }
     else if (a.canLand()) { b.textContent = 'RECOVER'; b.disabled = false; b.className = 'act down'; }
@@ -826,8 +791,9 @@ function updateUI() {
   }
   document.getElementById('count').textContent = `${airN}/${AIRCRAFT.length}`;
   const engaged = AUD.armed && CFG.fire > 0;
-  for (const s of SHIPS) {
-    const [txt, cls] = SHIP_FIRES.some(f => f.ship === s) ? ['DAMAGED', 'wait'] : engaged ? ['ENGAGING', 'busy'] : ['ON STATION', 'deck'];
+  for (const s of SITES) {
+    const hit = BASE_FIRES.some(f => s.fires.includes(f.name));
+    const [txt, cls] = hit ? ['DAMAGED', 'wait'] : engaged && s.busy() ? ['ENGAGING', 'busy'] : s.tp === 'TWR' && s.busy() ? ['RUNWAY IN USE', 'air'] : ['ON ALERT', 'deck'];
     s.ui.st.textContent = txt; s.ui.st.className = 'st ' + cls;
   }
   const chk = document.getElementById("autoChk"); if (chk.checked !== CFG.auto) chk.checked = CFG.auto;
@@ -839,19 +805,6 @@ function updateMeter() {
     const v = (AUD.raw[bin] + AUD.raw[64 + bin]) / 2;
     bars[i].style.transform = `scaleY(${Math.max(0.06, Math.min(1, v * 1.4))})`;
   }
-}
-
-/* ---- elevators & jet blast deflectors ---- */
-function updateDeckMachinery(dt) {
-  for (const L of CARRIER.lifts) {
-    L.y += clamp(L.target - L.y, -0.55 * dt, 0.55 * dt);
-    L.grp.position.y = L.y;
-  }
-  CARRIER.jbds.forEach((j, i) => {
-    const c = FD.cats[i], up = c.busy && (c.busy.state === 'hold' || c.busy.state === 'launch') ? 1 : 0;
-    j.a += clamp(up - j.a, -dt * 0.9, dt * 0.9);
-    j.piv.rotation.z = -j.a * 1.05;
-  });
 }
 
 /* ---- main loop ---- */
@@ -871,7 +824,7 @@ function frame(ms) {
   if (CFG.shadows) fitShadow();
   renderer.render(scene, camera);
 }
-/* The sun's shadow camera covers just the visible sea: the light-space bounds of the screen corners at sea level.
+/* The sun's shadow camera covers just the visible ground: the light-space bounds of the screen corners at ground level.
    Anything casting onto the screen lies above that area along the light, however far out or high (a jet climbing
    out); a fixed box cut such shadows off. Follows zoom, window size and the rotating camera. */
 const _shc = new V3(), _shi = new THREE.Matrix4(), SCREEN_CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
@@ -884,28 +837,21 @@ function fitShadow() {
     AIRWAR.groundAt(c[0], c[1], 0, _shc).applyMatrix4(_shi);
     x0 = Math.min(x0, _shc.x); x1 = Math.max(x1, _shc.x); y0 = Math.min(y0, _shc.y); y1 = Math.max(y1, _shc.y);
   }
-  const m = 4;   // waves, ships' sides
+  const m = 6;   // buildings and trees just off the screen edge
   if (Math.abs(sc.left - (x0 - m)) + Math.abs(sc.right - (x1 + m)) + Math.abs(sc.bottom - (y0 - m)) + Math.abs(sc.top - (y1 + m)) < 0.5) return;
   sc.left = x0 - m; sc.right = x1 + m; sc.bottom = y0 - m; sc.top = y1 + m; sc.updateProjectionMatrix();
 }
 const TIME_SCALE = Math.max(1, Math.round(parseFloat(QS.get('ts') || '1')));
-let wcAcc = 0;
 /* start-up splash: covers the first seconds, when settings / WE properties may rebuild and restore the air wing */
 let splash = document.getElementById('splash');
 function step(dt) {
   T += dt;
   if (splash && T > 3.2) { const s = splash; splash = null; s.classList.add('off'); setTimeout(() => s.remove(), 700); }
   updateArming();
-  WAVE.flow = 2.2 * CFG.speed / 100; WAVE.amp = CFG.waves / 100;
-  waveAdvance(dt);
-  waterUniforms.uPh.value.set(WAVE.phase[0], WAVE.phase[1], WAVE.phase[2], WAVE.phase[3]); waterUniforms.uAmp.value = WAVE.amp;
-
-  updateShips(dt);
-  wcAcc += dt * 35 * WAVE.amp; // whitecaps
-  while (wcAcc > 1) { wcAcc--; FX.foam.emit(rand(-120, 120), rand(-120, 120), rand(-0.3, 0.3), rand(-0.3, 0.3), rand(1.5, 3.5)); }
+  updateSite(dt);
   updateMounts(dt);
-  updateDeckMachinery(dt);
   for (const a of AIRCRAFT) a.update(dt);
+  AIRFIELD.update(dt);
   retireAircraft();
   missionWorldUpdate(dt);
   PERSIST.update(dt);
@@ -917,9 +863,9 @@ function step(dt) {
   FX.tracers.update(dt);
   FX.flash.update(dt);
   FX.smoke.update(dt, ENV.smokeTint, camera);
-  FX.splash.update(dt, WAVE.flow, ENV.splashTint);
-  FX.foam.update(dt, WAVE.flow);
+  FX.scorch.update(dt);
   FX.lights.update(dt, 0.6 + ENV.night * 0.8);
+  TERRAIN.update(dt);
   STRESS.update(dt);
   updateCombat(dt);
   AIRWAR.update(dt);

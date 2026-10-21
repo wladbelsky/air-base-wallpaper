@@ -52,7 +52,8 @@ test('project.json is a complete Wallpaper Engine web project', () => {
   expect(p.type).toBe('web');
   expect(p.file).toBe('index.html');
   expect(fs.existsSync(path.join(root, p.preview)), 'preview image').toBe(true);
-  for (const k of ['title', 'description', 'workshopid', 'workshopurl']) expect(p[k], k).toBeTruthy();
+  for (const k of ['title', 'description']) expect(p[k], k).toBeTruthy();
+  if (p.workshopid) expect(p.workshopurl, 'workshopurl').toContain(p.workshopid);   // set once it is on the Workshop
   expect(p.general.supportsaudioprocessing).toBe(true);
   for (const [k, prop] of Object.entries(p.general.properties)) {
     expect(typeof prop.order, `${k}.order`).toBe('number');
@@ -63,8 +64,8 @@ test('project.json is a complete Wallpaper Engine web project', () => {
   }
 });
 
-test('README links the live demo and the Workshop page', () => {
+test('README links the live demo (and the Workshop page once there is one)', () => {
   const r = read('README.md'), p = JSON.parse(read('project.json'));
-  expect(r).toContain('https://wladbelsky.github.io/carrier-wallpaper/');
-  expect(r).toContain(p.workshopid);
+  expect(r).toContain('https://wladbelsky.github.io/forward-air-base/');
+  if (p.workshopid) expect(r).toContain(p.workshopid);
 });

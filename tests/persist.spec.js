@@ -5,8 +5,8 @@ async function setUp(wp) {
   await wp.boot();
   await wp.run(() => {
     CFG.auto = false; CFG.missions = 0; CFG.flyby = 0; buildAirWing(); TANKER.timer = 1e9;
-    window.__up = AIRCRAFT.filter(a => a.spec.key === 'fa18' && flightOf(a) === CALLSIGNS.fa18[0]);
-    window.__away = AIRCRAFT.filter(a => a.spec.key === 'f14');
+    window.__up = AIRCRAFT.filter(a => a.spec.key === 'f16' && flightOf(a) === CALLSIGNS.f16[0]);
+    window.__away = AIRCRAFT.filter(a => a.spec.key === 'f22');
     [...__up, ...__away].forEach(a => a.requestLaunch());
   });
   const up = await wp.until(() => [...__up, ...__away].every(a => a.state === 'orbit'), 900);
@@ -33,6 +33,8 @@ test('aircraft in the air and on missions, and the threat level, come back after
     radio: RADIO.q.map(m => m.text)
   }));
   for (const cs of want.up) expect(r.orbit).toContain(cs);
+  // the restored aircraft keep their homes: nobody else moved in
+  expect(await wp.run(() => AIRCRAFT.every(a => a.spot.occ === a))).toBe(true);
   expect(r.away).toEqual(want.away);
   expect(r.stress).toBeCloseTo(0.6, 5);
   const restoreLines = await wp.run(() => LINES.restore);
@@ -47,9 +49,9 @@ test('unknown aircraft in a saved session are ignored', async ({ wp }) => {
   await wp.boot();
   // saveState off for this page only, or the save on pagehide would overwrite the planted session
   await wp.run(() => { CFG.saveState = false; localStorage.setItem(PERSIST.KEY, JSON.stringify({ v: 1, stress: 0.2, air: [
-    { key: 'fa18', cs: 'NOBODY 9', host: 0, mission: false }, { key: 'zz', cs: 'X', host: 0, mission: true }, { key: 'fa18', cs: CALLSIGNS.fa18[0] + ' 1', host: 0, mission: false }] })); });
+    { key: 'f16', cs: 'NOBODY 9', mission: false }, { key: 'zz', cs: 'X', mission: true }, { key: 'f16', cs: CALLSIGNS.f16[0] + ' 1', mission: false }] })); });
   await wp.reload();
-  const r = await wp.run(() => ({ lead: AIRCRAFT.find(a => a.callsign === CALLSIGNS.fa18[0] + ' 1').state, missions: AIRCRAFT.filter(a => a.mission).length }));
+  const r = await wp.run(() => ({ lead: AIRCRAFT.find(a => a.callsign === CALLSIGNS.f16[0] + ' 1').state, missions: AIRCRAFT.filter(a => a.mission).length }));
   expect(r.lead).toBe('orbit');
   expect(r.missions).toBe(0);
   expect((await wp.sim(30)).violations).toEqual([]);

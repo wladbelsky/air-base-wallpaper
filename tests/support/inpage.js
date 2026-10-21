@@ -7,21 +7,17 @@
   const DT = 0.05;
 
   // states in which an aircraft is on a mission leg (registerLeg in missions.js) / a refuelling pass (tanker.js)
-  H.MISSION_STATES = new Set(['mission_out', 'mission', 'mission_back', 'sling_to', 'sling_hook', 'sling_drop', 'ship_out', 'ship_hover', 'ship_watch']);
+  H.MISSION_STATES = new Set(['mission_out', 'mission', 'mission_back']);
   H.TANK_STATES = new Set(['tank_out', 'tank_wait', 'tank_pass', 'tank_back']);
-  H.CAT_STATES = new Set(['queued', 'taxi_out', 'hold', 'launch']);
-  // who may hold the landing area (from 'orbit' straight into approach; released while taxiing clear) / an elevator
-  H.RUNWAY_STATES = new Set(['approach', 'final', 'trap', 'taxi_in', 'taxi_stage', 'wait_lift', 'turn']);
-  H.LIFT_STATES = new Set(['lift_wait', 'lift_prep', 'roll_out', 'lift_up', 'queued', 'taxi_out', 'wait_lift', 'onto_lift', 'lift_down', 'roll_in', 'tow_pad', 'tow_lift']);
+  // who may be on the runway (lining up, rolling, landing roll until clear) / on approach
+  H.RUNWAY_STATES = new Set(['lineup', 'takeoff_roll', 'rollout', 'taxi_in']);
+  H.ARRIVAL_STATES = new Set(['approach', 'final']);
   // per-state limits for the stuck detector (s); states missing here use DEFAULT_LIMIT, EXEMPT ones are never stuck
-  H.STATE_LIMITS = { hold: 30, launch: 20, trap: 20, final: 90, approach: 240, lift_up: 40, lift_down: 40, roll_out: 40, roll_in: 40,
-    lift_prep: 60, taxi_out: 60, taxi_in: 60, turn: 30, spinup: 30, spindown: 30, unfold: 40, fold: 40, tow_pad: 60, tow_lift: 60,
-    hover: 60, descend: 60, lift: 40, climb: 240, depart: 240, ret: 300, cbt_out: 180, cbt_rtb: 300, cbt_pass: 240,
-    tank_out: 240, tank_back: 300, tank_pass: 240, mission_out: 400, mission_back: 600, sling_to: 300, sling_hook: 120, sling_drop: 400,
-    ship_out: 600 };
+  H.STATE_LIMITS = { ready: 120, pushback: 90, taxi_out: 420, hold_short: 300, lineup: 40, takeoff_roll: 45, climb: 240, approach: 240, final: 60,
+    go_around: 120, rollout: 90, taxi_in: 360, spinup: 30, lift: 30, depart: 240, ret: 300, hover: 30, descend: 30, spindown: 30,
+    cbt_out: 180, cbt_rtb: 300, cbt_pass: 240, tank_out: 240, tank_back: 300, tank_pass: 240, mission_out: 400, mission_back: 600 };
   H.DEFAULT_LIMIT = 600;
-  H.EXEMPT = new Set(['parked', 'hangar', 'orbit', 'cbt_wait', 'mission', 'ship_hover', 'ship_watch', 'tank_wait',
-    'queued', 'lift_wait', 'wait_lift', 'pad_wait']);   // waiting states depend on traffic: checked by "eventually" tests instead
+  H.EXEMPT = new Set(['parked', 'orbit', 'cbt_wait', 'cbt_orbit', 'mission', 'tank_wait']);   // waiting states depend on traffic: checked by "eventually" tests instead
 
   H.rt = () => rt;
   /* after boot: real time and the clock run on simulated time */
@@ -57,36 +53,28 @@
   H.checkInvariants = () => {
     const v = [], known = new Set(Object.keys(STATUS)), inWing = new Set(AIRCRAFT);
     const who = a => a ? `${a.callsign}[${a.state}]` : String(a);
-    // deck resources
-    FD.cats.forEach((c, i) => {
-      if (!c.busy) return;
-      if (!inWing.has(c.busy)) v.push(`cat ${i} held by an aircraft not in the air wing`);
-      else if (!H.CAT_STATES.has(c.busy.state)) v.push(`cat ${i} held by ${who(c.busy)}`);
-    });
-    if (FD.runway) {
-      if (!inWing.has(FD.runway)) v.push('runway held by an aircraft not in the air wing');
-      else if (!H.RUNWAY_STATES.has(FD.runway.state)) v.push(`runway held by ${who(FD.runway)}`);
+    // runway and arrivals
+    for (const a of AIRFIELD.rwy) if (!inWing.has(a)) v.push(`runway held by an aircraft not in the air wing ${who(a)}`); else if (!H.RUNWAY_STATES.has(a.state)) v.push(`runway held by ${who(a)}`);
+    for (const a of AIRFIELD.arrivals) if (!inWing.has(a) || !H.ARRIVAL_STATES.has(a.state)) v.push(`arrival list holds ${who(a)}`);
+    for (const a of AIRCRAFT) if (H.ARRIVAL_STATES.has(a.state) && !AIRFIELD.arrivals.has(a)) v.push(`on approach but not sequenced ${who(a)}`);
+    if ([...AIRFIELD.rwy].filter(a => a.state === 'rollout').length > 1) v.push('two landing rolls on the runway');
+    // homes: every slot's occupant lives there, every aircraft has its own home (shared only past the base's capacity)
+    for (const l of [PARKING.stands, PARKING.shelters, PARKING.hangars, PARKING.remote, PARKING.heli]) for (const sp of l) {
+      if (!sp.occ) continue;
+      if (!inWing.has(sp.occ)) v.push(`a home held by an aircraft not in the air wing ${who(sp.occ)}`);
+      else if (sp.occ.spot !== sp) v.push(`home occ/spot mismatch: ${who(sp.occ)}`);
     }
-    DECK.fixedSpots.forEach((sp, i) => {
-      if (!sp.occ) return;
-      if (!inWing.has(sp.occ)) v.push(`spot ${i} held by an aircraft not in the air wing`);
-      else if (sp.occ.spot !== sp) v.push(`spot ${i} occ/spot mismatch: ${who(sp.occ)}`);
-      else if (sp.occ.aloft) v.push(`spot ${i} held by an aloft ${who(sp.occ)}`);
-    });
-    const pad = DECK.heliPad.busy;
-    if (pad && (!inWing.has(pad) || pad.aloft)) v.push(`heli pad held by ${who(pad)}`);
-    for (const s of SHIPS) for (const [i, L] of (s.lifts || []).entries()) {
-      if (L.y < L.bottom - 1e-6 || L.y > L.top + 1e-6) v.push(`lift ${i} out of range: ${L.y}`);
-      const b = L.busy;
-      if (b && !b.m) { if (!inWing.has(b)) v.push(`lift ${i} held by an aircraft not in the air wing`); else if (!H.LIFT_STATES.has(b.state)) v.push(`lift ${i} held by ${who(b)}`); }
-      if (b && b.m && !AIRCRAFT.some(a => a.mission === b)) v.push(`lift ${i} held by a finished mission`);
-    }
+    for (const a of AIRCRAFT) if (!a.spot) v.push(`no home ${who(a)}`);
+    // the stand markings / helicopter pads drawn = the homes in use
+    const m = AIRFIELD.marks;
+    if (m && m.stand.count !== m.stands.filter(s => s.occ).length) v.push(`stand marks ${m.stand.count} for ${m.stands.filter(s => s.occ).length} stands in use`);
+    if (m && m.pad.count !== PARKING.heli.filter(s => s.occ).length) v.push(`heli pads ${m.pad.count} for ${PARKING.heli.filter(s => s.occ).length} in use`);
     // aircraft
     for (const a of AIRCRAFT) {
       if (!known.has(a.state)) v.push(`unknown state ${who(a)}`);
       const p = a.mesh.position;
       if (!Number.isFinite(p.x + p.y + p.z + a.v)) v.push(`non-finite position/speed ${who(a)}`);
-      if (a.mesh.visible && a.aloft && p.y < -0.3) v.push(`${who(a)} under water (y=${p.y.toFixed(2)})`);
+      if (a.mesh.visible && a.aloft && p.y < -0.3) v.push(`${who(a)} under ground (y=${p.y.toFixed(2)})`);
       if (!!a.mission !== H.MISSION_STATES.has(a.state)) v.push(`mission context / state mismatch ${who(a)}`);
       if (a.tank && !H.TANK_STATES.has(a.state)) v.push(`tank event outside a tanker state ${who(a)}`);
       if (a.spec.tanker && a.hoseOut && a.state !== 'tank_pass') v.push(`hose out outside the pass ${who(a)}`);
@@ -98,7 +86,9 @@
       if (ev.recv.length < 1 || ev.recv.length > 4) v.push(`tanker event with ${ev.recv.length} receivers`);
       if (new Set(ev.recv.map(flightOf)).size !== 1) v.push('tanker receivers from different flights');
       if (!(ev.cur >= 0 && ev.cur < ev.recv.length)) v.push(`basket index ${ev.cur} out of range`);
-      for (const a of ev.recv) if (!a.spec.armed || !(a instanceof FixedWing)) v.push(`receiver ${who(a)} is not an armed jet`);
+      if (ev.kind === 'drogue' && ev.recv.length > 2) v.push('more than two receivers on the hoses');
+      for (const a of ev.recv) if (!canReceive(a, ev.kind)) v.push(`receiver ${who(a)} can't take fuel from a ${ev.kind} tanker`);
+      if (ev.tanker.spec.tankKind !== ev.kind) v.push('tanker event of another kind than its tanker');
     }
     // bounded pools
     if (RADIO.q.length > 8) v.push(`radio queue ${RADIO.q.length}`);
@@ -110,7 +100,7 @@
   };
 
   /* stuck detector: time each aircraft has spent in its current state (by callsign + host, survives rebuilds) */
-  const keyOf = a => a.callsign + '@' + SHIPS.indexOf(a.host);
+  const keyOf = a => a.callsign;
   H.track = () => {
     const seen = new Set();
     for (const a of AIRCRAFT) {
@@ -159,8 +149,8 @@
   };
   H.fightOff = () => { delete AUD.active; AUD.lastActive = rt - 100; AUD.soundStart = -1; };
 
-  H.states = () => AIRCRAFT.map(a => ({ cs: a.callsign, key: a.spec.key, host: SHIPS.indexOf(a.host), state: a.state, mission: !!a.mission, tank: !!a.tank, retiring: !!a.retiring, landReq: a.landReq }));
-  H.find = (key, n = 0) => AIRCRAFT.filter(a => a.spec.key === key && a.host === CARRIER)[n];
+  H.states = () => AIRCRAFT.map(a => ({ cs: a.callsign, key: a.spec.key, state: a.state, mission: !!a.mission, tank: !!a.tank, retiring: !!a.retiring, landReq: a.landReq }));
+  H.find = (key, n = 0) => AIRCRAFT.filter(a => a.spec.key === key)[n];
 
   /* ---- rendering ---- */
   H.render = () => { if (CFG.shadows) fitShadow(); renderer.render(scene, camera); };   // what frame() does after the steps
@@ -179,7 +169,7 @@
   H.geoSeen = new Set();
   H.geometries = () => {
     H.render();
-    const g = new Set(), roots = [scene, ...Object.values(ENEMY_MODELS), ...Object.values(VESSEL_MODELS)];
+    const g = new Set(), roots = [scene, ...Object.values(ENEMY_MODELS)];
     for (const l of Object.values(FLYBY_MODELS)) for (const m of l) roots.push(m.group || m);
     for (const r of roots) r.traverse(x => { if (x.geometry) g.add(x.geometry); });
     for (const x of g) H.geoSeen.add(x);
@@ -187,6 +177,6 @@
     return { gpu: renderer.info.memory.geometries, reach: g.size, leaked: leaked.length, leakedTypes: [...new Set(leaked.map(x => x.type))] };
   };
   // module-level geometry caches that are kept on purpose while nothing in the scene uses them
-  H.GEO_CACHES = () => [typeof _figGeo !== 'undefined' && _figGeo].filter(Boolean);
+  H.GEO_CACHES = () => [];
   H.props = (o) => window.wallpaperPropertyListener.applyUserProperties(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { value: v }])));
 })();

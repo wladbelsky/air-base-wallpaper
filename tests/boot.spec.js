@@ -1,23 +1,23 @@
 // Start-up: the page boots cleanly in Wallpaper Engine mode and in a plain browser, with the default air wing
 const { test, expect } = require('./support/harness');
 
-test('boots in Wallpaper Engine mode with WebGL and the default air wing', async ({ wp }) => {
+test('boots in Wallpaper Engine mode with WebGL and the default air wing, each aircraft at its own home', async ({ wp }) => {
   await wp.boot();
   const info = await wp.run(() => ({
     webgl: !!renderer.getContext(),
-    counts: Object.fromEntries(Object.keys(AIRCRAFT_TYPES).map(k => [k, AIRCRAFT.filter(a => a.spec.key === k && a.host === CARRIER).length])),
+    counts: Object.fromEntries(Object.keys(AIRCRAFT_TYPES).map(k => [k, AIRCRAFT.filter(a => a.spec.key === k).length])),
     cfg: CFG.counts,
-    ddHelis: AIRCRAFT.filter(a => a.host !== CARRIER).map(a => a.callsign),
     rows: document.querySelectorAll('#list .row').length,
+    homes: new Set(AIRCRAFT.map(a => a.spot)).size, parked: AIRCRAFT.filter(a => a.state === 'parked').length,
     total: AIRCRAFT.length,
-    names: Object.fromEntries(Object.keys(AIRCRAFT_TYPES).map(k => [k, AIRCRAFT.filter(a => a.spec.key === k && a.host === CARRIER).map(a => a.callsign).sort()])),
+    names: Object.fromEntries(Object.keys(AIRCRAFT_TYPES).map(k => [k, AIRCRAFT.filter(a => a.spec.key === k).map(a => a.callsign).sort()])),
     expected: Object.fromEntries(Object.keys(AIRCRAFT_TYPES).map(k => [k, callsignsFor(k, CFG.counts[k]).sort()]))
   }));
   expect(info.webgl).toBe(true);
   expect(info.counts).toEqual(info.cfg);
   expect(info.names).toEqual(info.expected);
-  expect(info.ddHelis).toEqual(['SEAHORSE', 'PETREL']);
   expect(info.rows).toBe(info.total);
+  expect(info.homes, 'every aircraft has a home of its own').toBe(info.total);
 });
 
 test('every aircraft type has a count property in project.json and CFG', async ({ wp }) => {

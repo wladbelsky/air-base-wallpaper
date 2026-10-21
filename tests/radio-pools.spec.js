@@ -25,11 +25,9 @@ test('all line pools are well formed', async ({ wp }) => {
       if (Array.isArray(o)) {
         if (o.length && Array.isArray(o[0])) {   // MISSIONS: [order, done] pairs
           lists++;
-          // pilot.unknown: the done text comes with the reveal on arrival (LINES.pilot.reveal), so it is empty here
-          const emptyDone = where === 'MISSIONS.pilot.unknown';
           for (const [i, p] of o.entries()) {
             if (p.length !== 2) problems.push(`${where}[${i}]: not an order/done pair`);
-            checkList(emptyDone && p[1] === '' ? [p[0]] : p, `${where}[${i}]`);
+            checkList(p, `${where}[${i}]`);
           }
         } else checkList(o, where);
         return;
@@ -52,13 +50,13 @@ test('all line pools are well formed', async ({ wp }) => {
   expect(r.lines).toBeGreaterThan(600);
 });
 
-test('every deck call resolves in peace and in each combat tier, for armed and unarmed aircraft', async ({ wp }) => {
+test('every tower / ground call resolves in peace and in each combat tier, for armed, unarmed, tanker and AWACS', async ({ wp }) => {
   await wp.boot();
   const bad = await wp.run(() => {
-    const out = [], armed = AIRCRAFT.find(a => a.spec.armed), unarmed = AIRCRAFT.find(a => !a.spec.armed && !a.spec.tanker), tanker = AIRCRAFT.find(a => a.spec.tanker);
+    const out = [], armed = AIRCRAFT.find(a => a.spec.armed), unarmed = AIRCRAFT.find(a => !a.spec.armed && !a.spec.tanker && !a.isAwacs), tanker = AIRCRAFT.find(a => a.spec.tanker), awacs = AIRCRAFT.find(a => a.isAwacs);
     for (const combat of [false, true]) for (const lvl of [0.1, 0.5, 0.9]) {
       AUD.combat = combat; STRESS.level = lvl;
-      for (const k of Object.keys(OPS)) for (const a of [armed, unarmed, tanker]) {
+      for (const k of Object.keys(OPS)) for (const a of [armed, unarmed, tanker, awacs]) {
         const [text] = opsLine(k, a);
         if (typeof text !== 'string' || !text || /\{\w+\}/.test(text.replace('{c}', ''))) out.push(`${k} ${a.callsign} combat=${combat} lvl=${lvl}: ${text}`);
       }

@@ -13,7 +13,7 @@ const WE_PROPERTIES = {
   "type": "slider",
   "min": 50,
   "max": 250,
-  "value": 115
+  "value": 90
  },
  "camerarotate": {
   "order": 2,
@@ -122,121 +122,43 @@ const WE_PROPERTIES = {
  },
  "enemies": {
   "order": 16,
-  "text": "Enemy aircraft & missiles in combat",
+  "text": "Enemy aircraft, missiles & armour in combat",
   "type": "bool",
   "value": true
  },
- "fa18count": {
-  "order": 40,
-  "text": "F/A-18 Hornet — count",
-  "type": "slider",
-  "min": 0,
-  "max": 12,
-  "value": 4
- },
- "f14count": {
-  "order": 41,
-  "text": "F-14 Super Tomcat — count",
-  "type": "slider",
-  "min": 0,
-  "max": 8,
-  "value": 2
- },
- "f35count": {
-  "order": 42,
-  "text": "F-35C Lightning II — count",
-  "type": "slider",
-  "min": 0,
-  "max": 8,
-  "value": 2
- },
- "e2dcount": {
-  "order": 43,
-  "text": "E-2D Hawkeye (AWACS) — count",
-  "type": "slider",
-  "min": 0,
-  "max": 2,
-  "value": 1
- },
- "mq25count": {
-  "order": 43,
-  "text": "MQ-25 Stingray (tanker) — count",
-  "type": "slider",
-  "min": 0,
-  "max": 2,
-  "value": 1
- },
- "mh60count": {
-  "order": 44,
-  "text": "MH-60 Seahawk — count",
-  "type": "slider",
-  "min": 0,
-  "max": 4,
-  "value": 1
- },
- "ch53count": {
-  "order": 45,
-  "text": "CH-53 Sea Stallion — count",
-  "type": "slider",
-  "min": 0,
-  "max": 4,
-  "value": 1
- },
- "ah1count": {
-  "order": 46,
-  "text": "AH-1Z Viper — count",
-  "type": "slider",
-  "min": 0,
-  "max": 4,
-  "value": 1
- },
- "cmv22count": {
-  "order": 47,
-  "text": "CMV-22B Osprey — count",
-  "type": "slider",
-  "min": 0,
-  "max": 4,
-  "value": 1
- },
- "ddhelis": {
-  "order": 48,
-  "text": "Destroyer helicopters (MH-60)",
-  "type": "bool",
-  "value": true
- },
- "savestate": {
-  "order": 49,
-  "text": "Remember aircraft in the air between sessions",
-  "type": "bool",
-  "value": true
- },
- "subtitles": {
-  "order": 49,
-  "text": "Radio subtitles",
-  "type": "bool",
-  "value": true
- },
- "carriernumber": {
-  "order": 50,
-  "text": "Carrier hull number",
-  "type": "textinput",
-  "value": "07"
- },
- "waveheight": {
+ "season": {
   "order": 20,
-  "text": "Wave height, %",
-  "type": "slider",
-  "min": 0,
-  "max": 250,
-  "value": 100
+  "text": "Season",
+  "type": "combo",
+  "value": "auto",
+  "options": [
+   {
+    "label": "By the PC date",
+    "value": "auto"
+   },
+   {
+    "label": "Spring (green)",
+    "value": "spring"
+   },
+   {
+    "label": "Summer (desert)",
+    "value": "summer"
+   },
+   {
+    "label": "Autumn (golden)",
+    "value": "autumn"
+   },
+   {
+    "label": "Winter (snow)",
+    "value": "winter"
+   }
+  ]
  },
- "shipspeed": {
+ "weather": {
   "order": 21,
-  "text": "Ship speed, %",
-  "type": "slider",
-  "min": 0,
-  "max": 250,
-  "value": 100
+  "text": "Snowfall / falling leaves",
+  "type": "bool",
+  "value": true
  },
  "shadows": {
   "order": 22,
@@ -287,5 +209,143 @@ const WE_PROPERTIES = {
   "text": "Panel color",
   "type": "color",
   "value": "0.47 0.86 0.67"
+ },
+ "f15count": {
+  "order": 40,
+  "text": "F-15E Strike Eagle — count",
+  "type": "slider",
+  "min": 0,
+  "max": 6,
+  "value": 4
+ },
+ "f16count": {
+  "order": 40,
+  "text": "F-16C Fighting Falcon — count",
+  "type": "slider",
+  "min": 0,
+  "max": 6,
+  "value": 4
+ },
+ "f22count": {
+  "order": 41,
+  "text": "F-22A Raptor — count",
+  "type": "slider",
+  "min": 0,
+  "max": 4,
+  "value": 2
+ },
+ "f35count": {
+  "order": 41,
+  "text": "F-35A Lightning II — count",
+  "type": "slider",
+  "min": 0,
+  "max": 4,
+  "value": 2
+ },
+ "a10count": {
+  "order": 42,
+  "text": "A-10C Thunderbolt II — count",
+  "type": "slider",
+  "min": 0,
+  "max": 4,
+  "value": 2
+ },
+ "e3count": {
+  "order": 42,
+  "text": "E-3 Sentry (AWACS) — count",
+  "type": "slider",
+  "min": 0,
+  "max": 2,
+  "value": 1
+ },
+ "kc46count": {
+  "order": 43,
+  "text": "KC-46 Pegasus (boom tanker) — count",
+  "type": "slider",
+  "min": 0,
+  "max": 2,
+  "value": 1
+ },
+ "c130count": {
+  "order": 43,
+  "text": "C-130J Hercules — count",
+  "type": "slider",
+  "min": 0,
+  "max": 2,
+  "value": 1
+ },
+ "kc130count": {
+  "order": 44,
+  "text": "KC-130J (helicopter tanker) — count",
+  "type": "slider",
+  "min": 0,
+  "max": 2,
+  "value": 1
+ },
+ "ac130count": {
+  "order": 44,
+  "text": "AC-130J Ghostrider (gunship) — count",
+  "type": "slider",
+  "min": 0,
+  "max": 2,
+  "value": 1
+ },
+ "c17count": {
+  "order": 45,
+  "text": "C-17 Globemaster III — count",
+  "type": "slider",
+  "min": 0,
+  "max": 2,
+  "value": 1
+ },
+ "mq9count": {
+  "order": 45,
+  "text": "MQ-9 Reaper — count",
+  "type": "slider",
+  "min": 0,
+  "max": 2,
+  "value": 1
+ },
+ "uh60count": {
+  "order": 46,
+  "text": "UH-60 Black Hawk — count",
+  "type": "slider",
+  "min": 0,
+  "max": 4,
+  "value": 2
+ },
+ "ah64count": {
+  "order": 46,
+  "text": "AH-64D Apache — count",
+  "type": "slider",
+  "min": 0,
+  "max": 4,
+  "value": 2
+ },
+ "uh1count": {
+  "order": 47,
+  "text": "UH-1Y Venom — count",
+  "type": "slider",
+  "min": 0,
+  "max": 4,
+  "value": 2
+ },
+ "savestate": {
+  "order": 49,
+  "text": "Remember aircraft in the air between sessions",
+  "type": "bool",
+  "value": true
+ },
+ "subtitles": {
+  "order": 49,
+  "text": "Radio subtitles",
+  "type": "bool",
+  "value": true
+ },
+ "basename": {
+  "order": 50,
+  "text": "Base name (radio, panel)",
+  "type": "textinput",
+  "value": "SAND ISLAND"
  }
 };
