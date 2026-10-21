@@ -66,6 +66,6 @@ test('project.json is a complete Wallpaper Engine web project', () => {
 
 test('README links the live demo (and the Workshop page once there is one)', () => {
   const r = read('README.md'), p = JSON.parse(read('project.json'));
-  expect(r).toContain('https://wladbelsky.github.io/forward-air-base/');
+  expect(r).toContain('https://wladbelsky.github.io/air-base-wallpaper/');
   if (p.workshopid) expect(r).toContain(p.workshopid);
 });

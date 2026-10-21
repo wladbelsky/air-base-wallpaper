@@ -1,6 +1,6 @@
 # Forward Air Base — web wallpaper for Wallpaper Engine
 
-[![tests](https://github.com/wladbelsky/forward-air-base/actions/workflows/tests.yml/badge.svg)](https://github.com/wladbelsky/forward-air-base/actions/workflows/tests.yml)
+[![tests](https://github.com/wladbelsky/air-base-wallpaper/actions/workflows/tests.yml/badge.svg)](https://github.com/wladbelsky/air-base-wallpaper/actions/workflows/tests.yml)
 
 Isometric forward air base: a runway, hardened aircraft shelters, hangars, a control tower, air defence and tanks on
 the perimeter, and a configurable air wing that taxis, takes off and lands. Everything reacts to the music playing on
@@ -10,7 +10,7 @@ The sequel to [Carrier Strike Group](https://github.com/wladbelsky/carrier-wallp
 
 ![screenshot](screenshot.jpg)
 
-- **Live demo** (runs in the browser): https://wladbelsky.github.io/forward-air-base/
+- **Live demo** (runs in the browser): https://wladbelsky.github.io/air-base-wallpaper/
 
 ## Install
 
