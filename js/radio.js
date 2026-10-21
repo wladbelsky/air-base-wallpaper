@@ -125,6 +125,17 @@ const MISSIONS = {
     ['ISR orbit over the border crossing, bearing {B}.', 'Imagery downlinked. Coming home.'],
     ['support the special forces raid in sector {S}.', 'Raid complete, team exfiltrated. RTB.']
   ],
+  paradrop: {  // C-130 / C-17: low across the field next to the base, on screen
+    troops: [
+      ['paradrop training over the drop zone next to the base. Low pass, then back on station.', 'All jumpers out, good canopies. Back on station.'],
+      ['the airborne company is ready. Drop them on the field by the base, then climb out.', 'Stick is on the ground, all chutes open. Returning.'],
+      ['jump run over the drop zone outside the fence. Watch the wind.', 'Jumpers away, everybody landed in the zone. Back to the orbit.']
+    ],
+    cargo: [
+      ['airdrop the supply bundles on the drop zone next to the base.', 'Bundles on the ground. Returning.'],
+      ['container delivery drill: drop the load on the field outside the fence.', 'Load on the drop zone, chutes good. Back on station.']
+    ]
+  },
   airlift: [   // C-130 / C-17: long logistics runs that end with a landing at the base
     ['airlift run to the logistics hub: ammunition and spares.', 'Inbound from the hub with {P} passengers and {W} pounds of cargo.'],
     ['pick up the replacement F110 engines at the depot, grid {G}.', 'Engines in the back, strapped down. Heading home.'],
@@ -681,6 +692,21 @@ const ENEMY_LINES = {
       'Everything in the air, now! This is our last chance!', "I've lost my wingman. I'm alone out here!", 'Their runway is still open! How?!',
       'Jamming is useless! They see everything!', "Don't look at the fires. Fly!"]
   }
+};
+
+/* ---- scenes on the ground (js/groundops.js): emergency landings, unloading, paradrops ---- */
+LINES.emergency = {
+  mayday: ['Mayday, mayday! Engine fire, request immediate landing!', 'Pan-pan, pan-pan, hydraulic failure, request priority landing.', 'Mayday! Fire light on the left engine, coming straight in!',
+    'Emergency! Losing oil pressure, landing now.', 'Mayday, mayday! Bird strike, engine damaged, coming home.'],
+  tower: ['{C}, runway zero-niner is yours, all traffic hold. Crash crews rolling.', '{C}, copy your mayday. Straight in, cleared to land.', '{C}, emergency vehicles standing by. Cleared to land, any runway exit.'],
+  rolling: ['Crash crews, runway zero-niner, go, go!', 'Fire trucks rolling. Runway closed.', 'All traffic, runway closed for an emergency.'],
+  foam: ['Foam on the aircraft. Fire is out.', 'Pilot is out and okay. Fire suppressed.', 'Engine fire out. Hot brakes cooling.'],
+  tow: ['{C}, tug is hooked up. Runway reopens shortly.', 'Towing {C} clear of the runway.', 'Runway will be open in two minutes. Tug has {C}.']
+};
+LINES.unload = ['Ramp down. Unloading.', 'Cargo is off. Thanks, ground.', 'Loadmaster says all pallets are clear.', 'Pallets off, ramp coming up.'];
+LINES.paradrop = {
+  jump: ['Green light! Go, go, go!', 'Jumpers away!', 'Green light, everybody out!', 'Stick away, good canopies.'],
+  cargo: ['Load clear of the ramp!', 'Cargo away, chutes open!', 'Drop complete, ramp closing.']
 };
 
 /* ---- a restored session (js/persist.js): the HQ is back on the air, a lead answers ({C} = HQ callsign) ---- */

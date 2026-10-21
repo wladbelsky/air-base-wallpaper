@@ -10,7 +10,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 - Plain JS, no build step, no npm. `'use strict'` classic scripts sharing **global** scope
   (no modules). three.js **r149** is vendored as `js/three.min.js` — never edit it.
 - `index.html` loads scripts in dependency order (later files use globals of earlier ones):
-  `core → flightpath → models → base → terrain → airframes → effects → radio → airfield → aircraft → missions → persist → combat → airwar → tanker → main → properties → settings`,
+  `core → flightpath → models → base → terrain → airframes → effects → radio → airfield → aircraft → missions → persist → combat → airwar → tanker → groundops → main → properties → settings`,
   then an inline script registers the WE audio listener (or starts the browser demo beat).
   `main.js` calls `init()` at its end, so anything `init()` needs must be defined before `main.js`.
 
@@ -19,7 +19,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/core.js` | utils (`V3`, `rand`, `clamp`, `lerp`, `smoothstep`, `pick`…), `CFG` defaults, `WIND` (smoke / dust drift), `groundH` (flat ground), `SEASONS` + `seasonNow()`, sun position, sky palette, canvas textures `TEX` |
 | `js/flightpath.js` | `FlightPath`: Dubins CSC curves (turn-radius-limited flight) + lines |
 | `js/models.js` | mesh helpers (`M`, `box`, `cyl`, `taper`, `prism`, `strut`, `deckLine`…), `mergeStatic`, `disposeTree`, nav lights, searchlights, seasonal shared materials `ROOF_MAT` / `ARCH_MAT`, mounts: `buildCIWS` / `buildGun` and the land ones `buildCRAM`, `buildAAGun`, `buildTank`, `buildSamLauncher` (Patriot / NASAMS), `buildAvenger`, `buildPatriotRadar` |
-| `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
+| `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
 | `js/terrain.js` | `TERRAIN`: the ground (tiled canvas texture + vertex-colour patches) and the vegetation per season (InstancedMesh per kind: firs and snow drifts / cacti, rocks, shrubs / leafy trees in spring or autumn colours), weather particles (snowfall, falling leaves) |
 | `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
 | `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (scorch marks, instanced ring buffer), `FlashLights` |
@@ -31,6 +31,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/combat.js` | enemies: `ENEMY_TYPES` (fighters, attack jets, bombers), `HELI_TYPES`, `ARMOR_TYPES`; kinds `bandit`, `cruise`, `ballistic`, `heli`, `armor`; columns (`spawnColumn`), beat-synced hit resolution, `groundHit`, `baseImpact` + `BASE_FIRES` |
 | `js/airwar.js` | `AIRWAR`: combat passes — armed aircraft wait off-screen (`cbt_wait`) and cross the screen chasing / chased by a dogfight bandit, on close air support runs (`cas`) or hunting armour (helicopters); gunships circle over the fight (`cbt_orbit`); screen helpers (`ndc`, `onScreen`, `groundAt`), pass weapons on the beat (`AIRWAR.onBeat`), pass radio |
 | `js/tanker.js` | `TANKER` (a mission-world object): refuelling passes — KC-46 boom with a fighter flight, KC-130 hoses with a helicopter pair (see "Refuelling passes") |
+| `js/groundops.js` | `GROUND_OPS` (a mission-world object): scenes on the ground — emergency landings (crash tenders, tug), unloading a transport (K-loader, pallets), parachutes of the paradrops; pooled vehicle templates `VEH_TEMPLATES` / `VEH_POOL` (see "Ground scenes") |
 | `js/main.js` | WE property listener, scene init, audio analysis + `onBeat`, base weapons (tanks, AA guns, flak, Patriot / NASAMS, Stingers, C-RAM), searchlights, missions, chatter, panel UI (aircraft list + base sites), main loop |
 | `js/properties.js` | **generated** from `project.json` — do not edit by hand |
 | `js/settings.js` | browser-only settings drawer, demo beat, audio-file player (returns early inside WE) |
@@ -85,8 +86,9 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 ## Airfield (`js/airfield.js`, `js/aircraft.js`)
 - **Homes**: every aircraft gets a `PARKING` slot when it is built (`AIRFIELD.assignHome`) and keeps it while it flies;
   `release` on dispose. Fighters: a shelter (HAS), else a front-row stand, else a remote stand; heavies: a hangar (the
-  big one for `big` types), else a heavy stand; the MQ-9 a small hangar; helicopters a pad. Stand markings and
-  helicopter pads are instanced and drawn only for slots in use (`updateMarks`, after every build / count change / retire).
+  big one for `big` types), else a heavy stand; the MQ-9 a small hangar; helicopters a pad. Stand markings are
+  instanced and drawn only for stands in use (`updateMarks`, after every build / count change / retire); the helicopter
+  pads are all drawn, always.
 - **One-way traffic**: the parallel taxiway runs west to the holding point (`BASE_LAYOUT.hold`) of the departure link;
   the apron lane runs east (entered by the west / centre channel, left by the east channel onto the taxiway).
   Front-row stands open onto the taxiway, shelters / hangars / the back remote row onto the lane. Parking is nose
@@ -96,7 +98,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   first in `AIRCRAFT` goes; a three-way knot is untied after 25 s). `onGround` = `GROUND_STATES` (helicopters never).
 - **FixedWing states**: `parked` → `ready` (engines, waits for the door and `pushbackClear`) → `pushback` →
   `taxi_out` → `hold_short` → `lineup` → `takeoff_roll` (brakes, roll, rotate at `vR`) → `climb` → `orbit` →
-  `approach` → `final` → `rollout` → `taxi_in` → `parked`; `go_around` (→ `orbit`, `landReq` kept).
+  `approach` → `final` → `rollout` → `taxi_in` → `parked`; `go_around` (→ `orbit`, `landReq` kept); an emergency:
+  `rollout` → `emergency` (stopped on the runway) → `towed` → `parked` (groundops.js).
   A pair of one flight lines up side by side (`rdz` ±1) and rolls a second apart.
 - **Runway**: `AIRFIELD.rwy` = aircraft on it (lineup … until clear of it); `arrivals` = on approach / final.
   `canLineUp`: runway empty, no arrival on final or within 32 s. `canApproach`: one arrival at a time (the next once the
@@ -120,13 +123,29 @@ Missions fly beyond the screen edge while there is no music. `dispatchFlight` (`
 - **Types**: `registerMission(C)`; `pickMission(lead)` picks by `static weight` among types that are
   `eligible(lead)` — all non-`optIn` types, or exactly the keys in `spec.missions` (allow-list).
   `Mission` (`patrol`, generic: CAP, strikes, CSAR, medevac, overwatch… — text by `textKey()`: `fighter`, `awacs`,
-  `gunship`, `heli_attack`, `heli_transport`), `AirliftMission` (`airlift`, optIn — C-130 / C-17: farther, longer, lands after).
+  `gunship`, `heli_attack`, `heli_transport`), `AirliftMission` (`airlift`, optIn — C-130 / C-17: farther, longer, lands
+  after with cargo: `a.cargo`, unloaded on its stand), `ParadropMission` (`paradrop`, optIn — C-130 / C-17: legs
+  `[Depart, Away, DropPass, Return]`; `DropPass` (`drop_pass`) flies low across the screen over `dropZone()` and drops
+  `GROUND_OPS.dropChute` jumpers or cargo).
 - **New mission type**: subclass `Mission` (or a type), override what differs — `legs(role)`, `static eligible`,
   `static weight` / `optIn`, `textKey()` (key into `MISSIONS`, dots for nesting), `copyKey()` (acknowledgement pool),
   `textVars()` (extra placeholders), `dist` / `away` in the constructor, `finish(a)` — then `registerMission()`.
   Texts go into `MISSIONS` (order / done pairs, `{S} {B} {G} {P} {W}` placeholders) and line pools into `LINES` (radio.js).
 - **Mission-world objects** (things that live in the scene for a mission) `registerMissionWorld({ update(dt), reset() })`;
   `main.js` calls `missionWorldUpdate(dt)` every step and `missionWorldReset()` in `buildAirWing`. `TANKER` is one.
+
+## Ground scenes (`js/groundops.js`)
+`GROUND_OPS` is a mission-world object (peace-time scenes, reset in `buildAirWing`). Vehicles, pallets and parachutes are
+clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / returned to `VEH_POOL` (`takeVehicle` /
+`dropVehicle`, never disposed); `Drive` moves one along a smooth path. Scenes are objects with `update(dt)`, `done`, `end()`.
+- **Emergency landing**: every 8–15 min in peace (`emTimer`) a jet in orbit declares one (`a.emerg`, smoke `trail`);
+  `canApproach` gives it priority, `canLineUp` is closed while `GROUND_OPS.emerg`; it stops on the runway
+  (`emergency`), `EmergencyScene`: two crash tenders from the fire station foam it, a tug tows it home (`towed`, via
+  `AIRFIELD.homeRoute`), the runway opens when it is clear.
+- **Unloading** (`UnloadScene`): a transport parked with `a.cargo` on a stand (not in a hangar): `a.rampT` opens the
+  ramp (C-130 / C-17 models), a K-loader comes from the cargo yard along the service road, three pallets slide onto it,
+  it drives away; `a.groundBusy` holds the aircraft's departure in `ready` meanwhile.
+- **Parachutes** (`dropChute`, `updateChutes`): open, drift with `WIND`, land, the canopy collapses, gone after ~16 s.
 
 ## Combat (`js/combat.js`, `js/airwar.js`, `js/main.js`)
 - Enemy kinds: `bandit` (waves from `ENEMY_TYPES`; bombers / attack jets drop a stick on a `BASE.targets` structure,

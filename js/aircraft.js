@@ -25,7 +25,7 @@ const STATUS = {
   cbt_out: ['ENGAGED ▶', 'air'], cbt_wait: ['ENGAGED', 'air'], cbt_pass: ['ATTACK RUN', 'air'], cbt_orbit: ['FIRE SUPPORT', 'air'], cbt_rtb: ['RTB', 'air']
 };
 const ORBIT_STATES = new Set(['climb', 'depart', 'orbit']);   // flight-mates already given an orbit
-const GROUND_STATES = new Set(['parked', 'ready', 'pushback', 'taxi_out', 'hold_short', 'lineup', 'takeoff_roll', 'rollout', 'taxi_in', 'spinup', 'spindown']);
+const GROUND_STATES = new Set(['parked', 'ready', 'pushback', 'taxi_out', 'hold_short', 'lineup', 'takeoff_roll', 'rollout', 'taxi_in', 'emergency', 'towed', 'spinup', 'spindown']);
 
 /* ======================= Base class ======================= */
 class Aircraft {
@@ -211,7 +211,7 @@ const ORBIT_C = new V3(0, 0, -4);   // orbits are flown around the airfield's ce
 /* ======================= Fixed wing (runway) ======================= */
 class FixedWing extends Aircraft {
   static spec = Object.assign({}, Aircraft.spec, { approachV: 8.5, taxiV: 1.8, rollAcc: 1.5, vR: 8, decel: 1.6, climbOut: 26, bankMax: 1.0, park: 'f' });
-  get engineOn() { return this.state !== 'parked'; }
+  get engineOn() { return this.state !== 'parked' && this.state !== 'towed' && this.state !== 'emergency'; }
   get gearDown() {
     if (this.state === 'orbit' || this.onMission || this.inCombat || this.tank) return false;
     if (this.state === 'climb' || this.state === 'go_around') return this.ps < 14;
@@ -232,8 +232,9 @@ class FixedWing extends Aircraft {
     let glow = 0;
     switch (this.state) {
       case 'parked': this.deckPose(sp.x, sp.z, sp.yaw, 0); this.v = 0; break;
-      case 'ready':                                    // engines running; the tug waits for the door and for traffic
+      case 'ready':                                    // engines running; the tug waits for the door and for traffic (and for an unloading to end)
         glow = 0.12; this.deckPose(sp.x, sp.z, sp.yaw, 0); this.mesh.visible = true;
+        if (this.groundBusy) { this.t = 0; break; }
         if (this.t > 2 && (!AIRFIELD.sheltered(sp) || sp.door > 0.95) && AIRFIELD.pushbackClear(this, this.pb)) {
           this.startDeckPath(this.pb, 0.7, true); this.state = 'pushback';
           if (Math.random() < 0.5) this.call('taxiReq');
@@ -292,7 +293,7 @@ class FixedWing extends Aircraft {
       case 'climb': glow = 0.6; if (this.followPath(dt)) this.state = 'orbit'; break;
       case 'go_around': glow = 0.8; if (this.followPath(dt)) { this.state = 'orbit'; } break;
       case 'orbit':
-        glow = 0.3; this.airT += dt; this.orbitStep(dt);
+        glow = 0.3; this.airT += dt; this.orbitStep(dt); if (this.emerg) this.trail(dt);
         if (this.landReq && AIRFIELD.canApproach(this)) {
           AIRFIELD.arrivals.add(this);
           // straight-in from the west: a Dubins turn to the gate, then the glide path to the touchdown point
@@ -311,6 +312,7 @@ class FixedWing extends Aircraft {
           this.state = 'final'; this.tower('landClear');
         }
         if (this.state === 'final' && this.ps > this.path.length - 14 && !AIRFIELD.clearToLand(this, true)) { this.goAround(); break; }   // something rolled out in front
+        if (this.emerg) this.trail(dt);
         if (this.followPath(dt)) {
           AIRFIELD.arrivals.delete(this); AIRFIELD.rwy.add(this);
           this.state = 'rollout'; this.rx = this.mesh.position.x; this.v = S.approachV;
@@ -322,19 +324,34 @@ class FixedWing extends Aircraft {
         break;
       case 'rollout': {
         glow = 0.12;
+        if (this.emerg) {                              // an emergency stops on the runway: crash crews and a tug (groundops.js)
+          this.v = Math.max(0, this.v - S.decel * dt); this.rx += this.v * dt; this.rwyPose(this.rx, 0); this.trail(dt);
+          if (this.v <= 0) { this.state = 'emergency'; this.t = 0; this.smokeOut = 1; GROUND_OPS.onStopped(this); }
+          break;
+        }
         // brake to a fast taxi on the runway, down to taxi speed for the turn off
         this.v = Math.max(this.rx < this.exitX - 10 ? S.taxiV * 1.8 : S.taxiV, this.v - S.decel * dt); this.rx += this.v * dt;
         this.rwyPose(this.rx, 0);
         if (this.rx >= this.exitX - 4.5 || this.rx > RW.x1 - 2) { this.startDeckPath(AIRFIELD.homeRoute(this.spot, this.rx, this.exitX), S.taxiV); this.dv = this.v; this.state = 'taxi_in'; }
         break;
       }
+      case 'emergency': this.rwyPose(this.rx, 0); this.v = 0; this.trail(dt); break;
       case 'taxi_in':
-        glow = 0.12;
+      case 'towed':
+        glow = this.state === 'towed' ? 0 : 0.12;
         if (AIRFIELD.rwy.has(this) && this.mesh.position.z < RW.z - RW.w / 2 - 1.2) AIRFIELD.rwy.delete(this);
         if (this.followDeck(dt)) { AIRFIELD.rwy.delete(this); this.state = 'parked'; this.t = 0; }
         break;
     }
     this.glow = glow;
+  }
+  /* the tug has it: towed home along the way it would have taxied */
+  startTow() { this.startDeckPath(AIRFIELD.homeRoute(this.spot, this.rx, AIRFIELD.exitFor(this.spot, this.rx)), 1.0); this.state = 'towed'; this.t = 0; }
+  /* an emergency: smoke from the engine (it thins out once the crash crews have foamed it) */
+  trail(dt) {
+    const k = this.smokeOut ?? 1; if (k <= 0.02) return;
+    this.trailT = (this.trailT || 0) + dt;
+    while (this.trailT > 0.05) { this.trailT -= 0.05; FX.smoke.spawn(this.mesh.position.clone().addScaledVector(this.fwd, -this.spec.len * 0.4).setY(this.mesh.position.y + 0.3), { s0: 0.4 * k, s1: 2.2 * k, life: 2.2, a0: 0.55 * k, color: 0x1e1e1e, v: new V3(WIND.x, 0.8, WIND.z) }); }
   }
   goAround() {
     AIRFIELD.arrivals.delete(this);
@@ -478,9 +495,9 @@ class KC130 extends FixedWing {
   get hoseOut() { return this.tank && this.state === 'tank_pass' ? 1 : 0; }
   buildModel() { return buildC130('kc130'); }
 }
-class C130 extends FixedWing { static spec = heavy({ key: 'c130', tag: 'C-130J', speed: 10, orbitR: [34, 70], farOrbit: [64, 80], alt: [14, 18], transport: true, missions: ['airlift'], len: 3.2, span: 4.2, vR: 5.5, rollAcc: 0.6 }); buildModel() { return buildC130('c130'); } }
+class C130 extends FixedWing { static spec = heavy({ key: 'c130', tag: 'C-130J', speed: 10, orbitR: [34, 70], farOrbit: [64, 80], alt: [14, 18], transport: true, missions: ['airlift', 'paradrop'], len: 3.2, span: 4.2, vR: 5.5, rollAcc: 0.6 }); buildModel() { return buildC130('c130'); } }
 class AC130 extends FixedWing { static spec = heavy({ key: 'ac130', tag: 'AC-130J', speed: 9.5, orbitR: [36, 60], alt: [16, 20], armed: true, gunship: true, len: 3.2, span: 4.2, vR: 5.5, rollAcc: 0.6 }); buildModel() { return buildC130('ac130'); } }
-class C17 extends FixedWing { static spec = heavy({ key: 'c17', tag: 'C-17', speed: 12, orbitR: [44, 78], farOrbit: [70, 86], alt: [16, 20], transport: true, missions: ['airlift'], len: 5.6, span: 5.4, big: true, vR: 6, rollAcc: 0.6 }); buildModel() { return buildC17(); } }
+class C17 extends FixedWing { static spec = heavy({ key: 'c17', tag: 'C-17', speed: 12, orbitR: [44, 78], farOrbit: [70, 86], alt: [16, 20], transport: true, missions: ['airlift', 'paradrop'], len: 5.6, span: 5.4, big: true, vR: 6, rollAcc: 0.6 }); buildModel() { return buildC17(); } }
 /* unmanned: no radio of its own on the ground (its operator talks for it), circles over the fight with Hellfires */
 class MQ9 extends FixedWing { static spec = Object.assign({}, FW, { key: 'mq9', tag: 'MQ-9', scale: 1.15, park: 'd', speed: 8, turnR: 14, orbitR: [40, 70], alt: [18, 22], armed: true, gunship: true, drone: true, callsignGroup: 1, len: 1.3, span: 2.3, taxiV: 1.5, vR: 4.5, rollAcc: 0.8, approachV: 5.5, decel: 1.2, bankMax: 0.5 }); buildModel() { return buildMQ9(); } }
 class UH60 extends Helicopter { static spec = Object.assign({}, HELI, { key: 'uh60', tag: 'UH-60', speed: 7.5, orbitR: [18, 46], farOrbit: [50, 62], alt: [8.5, 10.5], transport: true, refuel: 'probe' }); buildModel() { return buildUH60(); } }

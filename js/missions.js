@@ -130,7 +130,55 @@ class AirliftMission extends Mission {
   static key = 'airlift'; static optIn = true;
   constructor(flight, size) { super(flight, size); this.dist = 180; this.away = rand(100, 170); }
   textKey() { return 'airlift'; }
-  finish(a) { super.finish(a); a.landReq = true; }
+  finish(a) { super.finish(a); a.landReq = true; a.cargo = true; }   // unloaded on its stand when it is back (groundops.js)
 }
 registerMission(AirliftMission);
 
+
+/* ---- paradrop (C-130 / C-17): low across the screen over a drop zone at the edge of the base, the jumpers or the
+   cargo under canopies (GROUND_OPS.dropChute), then back to the orbit ---- */
+/* a drop zone: open ground on screen, nothing in the way — outside the fence if any of that is on screen, else a
+   field inside it (away from the runway, the apron and the buildings) */
+function dropZone() {
+  let inside = null;
+  for (let i = 0; i < 60; i++) {
+    const p = AIRWAR.groundAt(rand(-0.7, 0.7), rand(-0.7, 0.5), 0);
+    if (vegBlocked(p.x, p.z) || BASE.targets.some(t => Math.hypot(t.p.x - p.x, t.p.z - p.z) < 10)) continue;
+    if (!insideFence(p.x, p.z)) return p;
+    inside = inside || p;
+  }
+  return inside || AIRWAR.groundAt(rand(-0.5, 0.5), -0.5, 0);
+}
+class DropPass extends Leg {
+  static state = 'drop_pass';
+  enter(a, c) {
+    super.enter(a, c);
+    const m = c.m; if (!m.dz) { m.dz = dropZone(); m.dh = rand(0, TAU); }
+    // in a line abreast behind the lead: the run-in starts off-screen, crosses the drop zone, leaves off-screen
+    const d = new V3(Math.cos(m.dh), 0, Math.sin(m.dh)), side = new V3(-d.z, 0, d.x), alt = rand(8.5, 10);
+    const lag = c.slot * 7, A = m.dz.clone().addScaledVector(d, -95 - lag).addScaledVector(side, c.slot * 2.5), B = m.dz.clone().addScaledVector(d, 95 - lag).addScaledVector(side, c.slot * 2.5);
+    A.y = B.y = alt;
+    a.fly(new FlightPath().addLine(A, B), a.spec.speed * 0.8, a.spec.speed * 0.8); a.mesh.visible = true; a.fwd.copy(d);
+    this.dropAt = 95 + lag - 7; this.n = m.cargo ? 3 : randi(8, 12); this.acc = 0; this.said = false;
+  }
+  update(a, c, dt) {
+    const done = a.followPath(dt);
+    if (a.ps > this.dropAt && this.n > 0 && (this.acc -= dt) <= 0) {
+      this.acc = c.m.cargo ? 0.6 : 0.32; this.n--;
+      const tail = a.mesh.position.clone().addScaledVector(a.fwd, -a.spec.len * 0.55); tail.y -= 0.3;
+      GROUND_OPS.dropChute(tail, a.fwd.clone().multiplyScalar(a.v * 0.35), c.m.cargo);
+      if (!this.said && c.role === 'lead') { this.said = true; a.say(radioLine(c.m.cargo ? LINES.paradrop.cargo : LINES.paradrop.jump), { prio: 1 }); }
+    }
+    if (done) a.mesh.visible = false;
+    return done;
+  }
+}
+registerLeg(DropPass, 'DROP RUN', 'air');
+class ParadropMission extends Mission {
+  static key = 'paradrop'; static optIn = true;
+  constructor(flight, size) { super(flight, size); this.away = rand(15, 30); this.cargo = Math.random() < 0.35; }
+  textKey() { return this.cargo ? 'paradrop.cargo' : 'paradrop.troops'; }
+  copyKey() { return 'airlift'; }
+  legs(role) { return [Depart, Away, DropPass, Return]; }
+}
+registerMission(ParadropMission);

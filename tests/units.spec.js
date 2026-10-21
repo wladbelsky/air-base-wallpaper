@@ -134,9 +134,9 @@ test('pickMission respects allow-lists and eligibility', async ({ wp }) => {
     }
     return { picks, types: Object.keys(MISSION_TYPES).sort() };
   });
-  expect(r.types).toEqual(['airlift', 'patrol']);
-  expect(r.picks.c130).toEqual(['airlift']);
-  expect(r.picks.c17).toEqual(['airlift']);
+  expect(r.types).toEqual(['airlift', 'paradrop', 'patrol']);
+  expect(r.picks.c130).toEqual(['airlift', 'paradrop']);
+  expect(r.picks.c17).toEqual(['airlift', 'paradrop']);
   expect(r.picks.kc46).toEqual([null]);
   for (const k of ['f15', 'f16', 'f22', 'f35', 'a10', 'e3', 'ac130', 'mq9', 'uh60', 'ah64', 'uh1']) expect(r.picks[k], k).toEqual(['patrol']);
 });
@@ -158,6 +158,21 @@ test('airfield: every home is reachable — taxi routes start at the home and en
     return out;
   });
   expect(r).toEqual([]);
+});
+
+test('roads stay off the runway, the taxiway and the apron, and nothing grows on them', async ({ wp }) => {
+  const r = await wp.run(() => {
+    const out = [], R = BASE_LAYOUT.rwy;
+    for (const road of BASE_LAYOUT.roads) for (let i = 0; i < road.length - 1; i++) for (let u = 0; u <= 1; u += 0.05) {
+      const x = road[i][0] + (road[i + 1][0] - road[i][0]) * u, z = road[i][1] + (road[i + 1][1] - road[i][1]) * u;
+      if (x > R.x0 - 2 && x < R.x1 + 2 && Math.abs(z - R.z) < R.w / 2 + 1.6) out.push(`road on the runway at ${x.toFixed(0)},${z.toFixed(0)}`);
+    }
+    let trees = 0; const m = new THREE.Matrix4(), p = new THREE.Vector3();
+    for (const v of TERRAIN.veg) for (let i = 0; i < v.count; i++) { v.getMatrixAt(i, m); p.setFromMatrixPosition(m); if (roadDist(p.x, p.z) < BASE_LAYOUT.ROAD_W / 2) trees++; }
+    return { out: [...new Set(out)], trees };
+  });
+  expect(r.out).toEqual([]);
+  expect(r.trees).toBe(0);
 });
 
 test('seasons: the PC date picks the season unless one is set', async ({ wp }) => {

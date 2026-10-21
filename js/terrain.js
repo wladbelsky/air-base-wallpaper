@@ -18,7 +18,8 @@ function vegBlocked(x, z) {
   if (x > -76 && x < 76 && z > -32 && z < 2) return true;                               // taxiway, apron, remote stands
   if (x > -54 && x < 46 && z > -54 && z < -30) return true;                             // hangars, tower, buildings
   if (x > 4 && x < 36 && z > 12 && z < 36) return true;                                  // heli pad
-  if (x > -10 && x < 2 && z > 13 && z < 24) return true;                                 // fire station
+  if (x > -10 && x < 2 && z > 10 && z < 24) return true;                                 // fire station
+  if (roadDist(x, z) < BL.ROAD_W / 2 + 1.2) return true;                                 // roads
   const gp = BASE_LAYOUT.gatePos, go = BASE_LAYOUT.gateOut;
   if (gp) { const dx = x - gp.x, dz = z - gp.z, along = dx * go.x + dz * go.z, side = Math.abs(dx * go.z - dz * go.x); if (along > -6 && side < 4) return true; }
   return false;
@@ -125,7 +126,7 @@ const TERRAIN = {
       while (n < K.n && tries++ < K.n * 30) {
         const r = 12 + Math.pow(rnd(), 0.8) * 230, a = rnd() * TAU, x = Math.cos(a) * r, z = Math.sin(a) * r;
         if (vegBlocked(x, z)) continue;
-        if (insideFence(x, z) && rnd() > 0.06) continue;                                    // the base itself is mostly open ground
+        if (insideFence(x, z) && rnd() > 0.2) continue;                                     // the base itself is mostly open ground
         if (K.clump && vnoise(x / 24, z / 24, 5 + K.n) < K.clump && rnd() > 0.08) continue;   // forests in clumps
         const s = lerp(K.size[0], K.size[1], rnd());
         _tq.setFromAxisAngle(WUP_T, rnd() * TAU); _ts.set(s, s * lerp(0.85, 1.2, rnd()), s);

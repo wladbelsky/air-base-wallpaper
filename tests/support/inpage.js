@@ -7,14 +7,14 @@
   const DT = 0.05;
 
   // states in which an aircraft is on a mission leg (registerLeg in missions.js) / a refuelling pass (tanker.js)
-  H.MISSION_STATES = new Set(['mission_out', 'mission', 'mission_back']);
+  H.MISSION_STATES = new Set(['mission_out', 'mission', 'mission_back', 'drop_pass']);
   H.TANK_STATES = new Set(['tank_out', 'tank_wait', 'tank_pass', 'tank_back']);
   // who may be on the runway (lining up, rolling, landing roll until clear) / on approach
-  H.RUNWAY_STATES = new Set(['lineup', 'takeoff_roll', 'rollout', 'taxi_in']);
+  H.RUNWAY_STATES = new Set(['lineup', 'takeoff_roll', 'rollout', 'taxi_in', 'emergency', 'towed']);
   H.ARRIVAL_STATES = new Set(['approach', 'final']);
   // per-state limits for the stuck detector (s); states missing here use DEFAULT_LIMIT, EXEMPT ones are never stuck
   H.STATE_LIMITS = { ready: 120, pushback: 90, taxi_out: 420, hold_short: 300, lineup: 40, takeoff_roll: 45, climb: 240, approach: 240, final: 60,
-    go_around: 120, rollout: 90, taxi_in: 360, spinup: 30, lift: 30, depart: 240, ret: 300, hover: 30, descend: 30, spindown: 30,
+    go_around: 120, rollout: 90, taxi_in: 360, emergency: 200, towed: 360, drop_pass: 120, spinup: 30, lift: 30, depart: 240, ret: 300, hover: 30, descend: 30, spindown: 30,
     cbt_out: 180, cbt_rtb: 300, cbt_pass: 240, tank_out: 240, tank_back: 300, tank_pass: 240, mission_out: 400, mission_back: 600 };
   H.DEFAULT_LIMIT = 600;
   H.EXEMPT = new Set(['parked', 'orbit', 'cbt_wait', 'cbt_orbit', 'mission', 'tank_wait']);   // waiting states depend on traffic: checked by "eventually" tests instead
@@ -68,7 +68,7 @@
     // the stand markings / helicopter pads drawn = the homes in use
     const m = AIRFIELD.marks;
     if (m && m.stand.count !== m.stands.filter(s => s.occ).length) v.push(`stand marks ${m.stand.count} for ${m.stands.filter(s => s.occ).length} stands in use`);
-    if (m && m.pad.count !== PARKING.heli.filter(s => s.occ).length) v.push(`heli pads ${m.pad.count} for ${PARKING.heli.filter(s => s.occ).length} in use`);
+    if (m && m.pad.count !== PARKING.heli.length) v.push(`heli pads ${m.pad.count} instead of all ${PARKING.heli.length}`);
     // aircraft
     for (const a of AIRCRAFT) {
       if (!known.has(a.state)) v.push(`unknown state ${who(a)}`);
@@ -96,6 +96,9 @@
     if (MISSILES.length > 300) v.push(`MISSILES ${MISSILES.length}`);
     if (PENDING.length > 300) v.push(`PENDING ${PENDING.length}`);
     if (FLYBYS.length > 8) v.push(`FLYBYS ${FLYBYS.length}`);
+    if (GROUND_OPS.chutes.length > 40) v.push(`parachutes ${GROUND_OPS.chutes.length}`);
+    if (GROUND_OPS.scenes.length > 6) v.push(`ground scenes ${GROUND_OPS.scenes.length}`);
+    if (GROUND_OPS.emerg && !inWing.has(GROUND_OPS.emerg)) v.push('emergency of an aircraft not in the air wing');
     return v;
   };
 
@@ -171,6 +174,7 @@
     H.render();
     const g = new Set(), roots = [scene, ...Object.values(ENEMY_MODELS)];
     for (const l of Object.values(FLYBY_MODELS)) for (const m of l) roots.push(m.group || m);
+    roots.push(...Object.values(VEH_TEMPLATES)); for (const l of Object.values(VEH_POOL)) roots.push(...l);   // pooled ground vehicles / parachutes (groundops.js)
     for (const r of roots) r.traverse(x => { if (x.geometry) g.add(x.geometry); });
     for (const x of g) H.geoSeen.add(x);
     const caches = H.GEO_CACHES(), leaked = [...H.geoSeen].filter(x => !g.has(x) && !x.__disposed && !caches.includes(x));

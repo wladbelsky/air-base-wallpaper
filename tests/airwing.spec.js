@@ -1,5 +1,5 @@
 // Changing the air wing at runtime: new aircraft join at a free home, extras retire after landing, nobody is reset;
-// the stand markings and helicopter pads follow
+// the stand markings follow (the helicopter pads are all drawn, always)
 const { test, expect } = require('./support/harness');
 
 test.beforeEach(async ({ wp }) => {
@@ -19,7 +19,7 @@ test('raising a count adds parked aircraft at free homes without touching those 
   }));
   expect(r.f15).toEqual(r.want);
   expect(r.uh60).toBe(4);
-  expect(r.pads, 'a pad for each helicopter').toBe(r.helis);
+  expect(r.pads, 'all the helicopter pads, always').toBe(12);
   expect(r.homes, 'every aircraft has a home of its own').toBe(r.total);
   expect(r.rows).toBe(r.total);
   for (const [k, s] of Object.entries(before)) {
@@ -42,7 +42,7 @@ test('lowering a count retires the extras: they land first, then leave (and are 
     pads: AIRFIELD.marks.pad.count, helis: AIRCRAFT.filter(a => a instanceof Helicopter).length }));
   expect(after.f15).toEqual(after.want);
   expect(after.uh60).toBe(0);
-  expect(after.pads).toBe(after.helis);
+  expect(after.pads).toBe(12);
   expect(after.rows).toBe(after.total);
   expect((await wp.sim(120)).violations).toEqual([]);
   const geo = await wp.run(() => __t.geometries());

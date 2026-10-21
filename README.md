@@ -27,9 +27,9 @@ From source:
 ## The base
 
 - One runway (09/27) with a parallel taxiway, an apron, hardened aircraft shelters with sliding blast doors, a big and
-  a medium hangar for the heavies, two small hangars for the drones, a control tower with a beacon, an airport
-  surveillance radar, ops and squadron buildings, a fuel farm, a fire station, barracks and a fenced perimeter with
-  guard towers and a gate.
+  a medium hangar for the heavies, two small hangars for the drones, a heliport with twelve pads, a control tower with
+  a beacon, an airport surveillance radar, ops and squadron buildings, a fuel farm, a fire station, barracks, service
+  roads and a fenced perimeter with a perimeter road, guard towers and a gate.
 - Air defence on the edges: a Patriot battery (radar and four launchers), NASAMS, Avenger (Stinger) vehicles, C-RAM
   (Phalanx on trailers) and twin 35 mm AA guns; M1 Abrams tanks in revetments along the southern perimeter.
 - At night: runway edge and threshold lights, the approach lights with their sequenced flashers, PAPI, blue taxiway
@@ -64,7 +64,7 @@ Aircraft counts are set in the wallpaper properties.
 
 - Every aircraft has a home of its own: fighters go into the shelters first, then onto the front-row stands, heavies
   into the hangars, then onto the heavy stands; when those are full, the remote stands at both ends of the apron.
-  Stand markings and helicopter pads appear only where an aircraft lives — change a count and they follow.
+  Stand markings appear only where an aircraft lives — change a count and they follow.
 - Ground traffic: the tug pushes the aircraft back out of its shelter, hangar or stand (the doors open and close),
   it taxis to the holding point of runway 09 — one-way on the taxiway and the apron lane, keeping its distance to the
   aircraft ahead — lines up, rolls and rotates. Two of one flight take off side by side. Coming back it flies a
@@ -101,8 +101,17 @@ landing clearances, go-arounds, helicopter departures and landings, and combat c
 
 While there is no music, flights periodically leave the screen on missions (CAP, SEAD, close air support, recon,
 convoy escort, CSAR, medevac, overwatch…). Each mission has its own radio orders, and the flight returns to the orbit
-afterwards. The C-130s and C-17s fly airlift runs and land when they come back. The **Missions off-screen** property
+afterwards. The C-130s and C-17s fly airlift runs and land when they come back (with cargo to unload), or paradrops. The **Missions off-screen** property
 controls how often this happens (0 = off).
+
+## Scenes on the ground
+
+- **Emergency landings:** now and then a jet comes back with an engine fire, trailing smoke. The runway is cleared
+  for it, it stops on the runway, the crash tenders race out of the fire station and foam it, and a tug tows it home.
+- **Unloading:** a C-17 or C-130 back from an airlift run with cargo opens its ramp on its stand, a K-loader comes from
+  the cargo yard and takes the pallets away.
+- **Paradrops:** a C-130 or C-17 flies low across the screen over a drop zone and paratroopers (or cargo bundles)
+  come down under their canopies, drift with the wind and land.
 
 ## Combat
 

@@ -1,11 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="12" fill="#0b1d2c"/>
   <rect x="2" y="2" width="60" height="60" rx="10" fill="none" stroke="#78dcaa" stroke-opacity=".45" stroke-width="2"/>
-  <path d="M5 47 Q14 49 19 44 M4 40 Q11 42 15 38" fill="none" stroke="#78dcaa" stroke-opacity=".5" stroke-width="2" stroke-linecap="round"/>
-  <g transform="rotate(-35 32 32) translate(32 32) scale(1.1) translate(-32 -32)">
-    <!-- flight deck seen from above: bow to the right, angled deck overhanging to port (top) -->
-    <path d="M7 28 L28 21 L40 25 L50 26 L59 30.5 L59 33.5 L50 38 L7 38 Z" fill="#78dcaa"/>
-    <path d="M10 34.5 L37 25.5" stroke="#0b1d2c" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 2.5"/>
-    <rect x="33" y="35" width="8" height="4.5" rx="1" fill="#0b1d2c"/>
+  <!-- runway from the bottom-left to the top-right corner (as on the wallpaper), a jet climbing out over it -->
+  <g transform="rotate(-38 32 32)">
+    <rect x="4" y="35" width="56" height="8" rx="1.5" fill="#78dcaa" fill-opacity=".35"/>
+    <path d="M8 39 H56" stroke="#0b1d2c" stroke-width="1.6" stroke-dasharray="4 3"/>
+    <path d="M40 18 L28 22 L18 20 L16 22 L24 25 L18 30 L21 31 L30 26 L42 23 Q46 21 44 19 Z" fill="#78dcaa"/>
   </g>
 </svg>

@@ -349,14 +349,16 @@ function buildC130(v, color) {
     const ball = shade(new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), D)); ball.position.set(1.12, fy - 0.2, -0.08); g.add(ball);
   }
   const gr = gear(g, [[1.12, 0], [-0.15, 0.2], [-0.15, -0.2]], 0.13);
-  dyn.push(gr);
+  const ramp = new THREE.Group(); ramp.position.set(-1.0, fy - r * 0.95, 0); g.add(ramp); box(ramp, 0.5, 0.03, 0.34, C2, -0.25, 0, 0);   // loading ramp (st.rampT)
+  dyn.push(gr, ramp);
   navLights(g, [[0.0, wy + 0.03, -2.02, 0xff2a1a], [0.0, wy + 0.03, 2.02, 0x22ff66], [-1.9, fy + 0.3, 0, 0xffffff]], null, 0.9);
   navLights(g, [[-0.4, fy + 0.25, 0, 0xff2020]], { period: 1.2, duty: 0.15, phase: Math.random() }, 1.0);
   mergeStatic(g, dyn);
-  let spin = 0, ang = 0, ext = 0;
+  let spin = 0, ang = 0, ext = 0, rk = 0;
   return jetModel(g, gr, [], 0, 0, {
     more(dt, st) {
       spin += ((st.engineOn ? 1 : 0) - spin) * Math.min(1, dt * 0.8); ang += spin * 40 * dt; spinProps(props, spin, ang);
+      rk += ((st.rampT || 0) - rk) * Math.min(1, dt * 1.2); ramp.rotation.z = lerp(-0.32, 0.29, rk);
       if (!hoses.length) return;
       ext += ((st.hoseOut || 0) - ext) * Math.min(1, dt * 0.9);
       const P = KC130_POD, L = P.len * ext;
@@ -381,10 +383,12 @@ function buildC17(color) {
     box(g, 0.4, 0.14, 0.04, C, x - 0.25, wy - 0.06, s * z);
   }
   const gr = gear(g, [[1.75, 0], [-0.1, 0.3], [-0.1, -0.3]], 0.17);
+  const ramp = new THREE.Group(); ramp.position.set(-1.9, fy - r * 0.95, 0); g.add(ramp); box(ramp, 0.8, 0.04, 0.55, C2, -0.4, 0, 0);   // loading ramp (st.rampT)
   navLights(g, [[-0.7, wy + 0.3, -2.56, 0xff2a1a], [-0.7, wy + 0.3, 2.56, 0x22ff66], [-2.7, fy + 0.4, 0, 0xffffff]], null, 1.0);
   navLights(g, [[-1.2, fy + 0.36, 0, 0xff2020]], { period: 1.2, duty: 0.15, phase: Math.random() }, 1.1);
-  mergeStatic(g, [gr]);
-  return jetModel(g, gr, [], 0, 0);
+  mergeStatic(g, [gr, ramp]);
+  let rk = 0;
+  return jetModel(g, gr, [], 0, 0, { more(dt, st) { rk += ((st.rampT || 0) - rk) * Math.min(1, dt * 1.2); ramp.rotation.z = lerp(-0.3, 0.24, rk); } });
 }
 /* ---------- MQ-9 Reaper — 11 m, 20 m wing: bulbous nose, Y-tail, pusher propeller ---------- */
 function buildMQ9(color) {

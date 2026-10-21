@@ -77,13 +77,15 @@ const AIRFIELD = {
   /* ---- runway ---- */
   eta(a) { return a.path ? (a.path.length - a.ps) / Math.max(1, a.v) : 99; },
   canLineUp(a) {
-    if (this.rwy.size) return false;
+    if (this.rwy.size || GROUND_OPS.emerg) return false;              // an emergency closes the runway until it is towed clear
     for (const b of this.arrivals) if (b.state === 'final' || this.eta(b) < 32) return false;
     return true;
   },
   // one arrival at a time (the next may start its approach once the one ahead is on final); a departure kept waiting
   // at the holding point gets its turn: no new approaches until it has gone
   canApproach(a) {
+    if (a.emerg) return ![...this.arrivals].some(b => b.state === 'final');   // priority: the ones on approach will go around
+    if (GROUND_OPS.emerg) return false;
     if (AIRCRAFT.some(b => b.state === 'hold_short' && b.t > 25)) return false;
     for (const b of this.arrivals) if (b.state !== 'final') return false;
     return this.arrivals.size < 2;
@@ -145,7 +147,7 @@ const AIRFIELD = {
     // an aircraft parked in a closed shelter / hangar isn't drawn (or shadowed)
     for (const a of AIRCRAFT) if (a.state === 'parked' && this.sheltered(a.spot)) a.mesh.visible = a.spot.door > 0.02;
   },
-  /* ---- stand markings and helicopter pads: one instanced mesh each, a mark only where an aircraft lives ---- */
+  /* ---- stand markings (one instanced mesh, a mark only where an aircraft lives) and the helicopter pads (all of them, always) ---- */
   marks: null,
   buildMarks() {
     const box3 = (w, h, d) => new THREE.BoxGeometry(w, h, d);
@@ -163,7 +165,7 @@ const AIRFIELD = {
     for (const s of m.stands) if (s.occ) { m.stand.setMatrixAt(n, M4.makeTranslation(s.x, 0, s.z)); m.stand.setColorAt(n++, c); }
     m.stand.count = n; m.stand.instanceMatrix.needsUpdate = true; if (m.stand.instanceColor) m.stand.instanceColor.needsUpdate = true;
     n = 0;
-    for (const s of PARKING.heli) if (s.occ) { m.pad.setMatrixAt(n, M4.makeTranslation(s.x, 0, s.z)); m.pad.setColorAt(n++, c); }
+    for (const s of PARKING.heli) { m.pad.setMatrixAt(n, M4.makeTranslation(s.x, 0, s.z)); m.pad.setColorAt(n++, c); }
     m.pad.count = n; m.pad.instanceMatrix.needsUpdate = true; if (m.pad.instanceColor) m.pad.instanceColor.needsUpdate = true;
   }
 };

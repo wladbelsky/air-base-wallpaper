@@ -50,13 +50,13 @@ for (const key of ['c130', 'c17']) {
   });
 }
 
-test('pickMission: transports only airlift, tankers nothing, the rest patrol', async ({ wp }) => {
+test('pickMission: transports airlift / paradrop, tankers nothing, the rest patrol', async ({ wp }) => {
   await wp.boot();
   const r = await wp.run(() => Object.fromEntries(['f15', 'c130', 'c17', 'kc46', 'kc130', 'ac130', 'mq9', 'uh60', 'ah64', 'e3'].map(k => {
     const a = AIRCRAFT.find(x => x.spec.key === k), got = new Set(); for (let i = 0; i < 40; i++) { const M = pickMission(a); got.add(M ? M.key : null); }
     return [k, [...got].sort()];
   })));
-  expect(r).toEqual({ f15: ['patrol'], c130: ['airlift'], c17: ['airlift'], kc46: [null], kc130: [null], ac130: ['patrol'], mq9: ['patrol'], uh60: ['patrol'], ah64: ['patrol'], e3: ['patrol'] });
+  expect(r).toEqual({ f15: ['patrol'], c130: ['airlift', 'paradrop'], c17: ['airlift', 'paradrop'], kc46: [null], kc130: [null], ac130: ['patrol'], mq9: ['patrol'], uh60: ['patrol'], ah64: ['patrol'], e3: ['patrol'] });
 });
 
 test('dispatchFlight never sends out the last flight on station, and only in peace', async ({ wp }) => {

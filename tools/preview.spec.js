@@ -1,5 +1,6 @@
 // Renders the Workshop preview (preview.jpg, square 1080x1080) and the README screenshot (screenshot.jpg, 1280x720):
-// an afternoon fight with a dogfight pass on screen, a radio subtitle and the flight-deck panel. Run in Docker:
+// an afternoon fight with a dogfight pass on screen, a radio subtitle and the base ops panel (the seasons take turns
+// by seed). Run in Docker:
 //   powershell -ExecutionPolicy Bypass -File tools/test.ps1 -c tools/preview.config.js
 // Candidates for seeds 1..N go to test-results/<preview|screenshot>-<seed>.jpg; copy the best ones over
 // preview.jpg / screenshot.jpg. Every run clears test-results/ (`-g "preview, seed"` renders only the square ones).
@@ -7,16 +8,16 @@ const { test, expect } = require('../tests/support/harness');
 
 test.setTimeout(5 * 60 * 1000);
 
-const SEEDS = 6;
-// the square preview with a smaller panel, so it doesn't cover the carrier
+const SEEDS = 8, SEASON = ['autumn', 'winter', 'summer', 'spring'];
+// the square preview with a smaller panel, so it doesn't cover the base
 const SHOTS = { preview: { viewport: { width: 1080, height: 1080 }, panel: 70 }, screenshot: { viewport: { width: 1280, height: 720 }, panel: 100 } };
 for (const [name, { viewport, panel }] of Object.entries(SHOTS)) test.describe(name, () => {
   test.use({ viewport });
   for (let seed = 1; seed <= SEEDS; seed++) {
     test(`${name}, seed ${seed}`, async ({ wp, page }) => {
-      await wp.boot({ seed, query: '?hour=15.5' });
+      await wp.boot({ seed, query: `?hour=15.5&season=${SEASON[(seed - 1) % 4]}` });
       await wp.run((s) => { CFG.panelScale = s; applySettings(); }, panel);
-      await wp.sim(150);                                   // flights up, the tanker and missions out and back
+      await wp.sim(150);                                   // flights up, taxiing, the tanker and missions out and back
       await wp.sim(6, { audio: true });                    // the music starts: combat
       await wp.run(() => { STRESS.level = 0.45; });
       // fight until a dogfight pass is well inside the screen with a subtitle up (an enemy one if it comes within ~100 s)
