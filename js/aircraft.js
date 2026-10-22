@@ -110,7 +110,14 @@ class Aircraft {
     return this.ps >= P.length - 1e-4;
   }
   bankFor(v, R) { return Math.min(this.spec.bankMax, Math.atan(v * v / (R * 9.8))); }
-  orientFlight(dir, bankT, dt) { this.bank += (bankT - this.bank) * Math.min(1, dt * 1.5); this.fwd.copy(dir).normalize(); orientFrom(this.mesh, this.fwd, this.bank); }
+  orientFlight(dir, bankT, dt) {
+    this.bank += (bankT - this.bank) * Math.min(1, dt * 1.5);
+    // the pitch eases toward the path's: no snap where pieces join (a climb levelling off, the flare); orientation only
+    const hl = Math.hypot(dir.x, dir.z) || 1e-6, tp = Math.atan2(dir.y, hl);
+    this.pitch = this.pitch == null ? tp : this.pitch + (tp - this.pitch) * Math.min(1, dt * 2.5);
+    const c = Math.cos(this.pitch); this.fwd.set(dir.x / hl * c, Math.sin(this.pitch), dir.z / hl * c);
+    orientFrom(this.mesh, this.fwd, this.bank);
+  }
   /* orbit distance: a flight shares one (wingmen take the lead's), otherwise random — the far end runs off-screen.
      now = jump there (the next path is built to it); otherwise the radius eases toward it. fresh = ignore the flight. */
   pickOrbit(now, fresh) {
@@ -133,10 +140,10 @@ class Aircraft {
     this.v = o.v;
     this.orientFlight(_v.set(-Math.sin(th), 2.4 * Math.cos(th * 2 + o.ph) / o.R, Math.cos(th)), this.bankFor(o.v, o.R), dt);
   }
-  pathToOrbit(path, from, heading, lead) {
+  pathToOrbit(path, from, heading, lead, slope0) {   // slope0: the climb rate it arrives with (no kink in the climb)
     const th0 = Math.atan2(from.z - ORBIT_C.z, from.x - ORBIT_C.x) + lead;
     this.theta = th0;
-    return path.addDubins(from, heading, this.orbitPos(th0, new V3()), th0 + Math.PI / 2, this.spec.turnR);
+    return path.addDubins(from, heading, this.orbitPos(th0, new V3()), th0 + Math.PI / 2, this.spec.turnR, slope0);
   }
 
   /* --- missions (js/missions.js): this.mission is the flight's mission context, its legs drive the state --- */
@@ -214,7 +221,8 @@ const ORBIT_C = new V3(0, 0, -4);   // orbits are flown around the airfield's ce
 
 /* ======================= Fixed wing (runway) ======================= */
 class FixedWing extends Aircraft {
-  static spec = Object.assign({}, Aircraft.spec, { approachV: 8.5, taxiV: 1.8, toRoll: 60, vR: 8, decel: 1.6, climbOut: 26, bankMax: 1.0, park: 'f' });
+  // rollTo: fraction of the runway past the touchdown point used to brake to a fast taxi; decel: an emergency's hard stop
+  static spec = Object.assign({}, Aircraft.spec, { approachV: 8.5, taxiV: 1.8, toRoll: 60, vR: 8, decel: 1.6, rollTo: 0.35, climbOut: 26, bankMax: 1.0, park: 'f' });
   get engineOn() { return this.state !== 'parked' && this.state !== 'towed' && this.state !== 'emergency'; }
   get gearDown() {
     if (this.state === 'orbit' || this.onMission || this.inCombat || this.tank) return false;
@@ -287,9 +295,9 @@ class FixedWing extends Aircraft {
         if (this.v >= S.vR) {
           AIRFIELD.rwy.delete(this); this.pairL = this.pairW = null;
           const p0 = this.mesh.position.clone(), f = new V3(1, 0, 0);
-          const p1 = p0.clone().addScaledVector(f, Math.max(S.climbOut, RW.x1 + 10 - p0.x)); p1.y += 5;   // straight out past the runway end, then the turn
+          const run = Math.max(S.climbOut, RW.x1 + 10 - p0.x), p1 = p0.clone().addScaledVector(f, run); p1.y += 5;   // straight out past the runway end, then the turn
           const P = new FlightPath().addLine(p0, p1);
-          this.pickOrbit(true); this.pathToOrbit(P, p1, 0, 0.9);
+          this.pickOrbit(true); this.pathToOrbit(P, p1, 0, 0.9, 5 / run); this.pitch = 0.12;   // the climb carries on into the turn; pitch from the rotation
           this.fly(P, this.v, S.speed);
           this.fwd.copy(f); this.state = 'climb'; this.airT = 0;
           this.call('airborne', { delay: 0.6 });
@@ -322,7 +330,10 @@ class FixedWing extends Aircraft {
         if (this.followPath(dt)) {
           AIRFIELD.arrivals.delete(this); AIRFIELD.setOf(this.rwyL).add(this);
           this.state = 'rollout'; this.rx = this.mesh.position.x; this.v = S.approachV;
-          const xStop = this.rx + (this.v * this.v - S.taxiV * S.taxiV) / (2 * S.decel);
+          // braking by type: down to a fast taxi `rollTo` of the runway beyond the touchdown point, then to taxi speed for the exit
+          const vf = S.taxiV * 1.8, run = S.rollTo * (this.rwyL.x1 - this.rwyL.td);
+          this.rdec = (this.v * this.v - vf * vf) / (2 * run);
+          const xStop = this.rx + run + (vf * vf - S.taxiV * S.taxiV) / (2 * this.rdec);
           this.exitX = AIRFIELD.exitFor(this.spot, xStop);
           for (let i = 0; i < 4; i++) FX.smoke.spawn(new V3(this.rx, 0.15, this.rwyL.z + rand(-0.4, 0.4)), { s0: 0.4, s1: 1.6, life: 1.4, a0: 0.45, color: 0xd8d8d0, v: new V3(rand(0.5, 2), 0.3, 0) });   // tyre smoke
           if (Math.random() < 0.6) this.call('touchdown', { delay: 0.4 });
@@ -336,7 +347,7 @@ class FixedWing extends Aircraft {
           break;
         }
         // brake to a fast taxi on the runway, down to taxi speed for the turn off
-        this.v = Math.max(this.rx < this.exitX - 10 ? S.taxiV * 1.8 : S.taxiV, this.v - S.decel * dt); this.rx += this.v * dt;
+        this.v = Math.max(this.rx < this.exitX - 10 ? S.taxiV * 1.8 : S.taxiV, this.v - (this.rdec || S.decel) * dt); this.rx += this.v * dt;
         this.rwyPose(this.rx, 0, this.rwyL);
         if (this.rx >= this.exitX - 4.5 || this.rx > this.rwyL.x1 - 2) { this.startDeckPath(AIRFIELD.homeRoute(this.spot, this.rx, this.exitX, this.rwyL), S.taxiV); this.dv = this.v; this.state = 'taxi_in'; this.crossAt(this.exitX); }
         break;
@@ -364,7 +375,7 @@ class FixedWing extends Aircraft {
   goAround() {
     AIRFIELD.arrivals.delete(this);
     const p0 = this.mesh.position.clone(), p1 = p0.clone().addScaledVector(this.fwd.clone().setY(0).normalize(), 40); p1.y = Math.max(p0.y + 6, 9);
-    const P = new FlightPath().addLine(p0, p1); this.pickOrbit(true); this.pathToOrbit(P, p1, headingOf(this.fwd), 0.9);
+    const P = new FlightPath().addLine(p0, p1); this.pickOrbit(true); this.pathToOrbit(P, p1, headingOf(this.fwd), 0.9, (p1.y - p0.y) / 40);
     this.fly(P, this.v, this.spec.speed); this.state = 'go_around'; this.landReq = true;
     this.tower('goAround'); this.call('goingAround', { delay: 0.4 });
   }
@@ -485,16 +496,16 @@ class Helicopter extends Aircraft {
    refuel: 'boom' (KC-46) / 'probe' (KC-130); tankKind on the tankers; gunship: circles over the fight (cbt_orbit) */
 const FW = FixedWing.spec, HELI = Helicopter.spec;
 const fighter = o => Object.assign({}, FW, { speed: 17, turnR: 22, orbitR: [30, 70], alt: [12, 17], armed: true, refuel: 'boom', len: 2.4, span: 1.7, vR: 8, toRoll: 62 }, o);
-const heavy = o => Object.assign({}, FW, { scale: 1.05, park: 'h', taxiV: 1.6, toRoll: 80, vR: 6.5, decel: 0.9, approachV: 7.5, climbOut: 34, bankMax: 0.55, callsignGroup: 1, turnR: 24 }, o);
+const heavy = o => Object.assign({}, FW, { scale: 1.05, park: 'h', taxiV: 1.6, toRoll: 80, vR: 6.5, decel: 0.9, rollTo: 0.55, approachV: 7.5, climbOut: 34, bankMax: 0.55, callsignGroup: 1, turnR: 24 }, o);
 class F15 extends FixedWing { static spec = fighter({ key: 'f15', tag: 'F-15E', speed: 17.5, alt: [13, 18] }); buildModel() { return buildF15(); } }
 class F16 extends FixedWing { static spec = fighter({ key: 'f16', tag: 'F-16C', turnR: 20, alt: [12, 16], len: 1.9, span: 1.2, vR: 7.5 }); buildModel() { return buildF16(); } }
 class F22 extends FixedWing { static spec = fighter({ key: 'f22', tag: 'F-22A', speed: 18.5, turnR: 22, alt: [15, 20] }); buildModel() { return buildF22(); } }
 class F35 extends FixedWing { static spec = fighter({ key: 'f35', tag: 'F-35A', alt: [13, 18], len: 2.0, span: 1.4 }); buildModel() { return buildF35(); } }
 class A10 extends FixedWing { static spec = fighter({ key: 'a10', tag: 'A-10C', speed: 12, turnR: 15, orbitR: [24, 56], alt: [8, 12], cas: true, len: 2.1, span: 2.2, vR: 6, toRoll: 55, approachV: 7 }); buildModel() { return buildA10(); } }
-class E3 extends FixedWing { static spec = heavy({ key: 'e3', tag: 'E-3', speed: 12, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [21, 24], awacs: true, voice: 'awacs', len: 4.9, span: 4.6, toRoll: 88 }); buildModel() { return buildE3(); } }
+class E3 extends FixedWing { static spec = heavy({ key: 'e3', tag: 'E-3', speed: 12, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [21, 24], awacs: true, voice: 'awacs', len: 4.9, span: 4.6, toRoll: 88, rollTo: 0.6 }); buildModel() { return buildE3(); } }
 /* tankers fly refuelling passes with a flight in tow (js/tanker.js), no missions; the KC-46 has a boom, the KC-130 two hoses */
 class KC46 extends FixedWing {
-  static spec = heavy({ key: 'kc46', tag: 'KC-46', speed: 13, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [18, 21], tanker: true, tankKind: 'boom', voice: 'tanker', missions: [], len: 5.3, span: 5.0, big: true, toRoll: 88 });
+  static spec = heavy({ key: 'kc46', tag: 'KC-46', speed: 13, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [18, 21], tanker: true, tankKind: 'boom', voice: 'tanker', missions: [], len: 5.3, span: 5.0, big: true, toRoll: 88, rollTo: 0.6 });
   get hoseOut() { return this.tank && this.state === 'tank_pass' ? 1 : 0; }
   buildModel() { return buildKC46(); }
 }
@@ -505,7 +516,7 @@ class KC130 extends FixedWing {
 }
 class C130 extends FixedWing { static spec = heavy({ key: 'c130', tag: 'C-130J', speed: 10, orbitR: [52, 86], farOrbit: [80, 96], alt: [14, 18], transport: true, missions: ['airlift', 'paradrop'], len: 3.2, span: 4.2, vR: 5.5 }); buildModel() { return buildC130('c130'); } }
 class AC130 extends FixedWing { static spec = heavy({ key: 'ac130', tag: 'AC-130J', speed: 9.5, orbitR: [46, 76], alt: [16, 20], armed: true, gunship: true, len: 3.2, span: 4.2, vR: 5.5 }); buildModel() { return buildC130('ac130'); } }
-class C17 extends FixedWing { static spec = heavy({ key: 'c17', tag: 'C-17', speed: 12, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [16, 20], transport: true, missions: ['airlift', 'paradrop'], len: 5.6, span: 5.4, big: true, vR: 6, toRoll: 88 }); buildModel() { return buildC17(); } }
+class C17 extends FixedWing { static spec = heavy({ key: 'c17', tag: 'C-17', speed: 12, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [16, 20], transport: true, missions: ['airlift', 'paradrop'], len: 5.6, span: 5.4, big: true, vR: 6, toRoll: 88, rollTo: 0.5 }); buildModel() { return buildC17(); } }
 /* unmanned: no radio of its own on the ground (its operator talks for it), circles over the fight with Hellfires */
 class MQ9 extends FixedWing { static spec = Object.assign({}, FW, { key: 'mq9', tag: 'MQ-9', scale: 1.15, park: 'd', speed: 8, turnR: 14, orbitR: [40, 70], alt: [18, 22], armed: true, gunship: true, drone: true, callsignGroup: 1, len: 1.3, span: 2.3, taxiV: 1.5, vR: 4.5, toRoll: 45, approachV: 5.5, decel: 1.2, bankMax: 0.5 }); buildModel() { return buildMQ9(); } }
 class UH60 extends Helicopter { static spec = Object.assign({}, HELI, { key: 'uh60', tag: 'UH-60', speed: 7.5, orbitR: [18, 46], farOrbit: [50, 62], alt: [8.5, 10.5], transport: true, refuel: 'probe' }); buildModel() { return buildUH60(); } }

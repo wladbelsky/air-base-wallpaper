@@ -35,13 +35,16 @@ class FlightPath {
     this.pieces.push({ kind: 'line', p0: p0.clone(), p1: p1.clone(), len, s0: this.length });
     this.length += len; return this;
   }
-  addDubins(p0, h0, p1, h1, R) {
+  /* slope0: the climb rate (dy per unit along the ground) it starts with, so a climbing line before it joins without a
+     kink; the altitude is a cubic (Hermite) from that slope to level at p1, the start slope capped so it never overshoots */
+  addDubins(p0, h0, p1, h1, R, slope0 = 0) {
     const w = dubinsShortest(p0.x, p0.z, h0, p1.x, p1.z, h1, R);
     const types = w[0].split(''), lens = [w[1], w[2], w[3]];
     const starts = []; let q = [0, 0, h0];
     for (let i = 0; i < 3; i++) { starts.push(q); q = dubinsStep(types[i], q[0], q[1], q[2], lens[i]); }
-    const len = (lens[0] + lens[1] + lens[2]) * R;
-    this.pieces.push({ kind: 'dubins', x0: p0.x, z0: p0.z, y0: p0.y, y1: p1.y, R, types, lens, starts, len, s0: this.length });
+    const len = (lens[0] + lens[1] + lens[2]) * R, dy = p1.y - p0.y;
+    const m0 = len > 0 ? clamp(slope0 * len, Math.min(0, 3 * dy), Math.max(0, 3 * dy)) : 0;   // start slope × length (monotone while |m0| ≤ 3|dy|)
+    this.pieces.push({ kind: 'dubins', x0: p0.x, z0: p0.z, y0: p0.y, y1: p1.y, m0, R, types, lens, starts, len, s0: this.length });
     this.length += len; return this;
   }
   /* returns {pos, dir, turn(-1/0/1), R} at arc length s */
@@ -60,8 +63,9 @@ class FlightPath {
     while (i < 2 && sn > pc.lens[i]) { sn -= pc.lens[i]; i++; }
     const st = pc.starts[i], q = dubinsStep(pc.types[i], st[0], st[1], st[2], Math.min(sn, pc.lens[i]));
     const u = pc.len > 0 ? ls / pc.len : 1, S = u * u * (3 - 2 * u), dS = 6 * u * (1 - u);
-    out.pos.set(pc.x0 + q[0] * pc.R, pc.y0 + (pc.y1 - pc.y0) * S, pc.z0 + q[1] * pc.R);
-    const slope = pc.len > 0 ? (pc.y1 - pc.y0) * dS / pc.len : 0;
+    const H = u * (1 - u) * (1 - u), dH = (1 - u) * (1 - 3 * u);                                   // Hermite start-slope term
+    out.pos.set(pc.x0 + q[0] * pc.R, pc.y0 + (pc.y1 - pc.y0) * S + pc.m0 * H, pc.z0 + q[1] * pc.R);
+    const slope = pc.len > 0 ? ((pc.y1 - pc.y0) * dS + pc.m0 * dH) / pc.len : 0;
     out.dir.set(Math.cos(q[2]), slope, Math.sin(q[2])).normalize();
     out.turn = pc.types[i] === 'L' ? 1 : pc.types[i] === 'R' ? -1 : 0; out.R = pc.R;
     return out;

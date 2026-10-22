@@ -32,7 +32,7 @@ const AIRFIELD = {
   reset() {
     this.rwy.clear(); this.rwy2.clear(); this.arrivals.clear();
     for (const l of [PARKING.stands, PARKING.shelters, PARKING.hangars, PARKING.remote, PARKING.heli]) for (const s of l) s.occ = null;
-    for (const s of [...PARKING.shelters, ...PARKING.hangars]) { s.door = 0; this.setDoor(s); }
+    for (const s of [...PARKING.shelters, ...PARKING.hangars]) { s.door = 0; s.tugIn = null; this.setDoor(s); }
   },
   /* ---- homes ---- */
   assignHome(a) {
@@ -183,7 +183,9 @@ const AIRFIELD = {
     const d = (a.spec.span + b.spec.span) * 0.35 + 0.6;
     let ia = 9, ib = 9;
     for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) if (Math.hypot(A[i * 2] - B[j * 2], A[i * 2 + 1] - B[j * 2 + 1]) < d) { ia = Math.min(ia, i); ib = Math.min(ib, j); }
-    return ia < 9 && (rb && !ra || ia > ib || (ia === ib && AIRCRAFT.indexOf(a) > AIRCRAFT.indexOf(b)));
+    // already where the ways meet (ia 0): b comes up from behind and waits there (blocker) — even one still clearing the
+    // runway: the head of a queue never waits for its own tail
+    return ia > 0 && ia < 9 && (rb && !ra || ia > ib || (ia === ib && AIRCRAFT.indexOf(a) > AIRCRAFT.indexOf(b)));
   },
   wantsOut(b) { return b.state === 'ready' && b.t > 20 && !b.groundBusy && b.pb && b.tugReady && !this.queueFull(); },   // (only when it may go: else the traffic waits for nothing)
   gap: (a, b) => (a.spec.len + b.spec.len) * 0.5 + 1,       // nose to tail with room to spare
@@ -232,10 +234,11 @@ const AIRFIELD = {
   },
   /* ---- shelter / hangar doors: open while their aircraft moves in or out, closed otherwise ---- */
   doorWanted(s) {
+    if (s.tugIn) return 1;                                         // a tug on its way back in (groundops.js)
     const a = s.occ; if (!a) return 0;
     if (a.state === 'parked') return a.t < 4 ? 1 : 0;
     if (a.state === 'ready' || a.state === 'pushback') return 1;
-    if (a.state === 'taxi_in') return a.dlen - a.ds < 40 ? 1 : 0;
+    if (a.state === 'taxi_in' || a.state === 'towed') return a.dlen - a.ds < 40 ? 1 : 0;
     return 0;
   },
   setDoor(s) {

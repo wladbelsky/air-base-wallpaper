@@ -111,6 +111,12 @@ async function crewVisit(wp, kinds) {
   expect(r.kinds).toEqual(kinds);
   expect(r.busy).toBe(true); expect(r.hose).toBe(true);
   expect(r.near).toBeLessThan(5);
+  // the loader's load goes onto the aircraft: it drives off empty
+  if (kinds.includes('ammo')) {
+    const out = await wp.until(() => GROUND_OPS.scenes.some(s => s instanceof ServiceScene && s.a === __a && s.phase === 'out'), 60);
+    expect(out.done).toBe(true);
+    expect(await wp.run(() => GROUND_OPS.scenes.find(s => s instanceof ServiceScene && s.a === __a).items.filter(i => i.visible).length), 'items left on the loader').toBe(0);
+  }
   const off = await wp.until(() => !GROUND_OPS.scenes.some(s => s instanceof ServiceScene), 200);
   expect(off.violations).toEqual([]);
   expect(off.done, 'the crew is done and gone').toBe(true);
@@ -152,12 +158,16 @@ for (const [name, pick] of [['an open stand', "a.spec.key === 'f16' && PARKING.s
     for (let i = 0; i < 200; i++) {
       await wp.sim(0.5);
       const s = await wp.run(() => { if (__a.state !== 'pushback') return __a.state;
-        const t = __a.tug.m.position, n = __a.mesh.position.clone().addScaledVector(__a.fwd, __a.spec.len / 2 + 0.75).setY(0); __nose.push(t.distanceTo(n)); return 'pushback'; });
+        const t = __a.tug.m.position, n = __a.mesh.position.clone().addScaledVector(__a.fwd, __a.spec.len / 2 + 0.75).setY(0); __nose.push(t.distanceTo(n));
+        // the bend at the towbar: the tug's heading against the aircraft's (it faces the nose: pi apart when straight)
+        const ya = Math.atan2(-__a.fwd.z, __a.fwd.x) + Math.PI, yt = __a.tug.m.rotation.y; window.__bend = Math.max(window.__bend || 0, Math.abs(Math.atan2(Math.sin(yt - ya), Math.cos(yt - ya))));
+        window.__bar = window.__bar || __a.tug.m.getObjectByName('bar').visible; return 'pushback'; });
       if (s === 'taxi_out' || s === 'hold_short') break;
     }
     const nose = await wp.run(() => __nose);
     expect(nose.length, 'pushed back').toBeGreaterThan(3);
     expect(Math.max(...nose), 'the tug at the nose').toBeLessThan(1.2);
+    expect(await wp.run(() => [__bar, __bend > 0.08]), 'towbar out; the tug bends at it in the turn').toEqual([true, true]);
     const gone = await wp.until(() => !GROUND_OPS.scenes.length && !__a.tug && !__a.tugHold, 120);
     expect(gone.violations).toEqual([]);
     expect(gone.done, 'the tug leaves').toBe(true);

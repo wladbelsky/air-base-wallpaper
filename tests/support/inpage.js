@@ -14,7 +14,7 @@
   H.ARRIVAL_STATES = new Set(['approach', 'final']);
   // per-state limits for the stuck detector (s); states missing here use DEFAULT_LIMIT, EXEMPT ones are never stuck
   H.STATE_LIMITS = { ready: 600, pushback: 90, taxi_out: 600, hold_short: 300, lineup: 40, takeoff_roll: 90, climb: 240, approach: 240, final: 60,
-    go_around: 120, rollout: 90, taxi_in: 360, emergency: 200, towed: 360, drop_pass: 120, spinup: 30, lift: 30, depart: 240, ret: 300, hover: 30, descend: 30, spindown: 30,
+    go_around: 120, rollout: 90, taxi_in: 360, emergency: 200, towed: 360, drop_pass: 120, spinup: 60, lift: 30, depart: 240, ret: 300, hover: 30, descend: 30, spindown: 30,
     cbt_out: 180, cbt_rtb: 300, cbt_pass: 240, tank_out: 240, tank_back: 300, tank_pass: 240, mission_out: 400, mission_back: 600 };
   H.DEFAULT_LIMIT = 600;
   H.EXEMPT = new Set(['parked', 'orbit', 'cbt_wait', 'cbt_orbit', 'mission', 'tank_wait']);   // waiting states depend on traffic: checked by "eventually" tests instead
@@ -99,6 +99,37 @@
         const dx = p.x - a.mesh.position.x, dz = p.z - a.mesh.position.z, al = dx * a.fwd.x + dz * a.fwd.z, sd = dx * a.fwd.z - dz * a.fwd.x;
         if (Math.abs(al) < a.spec.len * 0.45 && Math.abs(sd) < a.spec.span * 0.3 + 0.3) v.push(`${sc.constructor.name} vehicle under ${who(a)} at ${p.x.toFixed(0)},${p.z.toFixed(0)}`);
       }
+    }
+    // ground vehicles: none jumps (a step longer than any vehicle drives), two moving ones never overlap, and a tug only
+    // goes through a shelter / hangar door that is open
+    const vehs = [];
+    for (const sc of GROUND_OPS.scenes) {
+      const ms = new Map();
+      if (sc.veh) for (const vh of sc.veh) { const m = vh.isObject3D ? vh : vh.m; if (m) ms.set(m, (vh.kind || 'veh') + ':' + (vh.stage || sc.phase)); }
+      if (sc.trucks) for (const k of sc.trucks) ms.set(k.m, 'firetruck:' + sc.phase);
+      if (sc.tug && sc.tug.isObject3D) ms.set(sc.tug, 'tug:' + sc.phase);
+      if (sc.m && sc.m.isObject3D) ms.set(sc.m, 'tug:' + sc.phase);
+      for (const [m, tag] of ms) if (m.visible && m.scale.x > 0.99) vehs.push({ m, sc, tag });
+    }
+    const VP = H.vehPrev || (H.vehPrev = new WeakMap()), moved = new Set();
+    for (const { m, sc } of vehs) {
+      const p = m.position, q = VP.get(m);
+      if (q && q.sc === sc) {
+        const d = Math.hypot(p.x - q.x, p.z - q.z);
+        if (d > 0.8) v.push(`${sc.constructor.name} (${sc.phase || '-'}) vehicle jumped ${d.toFixed(2)} at ${p.x.toFixed(1)},${p.z.toFixed(1)}`);
+        if (d > 0.005) moved.add(m);
+        for (const s of [...PARKING.shelters, ...PARKING.hangars]) {             // through the door plane (south face) while it is shut
+          const zd = s.z + (s.d || 6) / 2;
+          if (Math.abs(p.x - s.x) < (s.w || 4.6) / 2 - 0.3 && (q.z - zd) * (p.z - zd) < 0 && s.door < 0.6) v.push(`${sc.constructor.name} (${sc.phase || '-'}) vehicle through the closed door of ${s.kind} ${s.x},${s.z}`);
+        }
+      }
+      VP.set(m, { x: p.x, z: p.z, sc });
+    }
+    for (let i = 0; i < vehs.length; i++) for (let j = i + 1; j < vehs.length; j++) {
+      const a = vehs[i].m, b = vehs[j].m;
+      if (!moved.has(a) || !moved.has(b)) continue;
+      const d = Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z);
+      if (d < 0.65) v.push(`vehicles overlap (${vehs[i].sc.constructor.name} ${vehs[i].tag} / ${vehs[j].sc.constructor.name} ${vehs[j].tag}, ${d.toFixed(2)} apart at ${a.position.x.toFixed(1)},${a.position.z.toFixed(1)})`);
     }
     // enemy armour stays outside the fence
     for (const e of ENEMIES) if (e.kind === 'armor' && !e.dead && insideFence(e.p.x, e.p.z)) v.push(`enemy ${e.type} inside the fence at ${e.p.x.toFixed(0)},${e.p.z.toFixed(0)}`);

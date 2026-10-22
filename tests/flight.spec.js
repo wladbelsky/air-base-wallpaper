@@ -84,6 +84,32 @@ test('takeoff: the roll uses half the runway or more, the turn toward the orbit 
   }
 });
 
+test('climb-out eases into level flight; the landing roll is long, longer for heavies', async ({ wp }) => {
+  await quietBase(wp);
+  for (const [k, minFrac] of [['f16', 0.25], ['c17', 0.45]]) {
+    await wp.run((k) => { window.__a = AIRCRAFT.find(a => a.spec.key === k); __a.requestLaunch(); window.__pp = null; window.__dp = 0; window.__slow = null; }, k);
+    // the nose's pitch (from the model, so the rotation on the runway counts) never jumps from one step to the next
+    const up = await wp.until(() => {
+      if (['takeoff_roll', 'climb', 'orbit'].includes(__a.state)) {
+        const p = Math.asin(new THREE.Vector3(1, 0, 0).applyQuaternion(__a.mesh.quaternion).y);
+        if (__pp !== null) __dp = Math.max(__dp, Math.abs(p - __pp)); __pp = p;
+      }
+      return __a.state === 'orbit' && __a.airT > 8;
+    }, 500);
+    expect(up.done, `${k} up`).toBe(true);
+    expect(await wp.run(() => __dp), `${k} largest pitch change in one step`).toBeLessThan(0.025);
+    // braking: down to a fast taxi only well down its runway
+    await wp.run(() => __a.requestLand());
+    const down = await wp.until(() => {
+      if (__a.state === 'rollout' && __slow === null && __a.v <= __a.spec.taxiV * 1.8 + 0.01) __slow = (__a.rx - __a.rwyL.x0) / (__a.rwyL.x1 - __a.rwyL.x0);
+      return __a.state === 'parked';
+    }, 600);
+    expect(down.violations).toEqual([]);
+    expect(down.done, `${k} home`).toBe(true);
+    expect(await wp.run(() => __slow), `${k}: where on the runway it is down to a fast taxi`).toBeGreaterThan(minFrac);
+  }
+});
+
 test('two runways: departures from the north one while arrivals land on the south one and cross back', async ({ wp }) => {
   await quietBase(wp);
   await wp.run(() => { window.__in = AIRCRAFT.filter(a => ['f16', 'f15'].includes(a.spec.key)).slice(0, 3); __in.forEach(a => a.requestLaunch()); });

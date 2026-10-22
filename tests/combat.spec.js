@@ -109,3 +109,21 @@ test('the base fires back: tanks at the armour, SAMs and guns into the air; hits
   expect(r.shots.sam + r.shots.aa).toBeGreaterThan(0);
   expect(r.scorch, 'scorch marks on the ground').toBeGreaterThan(0);
 });
+
+test('sky searchlights slew: with bandits coming and going, and the fight ending, no beam ever jumps', async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => { __t.forceFight(); STRESS.level = 0.8; window.__sk = { prev: null, max: 0, tracked: 0 }; });
+  // the beam's direction every step, in the step's own predicate (wp.until): the largest change between two steps
+  const watch = () => {
+    const d = BASE.skyLights.map(sl => new THREE.Vector3(0, 0, 1).applyQuaternion(sl.holder.getWorldQuaternion(new THREE.Quaternion())));
+    if (__sk.prev) d.forEach((v, i) => { __sk.max = Math.max(__sk.max, v.angleTo(__sk.prev[i])); });
+    __sk.prev = d; if (BASE.skyLights.some(sl => sl.tgt)) __sk.tracked++;
+    return false;
+  };
+  await wp.until(watch, 120, { audio: true });
+  await wp.run(() => __t.fightOff());
+  await wp.until(watch, 60);
+  const r = await wp.run(() => __sk);
+  expect(r.tracked, 'the lights tracked bandits').toBeGreaterThan(0);
+  expect(r.max, 'largest beam turn in one 0.05 s step').toBeLessThan(0.05);
+});

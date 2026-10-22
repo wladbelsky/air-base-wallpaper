@@ -141,13 +141,16 @@ registerMission(AirliftMission);
    field inside it (away from the runway, the apron and the buildings) */
 function dropZone() {
   let inside = null;
-  for (let i = 0; i < 60; i++) {
+  const ok = p => !vegBlocked(p.x, p.z) && !BASE.targets.some(t => Math.hypot(t.p.x - p.x, t.p.z - p.z) < 10);
+  for (let i = 0; i < 150; i++) {
     const p = AIRWAR.groundAt(rand(-0.7, 0.7), rand(-0.7, 0.5), 0);
-    if (vegBlocked(p.x, p.z) || BASE.targets.some(t => Math.hypot(t.p.x - p.x, t.p.z - p.z) < 10)) continue;
+    if (!ok(p)) continue;
     if (!insideFence(p.x, p.z)) return p;
     inside = inside || p;
   }
-  return inside || AIRWAR.groundAt(rand(-0.5, 0.5), -0.5, 0);
+  if (inside) return inside;
+  for (let y = -0.7; y <= 0.5; y += 0.1) for (let x = -0.8; x <= 0.8; x += 0.1) { const p = AIRWAR.groundAt(x, y, 0); if (ok(p)) return p; }   // open ground somewhere on screen
+  return AIRWAR.groundAt(rand(-0.5, 0.5), -0.5, 0);
 }
 class DropPass extends Leg {
   static state = 'drop_pass';

@@ -74,12 +74,13 @@ Aircraft counts are set in the wallpaper properties.
   into the hangars, then onto the heavy stands; when those are full, the remote stands at both ends of the apron.
   Stand markings appear only where an aircraft lives — change a count and they follow.
 - Ground traffic: a tug (waiting inside the shelter or hangar, or driving up to an open stand) pushes the aircraft
-  back (the doors open and close), unhooks and drives off; the aircraft taxis to the holding point of runway 09 —
+  back on its towbar, bending at it in the turn (the doors open and close, and stay open until the tug is back inside),
+  unhooks and drives off; the aircraft taxis to the holding point of runway 09 —
   one-way on the taxiway and the apron lane, keeping its distance to the aircraft ahead, leaving the apron by the
   channel next to the big hangar or the one at the east end — lines up, rolls about half the runway (the heavies two
   thirds), lifts off and climbs straight out past the runway end before it turns. The next departure may line up
   while the one ahead is still rolling. Two of one flight take off side by side. Coming back it flies a
-  straight-in approach to the runway, lands, slows down, turns off at the first taxiway it can and taxis home; an
+  straight-in approach to the runway, lands, brakes down a long landing roll (longer for the heavies), turns off at the first taxiway it can and taxis home; an
   arrival that finds the runway occupied goes around. Departures and arrivals share the runway, the tower talks to them.
 - Helicopters start up on their pad, lift off and fly; they land on their pad and shut down.
 - The wallpaper remembers who was in the air or out on a mission (not where) and the threat level: after a restart
@@ -124,7 +125,10 @@ controls how often this happens (0 = off).
 - **Paradrops:** a C-130 or C-17 flies low across the screen over a drop zone and paratroopers (or cargo bundles)
   come down under their canopies, drift with the wind and land.
 - **Ground crew:** an aircraft back on an open stand, or a helicopter on its pad, gets a fuel truck (hose out) and,
-  if it is armed, an ammo loader for a while; it can't leave until they pull away (a launch cuts the work short).
+  if it is armed, a munitions loader with its type's load (bombs, missiles, gun ammunition for the A-10, rockets for
+  the attack helicopters, crates) that it lifts onto the aircraft; it can't leave until they pull away (a launch cuts
+  the work short). The vehicles have cab glass, headlights and amber beacons, keep to their side of the road, queue
+  behind each other and back out of an aircraft's way. Unloaded pallets carry crates, drums, covered loads or spares.
 - In peacetime the tanks on the perimeter turn their turrets now and then, looking around.
 
 ## Combat

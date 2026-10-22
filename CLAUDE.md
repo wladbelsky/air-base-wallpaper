@@ -17,11 +17,11 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | File | Contents |
 |---|---|
 | `js/core.js` | utils (`V3`, `rand`, `clamp`, `lerp`, `smoothstep`, `pick`…), `CFG` defaults, `WIND` (smoke / dust drift), `groundH` (flat ground), `SEASONS` + `seasonNow()`, sun position, sky palette, canvas textures `TEX` |
-| `js/flightpath.js` | `FlightPath`: Dubins CSC curves (turn-radius-limited flight) + lines |
+| `js/flightpath.js` | `FlightPath`: Dubins CSC curves (turn-radius-limited flight) + lines; a Dubins piece eases its altitude as a cubic from `slope0` (the climb it arrives with: no kink after a climbing line) to level |
 | `js/models.js` | mesh helpers (`M`, `box`, `cyl`, `taper`, `prism`, `strut`, `deckLine`…), `mergeStatic`, `disposeTree`, nav lights, searchlights, seasonal shared materials `ROOF_MAT` / `ARCH_MAT`, mounts: `buildCIWS` / `buildGun` and the land ones `buildCRAM`, `buildAAGun`, `buildTank`, `buildSamLauncher` (Patriot / NASAMS), `buildAvenger`, `buildPatriotRadar` |
-| `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
+| `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); the fence is a rectangle with chamfered corners and a west annex around both runways' approach lights (`fence`, `gate` = the gate segment, `towers` = guard-tower corners; the perimeter road is its 5-unit inward offset, `insetPoly`); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
 | `js/terrain.js` | `TERRAIN`: the ground (tiled canvas texture + vertex-colour patches) and the vegetation per season (InstancedMesh per kind: firs and snow drifts / cacti, rocks, shrubs / leafy trees in spring or autumn colours), weather particles (snowfall, falling leaves) |
-| `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
+| `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; smooth fuselages are `lathe` bodies (profile `[x, r, axis lift]`, `transportBody` for the transports with the cockpit `windscreen` band on the nose); `gear(g, legs, h)` legs `[x, z, kind]` — `n` / `s` / `t` / `tan` / `b4` / `b6` — folding up over ~1 s with `st.gearDown` (`tickGear`); KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
 | `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (scorch marks, instanced ring buffer), `FlashLights` |
 | `js/radio.js` | callsigns (+ `ENEMY_NAMES`, `RADIO_NAMES` — the tower is `<base name> TOWER`), `RADIO` subtitle queue, mission orders, `STRESS` + `THREAT_TIERS`, `radioLine()`, line pools `OPS` / `OPS_VOICE` / `OPS_UNARMED` / `COMBAT` / `AIRWAR_LINES` / `ENEMY_LINES` / `TANKER_LINES` / `LINES` (see "Radio lines & threat tiers") |
 | `js/airfield.js` | `AIRFIELD`: homes (`assignHome` / `release`), taxi routes (`pushback`, `toHold`, `lineUp`, `exitFor`, `homeRoute`), runway use (`rwy`, `arrivals`, `canLineUp`, `canApproach`, `clearToLand`), ground traffic (`blocked`), shelter / hangar doors, stand markings and helicopter pads (`updateMarks`) — see "Airfield" |
@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=5`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=6`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -51,7 +51,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   `FIXED_ORDER`/`HELI_ORDER`, callsign pool in `radio.js`, `<key>count` slider in `project.json`, `CFG.counts` default.
   `spec` keys: ground — `park` (home kind: `'f'` fighter shelter / stand, `'h'` heavy hangar / stand, `'d'` drone
   hangar, `'heli'` pad), `big` (only the big hangar fits it), `len` / `span` (footprint for taxi spacing), `taxiV`,
-  `toRoll` (lift-off distance down the runway; the roll accelerates to `vR` over it), `vR` (rotation speed), `decel`, `approachV`, `climbOut`; air — `speed`, `turnR`, `orbitR`, `alt`,
+  `toRoll` (lift-off distance down the runway; the roll accelerates to `vR` over it), `vR` (rotation speed), `rollTo` (fraction of the landing runway past the touchdown point used to brake to a fast taxi: the landing roll's length), `decel` (an emergency's hard stop), `approachV`, `climbOut`; air — `speed`, `turnR`, `orbitR`, `alt`,
   `farOrbit` (orbit range for unarmed types during combat; `armed` types fly combat passes instead), `bankMax`;
   roles — `armed`, `cas` (close air support passes), `gunship` (circles over the fight, `cbt_orbit`), `awacs`,
   `tanker` + `tankKind` (`'boom'` / `'drogue'`), `refuel` (`'boom'` / `'probe'`: which tanker it can take fuel from),
@@ -170,25 +170,46 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   `canApproach` gives it priority, its runway (`a.rwyL`: the south one with two) is closed while `GROUND_OPS.emerg`; it stops on the runway
   (`emergency`), `EmergencyScene`: two crash tenders from the fire station foam it, a tug tows it home (`towed`, via
   `AIRFIELD.homeRoute`), the runway opens as soon as it is towed off it (`GROUND_OPS.emerg` cleared: the tow may
-  queue behind departures).
+  queue behind departures). The tenders and the tug fade in at the station; the tenders keep to their own lanes; the
+  tug drives straight to its towing spot and goes home round the wingtip to a depot (`tugWay`, reversed) or stays in
+  the shelter / hangar.
 - **Unloading** (`UnloadScene`): a transport parked with `a.cargo` on a stand (not in a hangar): `a.rampT` opens the
-  ramp (C-130 / C-17 models), a K-loader comes from the cargo yard along the service road, three pallets slide onto it,
-  it drives away; `a.groundBusy` holds the aircraft's departure in `ready` meanwhile.
+  ramp (C-130 / C-17 models), a K-loader comes from the cargo yard along the service road and backs up to the ramp, three pallets slide onto it
+  (each a random `PALLET_KINDS` load, `setPallet`), it drives away; `a.groundBusy` holds the aircraft's departure in `ready` meanwhile.
 - **Ground crew** (`ServiceScene`): an aircraft that parks (`needsService`, set on landing) on an open row-a stand or
   a helicopter pad (`crewSpot`) gets a fuel truck (`fueler`, its `hose` node scaled out to the aircraft) and, if armed,
   an ammo loader (`ammo`): from the nearest `CREW_DEPOTS` along the service strip `SERVICE_Z` (between the taxiway
   wingtips and the front-row tails) or from `HELI_DEPOT` up the corridors between the pads; ≤ 3 at a time.
   `groundBusy` holds the departure (`ready`; a helicopter waits spun up in `spinup`) until they pull away; a launch
-  request cuts the work short. Vehicles (`CrewCar`) grow in / shrink out at the depots.
-- **Pushback tug** (`PushbackScene`, one per departure in `ready`): waits inside a shelter / hangar or drives up to
-  the nose on an open stand; rides at the nose during the pushback, then unhooks and backs off (the aircraft holds in
-  `taxi_out` while `tugHold`), and drives back inside (dropped once the door has shut) or to the depot.
-- **Vehicles vs aircraft**: aircraft never wait for vehicles; vehicles give way (`vehHold`: two points ahead of the
-  vehicle against the next 8 units of a taxiing aircraft's route — or straight on along its nose — one standing right in
-  the way, a pushback's end; a vehicle already in an aircraft's way drives on to clear it) and `pushbackClear`
-  waits for vehicles near its path (`GROUND_OPS.vehicleNear`). Scenes list their vehicles in `veh` (objects with a
-  `position`); the harness flags a vehicle under a taxiing aircraft's fuselage / inner wing. Drive routes are
-  `densify`d (no Catmull-Rom bow on long legs; the same for the taxi routes in `AIRFIELD.round`).
+  request cuts the work short. The loader brings the type's load (`LOADS`: bombs / missiles / gun ammo / rockets /
+  crates, `LOAD_BUILD` items on its lift `table`, `setLoad`): the table rises, the items vanish one by one onto the
+  aircraft (`loadTo`), it leaves empty. Out in order: the car nearer the depot first, the other once it is under way
+  (`CrewCar.after`). Vehicles (`CrewCar`) grow in over their first stretch / shrink out over their last (hidden while
+  they wait out a start delay).
+- **Pushback tug** (`PushbackScene`, one per departure in `ready`): waits inside a shelter / hangar (fading in if the
+  door is already open) or drives up to the nose on an open stand (`tugWay`); on its towbar during the pushback
+  (`towTug`: the tug trails the nose-gear hitch like a trailer, bending in turns; the `bar` node is scaled out to it),
+  then unhooks and backs off (the aircraft holds in `taxi_out` while `tugHold`), and drives back to the threshold,
+  waits for the door, drives in and is dropped once the door has shut — the door is held open meanwhile (`s.tugIn`,
+  `AIRFIELD.doorWanted`) — or to the depot. Doors also open for an aircraft towed home (`towed`).
+- **Driving** (`Drive`): along a smooth path; the heading turns at ≤ 3 rad/s from where the vehicle points (no snaps),
+  `rev` backs up tail first, `lane` keeps that far right of the route between its ends (two meeting head-on pass),
+  `step(dt, 'back')` reverses along the way it came; `ahead()` looks along the motion. Routes are `densify`d (no
+  Catmull-Rom bow on long legs; the same for the taxi routes in `AIRFIELD.round`).
+- **Vehicles vs aircraft**: aircraft never wait for vehicles; vehicles give way (`vehHold` → `vehHoldAir`: two points
+  ahead of the vehicle against the next 8 units of a taxiing aircraft's route — or straight on along its nose — one
+  standing right in the way, a pushback's end; a vehicle already in an aircraft's way drives on to clear it). One held
+  > 1.5 s in the way of an aircraft that must come through (a pushback about to start for it, one taxiing at it) backs
+  off along its route (`giveWay`). `pushbackClear` waits for vehicles near its path (`GROUND_OPS.vehicleNear`).
+- **Vehicles vs vehicles** (`vehHold`, `GROUND_OPS.vehicles()`): one stops behind another close ahead (two holding for
+  each other: the lower id goes; several setting off from one spot: in id order; 8 s behind the same one gives up); one
+  sets off from a start point only once the last to leave it is 1.8 clear and none is arriving there
+  (`GROUND_OPS.starts`, pruned every 5 s; after 10 s it goes anyway); one still small in its depot isn't on the road; one
+  under a moving aircraft ignores them and clears out. The harness flags a vehicle under a
+  taxiing aircraft's fuselage / inner wing, a vehicle jump (> 0.8 in a step), two moving vehicles < 0.65 apart, and a
+  vehicle through a shut shelter / hangar door. Scenes list their vehicles in `veh` (objects with a `position`).
+- **Vehicle models** (`VEH_BUILD`): cab glass (`cabGlass`), bumpers, head / tail lights and an amber beacon (`vehLights`;
+  the beacon's material has `userData.day`: `updateLights` flashes it by day too).
 - **Parachutes** (`dropChute`, `updateChutes`): open, drift with `WIND`, land, the canopy collapses, gone after ~16 s.
 
 ## Combat (`js/combat.js`, `js/airwar.js`, `js/main.js`)

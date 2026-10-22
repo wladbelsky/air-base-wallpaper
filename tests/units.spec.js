@@ -236,6 +236,47 @@ test('roads stay off the runway, the taxiway and the apron, and nothing grows on
   expect(r.trees).toBe(0);
 });
 
+test('the fence: square-cut, everything inside it, the approach lights too; mounts clear of the PAPI, lights and roads', async ({ wp }) => {
+  const r = await wp.run(() => {
+    const out = [], F = BASE_LAYOUT.fence, RW = BASE_LAYOUT.ROAD_W / 2;
+    for (let i = 0; i < F.length; i++) {                                   // sides: along x / z, or a 45° chamfer
+      const [x0, z0] = F[i], [x1, z1] = F[(i + 1) % F.length], dx = Math.abs(x1 - x0), dz = Math.abs(z1 - z0);
+      if (dx > 1e-6 && dz > 1e-6 && Math.abs(dx - dz) > 1e-6) out.push(`fence side ${i} is slanted`);
+    }
+    // approach lights, red bars, flashers and PAPI of both runways (as buildRunway places them)
+    const lights = [], papi = [];
+    for (const [L, side] of [[BASE_LAYOUT.rwy, -1], [BASE_LAYOUT.rwy2, 1]]) {
+      for (let x = L.x0 - 4; x > L.x0 - 34; x -= 3) for (let k = -2; k <= 2; k++) lights.push([x, L.z + k * 0.45]);
+      for (const sx of [-1, 1]) for (let x = L.x0 - 8; x > L.x0 - 18; x -= 3) lights.push([x, L.z + sx * 1.6]);
+      for (let i = 0; i < 10; i++) lights.push([L.x0 - 34 + i * 3, L.z]);
+      for (let i = 0; i < 4; i++) papi.push([L.td + 2, L.z + side * (L.w / 2 + 1.2 + i * 0.5)]);
+    }
+    const inside = (x, z, m) => [[0, 0], [m, 0], [-m, 0], [0, m], [0, -m]].every(([a, b]) => insideFence(x + a, z + b));
+    for (const [x, z] of lights) {
+      if (!inside(x, z, 2)) out.push(`approach light at ${x.toFixed(0)},${z.toFixed(1)} outside the fence`);
+      if (roadDist(x, z) < RW + 1.5) out.push(`road by the approach light at ${x.toFixed(0)},${z.toFixed(1)}`);
+    }
+    // mounts, the Patriot radar, sky lights: inside, off the roads, clear of the lights and the PAPI
+    const things = [...Object.values(BASE.mounts).flat().map(m => [m.yawG.position.x, m.yawG.position.z, 'mount']),
+      [BASE.patriotRadar.position ? BASE.patriotRadar.position.x : -40, BASE.patriotRadar.position ? BASE.patriotRadar.position.z : 32, 'patriot radar'],
+      ...BASE.skyLights.map(sl => [sl.holder.position.x, sl.holder.position.z, 'sky light'])];
+    for (const [x, z, what] of things) {
+      const at = `${what} at ${x.toFixed(0)},${z.toFixed(0)}`;
+      if (!inside(x, z, 2)) out.push(`${at} outside the fence`);
+      if (roadDist(x, z) < RW + 1.2) out.push(`${at} on a road`);
+      for (const [px, pz] of [...lights, ...papi]) if (Math.hypot(px - x, pz - z) < 3) { out.push(`${at} on the runway lights at ${px.toFixed(0)},${pz.toFixed(1)}`); break; }
+    }
+    // the perimeter road keeps 5 from the fence all round (an inward offset, not a pull toward the centre)
+    const per = BASE_LAYOUT.roads[BASE_LAYOUT.roads.length - 1];
+    for (let i = 0; i < per.length - 1; i++) for (let u = 0; u <= 1; u += 0.1) {
+      const x = per[i][0] + (per[i + 1][0] - per[i][0]) * u, z = per[i][1] + (per[i + 1][1] - per[i][1]) * u;
+      if (!inside(x, z, 4.5)) out.push(`perimeter road too close to the fence at ${x.toFixed(0)},${z.toFixed(0)}`);
+    }
+    return [...new Set(out)];
+  });
+  expect(r).toEqual([]);
+});
+
 test('seasons: the PC date picks the season unless one is set', async ({ wp }) => {
   const r = await wp.run(() => {
     const out = {}, real = getNow;
@@ -297,4 +338,37 @@ test('models: every builder runs, mergeStatic keeps dynamic nodes, disposeTree s
   expect(r.baseMeshes).toBeLessThan(400);
   expect(r.merge).toEqual({ rootMeshes: 1, dynKept: true, dynMeshes: 1 });
   expect(r.disposed).toEqual(['geo', 'own']);
+});
+
+test('no tree grows through a gun, tank, launcher or light tower', async ({ wp }) => {
+  const r = await wp.run(() => {
+    const out = [], m = new THREE.Matrix4(), p = new THREE.Vector3(), w = new THREE.Vector3();
+    const keep = [...Object.values(BASE.mounts).flat().map(o => o.yawG), BASE.patriotRadar, ...BASE.skyLights.map(s => s.holder)].map(o => o.getWorldPosition(w.clone()));
+    for (const v of [...TERRAIN.veg, ...TERRAIN.fill]) for (let i = 0; i < v.count; i++) {
+      v.getMatrixAt(i, m); p.setFromMatrixPosition(m);
+      for (const k of keep) if (Math.hypot(p.x - k.x, p.z - k.z) < 2) out.push(`tree at ${p.x.toFixed(0)},${p.z.toFixed(0)}`);
+    }
+    return out;
+  });
+  expect(r).toEqual([]);
+});
+
+test('landing gear: every airframe stands on its wheels, the gear folds away in about a second', async ({ wp }) => {
+  const r = await wp.run(() => {
+    const out = [];
+    for (const [n, f] of Object.entries({ buildF15, buildF16, buildF22, buildF35, buildA10, buildE3, buildKC46, c130: () => buildC130('c130'), buildC17, buildMQ9 })) {
+      const m = f(), g = m.group; g.updateMatrixWorld(true);
+      let gr = null; g.traverse(o => { if (!gr && o.isGroup && o !== g && o.position.y > 0.05 && o.children.some(c => c.isMesh && c.material.color && c.material.color.getHex() === 0x1e1e1e)) gr = o; });
+      if (!gr) { out.push(`${n}: no gear`); disposeTree(g); continue; }
+      const bb = new THREE.Box3().setFromObject(gr);
+      if (Math.abs(bb.min.y) > 0.01) out.push(`${n}: wheels at y ${bb.min.y.toFixed(3)}`);
+      for (let i = 0; i < 25; i++) m.tick(0.05, { gearDown: false });
+      if (gr.visible) out.push(`${n}: gear still down after 1.25 s`);
+      for (let i = 0; i < 25; i++) m.tick(0.05, { gearDown: true });
+      if (!gr.visible || gr.scale.y < 0.99) out.push(`${n}: gear not back down`);
+      disposeTree(g);
+    }
+    return out;
+  });
+  expect(r).toEqual([]);
 });

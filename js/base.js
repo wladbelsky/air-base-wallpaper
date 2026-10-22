@@ -18,8 +18,10 @@ const BASE_LAYOUT = {
   chIn: [-44, -4], chOut: [19.5, 66.5],
   // remote stands at both ends of the apron (slabs joined to it, kept inside the fence): stand xs, rows (z)
   remote: [{ x0: -67.2, x1: -42, z1: -17.6, xs: [-63, -54], rows: [-9] }, { x0: 42, x1: 66, z1: -26, xs: [49, 58], rows: [-9, -20] }],
-  fence: [[-80, -2], [-63, -43], [-24, -66], [12, -70], [56, -53], [81, -14], [74, 22], [44, 54], [8, 72], [-28, 64], [-58, 42], [-76, 18]],
-  gate: 9,                                                  // fence segment with the main gate (index of its first point)
+  // the perimeter fence (clockwise): a rectangle with chamfered corners and, west, an annex around the approach lights
+  fence: [[-80, -6], [-80, -56], [-72, -64], [72, -64], [80, -56], [80, 60], [72, 68], [-25, 68], [-61, 68], [-72, 68], [-80, 60], [-80, 32], [-108, 32], [-108, -6]],
+  gate: 7,                                                  // fence segment with the main gate (index of its first point)
+  towers: [2, 4, 6, 9, 12],                                 // fence corners with a guard tower
   fuel: [[-47, -40], [-40, -44], [-35, -40]], FUEL_R: 1.85,  // fuel farm tanks (the spur road runs in between)
   // with one runway the south strip is a storage yard and scrub: these footprints [x, z, r] (and the fire station's way
   // up to the runway, x −9…1) are kept free of the trees there (TERRAIN.fill)
@@ -28,16 +30,30 @@ const BASE_LAYOUT = {
 const BL = BASE_LAYOUT;
 BL.crossZ = BL.rwy.z + BL.rwy.w / 2 + 1.6;   // holding line on the runway connectors in front of the north runway (crossing it)
 BL.channels = [...BL.chIn, ...BL.chOut];
+/* a polygon moved `d` inward: each side along its normal, neighbouring sides meet where their offset lines cross */
+function insetPoly(P, d) {
+  let a2 = 0; for (let i = 0; i < P.length; i++) { const [x0, z0] = P[i], [x1, z1] = P[(i + 1) % P.length]; a2 += x0 * z1 - x1 * z0; }
+  const sg = Math.sign(a2), L = P.map((p, i) => {                                          // offset side i: a point and a direction
+    const q = P[(i + 1) % P.length], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz), nx = -dz / l * sg, nz = dx / l * sg;
+    return [p[0] + nx * d, p[1] + nz * d, dx / l, dz / l];
+  });
+  return P.map((p, i) => {
+    const [ax, az, ux, uz] = L[(i + P.length - 1) % P.length], [bx, bz, vx, vz] = L[i], den = ux * vz - uz * vx;
+    if (Math.abs(den) < 1e-9) return [bx, bz];
+    const t = ((bx - ax) * vz - (bz - az) * vx) / den;
+    return [ax + ux * t, az + uz * t];
+  });
+}
 /* service roads inside the fence ([x, z] polylines): in from the gate past the fire station to the heli pad and the
    barracks, out to the Patriot battery, behind the hangars to the tower, the ops buildings, the fuel farm and the
    radar, and the perimeter road just inside the fence (its points pulled 5 units in toward the centre) */
 BL.roads = [
-  [[-43, 53], [-36, 47], [-24, 40], [-14, 27.2], [36, 27.2], [44, 35]],   // between the south runway and the heliport
+  [[-43, 67.5], [-43, 53], [-36, 47], [-24, 40], [-14, 27.2], [36, 27.2], [44, 35]],   // in at the gate, between the south runway and the heliport
   [[-36, 47], [-41, 41], [-41, 34.5]], [[5.5, 27.2], [5.5, 48.5]],
   [[-44, -26], [-44, -28.7], [36, -28.7], [40, -26]],
   [[-43, -28.7], [-43, -41.5]], [[-18, -28.7], [-18, -38]], [[4, -28.7], [4, -32.2]], [[16, -28.7], [16, -33.5]], [[30, -28.7], [30, -30.6]],
   [[36, -28.7], [41, -36]], [[-2, -28.7], [-2, -47.5]],
-  (() => { const f = BL.fence.map(([x, z]) => { const l = Math.hypot(x, z); return [x - x / l * 5, z - z / l * 5]; }); return [...f, f[0]]; })()
+  (() => { const f = insetPoly(BL.fence, 5); return [...f, f[0]]; })()
 ];
 BL.ROAD_W = 1.6;
 /* how far (x, z) is from the nearest road's centreline */
@@ -195,7 +211,7 @@ function buildFence(p) {
       seg(0, g0); seg(g1, 1);
       const gx = ax + (bx - ax) * 0.5, gz = az + (bz - az) * 0.5, r = Math.atan2(-(bz - az), bx - ax);
       const bar = box(p, L * 0.1, 0.08, 0.08, 0xd03a2a, gx, 0.9, gz); bar.rotation.y = r;           // barrier
-      const hx = gx + Math.sin(r) * 2.4, hz = gz + Math.cos(r) * 2.4;                            // guard hut, inside
+      const hx = gx + Math.sin(r) * 2.2 + Math.cos(r) * 3, hz = gz + Math.cos(r) * 2.2 - Math.sin(r) * 3;   // guard hut, inside, beside the road
       box(p, 1.3, 1.3, 1.3, WALL, hx, 0.65, hz).rotation.y = r; box(p, 1.45, 0.12, 1.45, ROOF_MAT, hx, 1.36, hz).rotation.y = r;
       BL.gatePos = new V3(gx, 0, gz); BL.gateOut = new V3(-Math.sin(r), 0, -Math.cos(r));          // outward normal of the gate (the fence runs clockwise)
     } else seg(0, 1);
@@ -294,7 +310,7 @@ function buildBase() {
   // --- fence, guard towers, gate road
   dyn.push(buildFence(g));
   const guards = [];
-  for (const i of [1, 3, 5, 7, 10]) { const [x, z] = BL.fence[i]; guards.push(buildGuardTower(g, x * 0.97, z * 0.97, Math.atan2(-z, x))); }
+  for (const i of BL.towers) { const [x, z] = BL.fence[i]; guards.push(buildGuardTower(g, x * 0.97, z * 0.97, Math.atan2(-z, x))); }
   const gp = BL.gatePos, go = BL.gateOut;
   const road = box(g, 170, 0.04, 3.0, ASPH2, gp.x + go.x * 75, 0.01, gp.z + go.z * 75); road.rotation.y = Math.atan2(-go.z, go.x); road.castShadow = false;   // the road in (enemy columns come along it)
   // --- air defence, tanks (mounts are dynamic)
@@ -304,7 +320,7 @@ function buildBase() {
   add(mounts.aa, buildAAGun(g, -56, -16, 200, 140)); add(mounts.aa, buildAAGun(g, 59, 15, 20, 140)); add(mounts.aa, buildAAGun(g, -20, 57, 235, 140)); add(mounts.aa, buildAAGun(g, 30, -52, 90, 140));
   for (const [x, z, f] of [[-22, 49, 230], [-6, 56, 255], [18, 58, 290], [-56, 28.5, 200]]) add(mounts.tanks, buildTank(g, x, z, f, 70, true));
   const pr = buildPatriotRadar(g, -40, 32, 215);
-  for (const [x, z, f] of [[-49, 38, 215], [-30, 33, 230], [-33, 40, 245], [-50, 28, 200]]) add(mounts.sams, buildSamLauncher(g, x, z, f, 70, 'patriot'));
+  for (const [x, z, f] of [[-49, 38, 215], [-30, 33, 230], [-33, 40, 245], [-54, 34, 200]]) add(mounts.sams, buildSamLauncher(g, x, z, f, 70, 'patriot'));
   for (const [x, z, f] of [[38, -40, 60], [44, -34, 40]]) add(mounts.sams, buildSamLauncher(g, x, z, f, 80, 'nasams'));
   add(mounts.shorad, buildAvenger(g, -60, 4, 180, 150)); add(mounts.shorad, buildAvenger(g, 60, -20, 20, 150)); add(mounts.shorad, buildAvenger(g, -14, 50, 300, 150));
   // --- lights: runway edge, thresholds, approach lights + sequenced flashers, PAPI, taxiway edges, apron masts

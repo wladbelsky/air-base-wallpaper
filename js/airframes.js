@@ -8,14 +8,74 @@ function glowSprite(g, x, y, z, s, color) {
   const m = new THREE.SpriteMaterial({ map: TEX.flash, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, opacity: 0, color: color || 0xffaa66 });
   const sp = new THREE.Sprite(m); sp.position.set(x, y, z); sp.scale.set(s, s, 1); g.add(sp); return sp;
 }
-function gear(g, pts, h) { const gg = new THREE.Group(); g.add(gg); for (const [x, z] of pts) { box(gg, 0.035, h, 0.035, 0x222, x, h / 2, z); box(gg, 0.08, 0.06, 0.03, 0x1a1a1a, x, 0.03, z); } return gg; }
+/* landing gear: legs [x, z, kind] — 'n' nose wheel (the first leg's default), 's' single, 't' twin, 'tan' tandem pair,
+   'b4' 2x2 bogie, 'b6' 3x2 bogie; h = ground to the gear bay. Light struts and doors, dark tyres with light hubs. The
+   group hangs from the bay (y = h) so tickGear folds it up into it. */
+function gear(g, legs, h) {
+  const gg = new THREE.Group(); gg.position.y = h; g.add(gg);
+  const S = M(0xb8bcc0), TY = M(0x1e1e1e), st = clamp(h * 0.2, 0.022, 0.04);
+  legs.forEach(([x, z, kind], i) => {
+    kind = kind || (i ? 's' : 'n');
+    const r = h * (kind === 'n' ? 0.26 : kind === 'b6' || kind === 'b4' ? 0.28 : 0.32), w = r * 0.62, ax = -h + r, sp = w * 0.75, lx = r * 1.15;
+    const wh = { n: [[0, 0]], s: [[0, 0]], t: [[0, -sp], [0, sp]], tan: [[-lx, 0], [lx, 0]], b4: [[-lx, -sp], [-lx, sp], [lx, -sp], [lx, sp]],
+      b6: [[-2 * lx, -sp], [-2 * lx, sp], [0, -sp], [0, sp], [2 * lx, -sp], [2 * lx, sp]] }[kind];
+    box(gg, st, h - r, st, S, x, ax / 2, z);                                                        // strut, bay to axle
+    if (wh.length > 1) { const xs = wh.map(q => q[0]), zs = wh.map(q => q[1]); box(gg, Math.max(...xs) - Math.min(...xs) + st, st * 0.8, Math.max(...zs) - Math.min(...zs) + st, S, x, ax, z); }   // axle beam / bogie
+    for (const [dx, dz] of wh) {
+      cyl(gg, r, r, w, 10, TY, x + dx, ax, z + dz).rotation.x = Math.PI / 2;                        // tyre
+      cyl(gg, r * 0.45, r * 0.45, w * 1.08, 8, S, x + dx, ax, z + dz).rotation.x = Math.PI / 2;      // hub
+    }
+    const side = Math.sign(z) || 1, out = wh.some(q => q[1]) ? sp + w / 2 : 0;
+    box(gg, r * 2, (h - r) * 0.75, 0.01, S, x, -(h - r) * 0.42, z + side * (st + 0.012 + out));      // gear door
+  });
+  return gg;
+}
+/* gear up / down over about a second (st.gearDown), folding into the bay */
+function tickGear(gr, st, dt) {
+  if (!gr) return;
+  const u = gr.userData, k0 = u.k ?? 1;
+  u.k = clamp(k0 + (st.gearDown !== false ? dt : -dt), 0, 1);
+  gr.scale.y = Math.max(0.01, smoothstep(0, 1, u.k)); gr.visible = u.k > 0.01;
+}
+/* a smooth body of revolution along X: profile [[x, r, dy], ...] (back to front; dy lifts the axis there), cross-section
+   r wide and r*sy tall, so a nose blends into the fuselage without a step */
+function lathe(g, profile, c, y, sy, seg) {
+  const geo = new THREE.LatheGeometry(profile.map(([x, r]) => new THREE.Vector2(Math.max(r, 1e-4), x)), seg || 12);
+  geo.rotateZ(-Math.PI / 2);                                                                      // the lathe axis (y) onto +x
+  const pos = geo.attributes.position, lift = x => {                                              // the axis lift at x
+    for (let i = 1; i < profile.length; i++) if (x <= profile[i][0] || i === profile.length - 1) { const [x0, , a] = profile[i - 1], [x1, , b] = profile[i]; return lerp(a || 0, b || 0, clamp((x - x0) / (x1 - x0 || 1), 0, 1)); }
+    return 0;
+  };
+  for (let i = 0; i < pos.count; i++) pos.setY(i, pos.getY(i) * sy + lift(pos.getX(i)) + y);
+  geo.computeVertexNormals();
+  const m = shade(new THREE.Mesh(geo, mm(c))); g.add(m); return m;
+}
+/* cockpit glass on a tapering nose: a band of the nose's own surface (x0..x1, radii r0 at x0, r1 at x1, a hair proud of
+   it) over the upper front arc (+-arc from the top), so it never sticks out past the skin */
+function windscreen(g, x0, x1, r0, r1, y, sy, arc = 1.13) {
+  const geo = new THREE.CylinderGeometry(r1 * 1.02, r0 * 1.02, x1 - x0, 12, 1, true, 1.5 * Math.PI - arc, 2 * arc);
+  const m = shade(new THREE.Mesh(geo, M(0x14202c, { side: THREE.DoubleSide })), false);
+  m.rotation.z = -Math.PI / 2; m.scale.x = sy || 1; m.position.set((x0 + x1) / 2, y, 0); g.add(m); return m;
+}
+/* a lathe profile at x: [radius, axis lift] */
+function profAt(P, x) {
+  for (let i = 1; i < P.length; i++) if (x <= P[i][0] || i === P.length - 1) { const a = P[i - 1], b = P[i], u = clamp((x - a[0]) / (b[0] - a[0] || 1), 0, 1); return [lerp(a[1], b[1], u), lerp(a[2] || 0, b[2] || 0, u)]; }
+  return [P[0][1], P[0][2] || 0];
+}
+/* a transport's fuselage in one piece: the nose droops a little to its tip, the tail sweeps up (top line straight), so
+   neither steps off the body seen from the side; the cockpit glass hugs the nose. Returns the profile. */
+function transportBody(g, C, P, fy, sy, wx0, wx1) {
+  lathe(g, P, C, fy, sy, 12);
+  const [r0, d0] = profAt(P, wx0), [r1, d1] = profAt(P, wx1);
+  windscreen(g, wx0, wx1, r0, r1, fy + (d0 + d1) / 2, sy);
+  return P;
+}
 
 /* ---------- F-35A Lightning II — stealth (the fold pivots are kept from the carrier version; land jets never fold) ---------- */
 function buildF35(color, big) {
   const g = new THREE.Group(), C = M(color || 0x6c747c), C2 = M(0x5e666e), D = M(0x33383d), CAN = M(0x3a3320, { shininess: 90, specular: 0xccaa55 });
   const b = new THREE.Group(); b.position.y = 0.2; g.add(b);
-  taper(b, 0.5, 0.15, 0.2, C, 0.52, 0.03, 0, 0.75, 0.55);                                   // chined forebody
-  const nose = shade(new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.3, 4), C)); nose.rotation.set(Math.PI / 4, 0, -Math.PI / 2); nose.position.set(0.92, 0.03, 0); b.add(nose);
+  lathe(b, [[0.2, 0.17], [0.45, 0.14, 0.01], [0.7, 0.1, 0.02], [0.92, 0.055, 0.03], [1.08, 0.004, 0.035]], C, 0.03, 0.72, 4);   // chined forebody to the nose, one piece
   taper(b, 0.9, 0.22, 0.44, C, -0.15, 0.01, 0, 0.9, 0.8);                                    // wide body, single engine
   taper(b, 0.34, 0.1, 0.13, CAN, 0.48, 0.14, 0, 0.6, 0.7, -0.04);
   for (const s of [-1, 1]) taper(b, 0.2, 0.12, 0.07, D, 0.24, 0.0, s * 0.21, 0.7, 1, 0.04);   // DSI intakes
@@ -38,7 +98,7 @@ function buildF35(color, big) {
   return {
     group: g,
     setFold(f) { for (const p of pivots) p.pv.rotation.x = -p.s * f * 1.75; },
-    tick(dt, st) { if (gr) gr.visible = st.gearDown !== false; glow.material.opacity += ((st.glow || 0) - glow.material.opacity) * Math.min(1, dt * 6); const sc = 0.5 + glow.material.opacity * 0.6; glow.scale.set(sc, sc, 1); }
+    tick(dt, st) { tickGear(gr, st, dt); glow.material.opacity += ((st.glow || 0) - glow.material.opacity) * Math.min(1, dt * 6); const sc = 0.5 + glow.material.opacity * 0.6; glow.scale.set(sc, sc, 1); }
   };
 }
 
@@ -182,15 +242,14 @@ function glows(g, list, s) { return list.map(([x, y, z]) => glowSprite(g, x, y, 
 function tickGlow(gl, st, dt, base, k) { for (const s of gl) { s.material.opacity += ((st.glow || 0) - s.material.opacity) * Math.min(1, dt * 6); const sc = base + s.material.opacity * k; s.scale.set(sc, sc, 1); } }
 /* a jet's standard model object: gear toggles with st.gearDown, glows follow st.glow */
 function jetModel(g, gr, gl, base, k, extra) {
-  return Object.assign({ group: g, setFold() {}, tick(dt, st) { if (gr) gr.visible = st.gearDown !== false; tickGlow(gl, st, dt, base, k); if (this.more) this.more(dt, st); } }, extra || {});
+  return Object.assign({ group: g, setFold() {}, tick(dt, st) { tickGear(gr, st, dt); tickGlow(gl, st, dt, base, k); if (this.more) this.more(dt, st); } }, extra || {});
 }
 
 /* ---------- F-15E Strike Eagle — 19.4 m: big wing, twin fins, conformal tanks, dark grey ---------- */
 function buildF15(color, big) {
   const g = new THREE.Group(), C = M(color || 0x5a6168), C2 = M(0x4c535a), D = M(0x2c3035), CAN = CANOPY();
   const b = new THREE.Group(); b.position.y = 0.22; g.add(b);
-  taper(b, 0.72, 0.17, 0.19, C, 0.72, 0.04, 0, 0.8, 0.7);
-  noseCone(b, 1.08, 0.04, 0.09, 0.36, C);
+  lathe(b, [[0.3, 0.1], [0.55, 0.098, 0.005], [0.8, 0.088, 0.015], [1.0, 0.074, 0.02], [1.2, 0.05, 0.025], [1.36, 0.024, 0.03], [1.45, 0.002, 0.03]], C, 0.04, 1, 12);   // forebody to the radome, one piece
   taper(b, 0.44, 0.12, 0.15, CAN, 0.7, 0.16, 0, 0.6, 0.72, -0.05);
   prism(b, [[0.42, 0.17], [-0.98, 0.3], [-0.98, -0.3], [0.42, -0.17]], -0.05, 0.13, C);       // wide lifting body
   for (const s of [-1, 1]) {
@@ -212,11 +271,12 @@ function buildF15(color, big) {
 function buildF16(color, big) {
   const g = new THREE.Group(), C = M(color || 0x8a929a), C2 = M(0x7a828a), D = M(0x2c3035), CAN = M(0x4a3f28, { shininess: 90, specular: 0xccaa55 });
   const b = new THREE.Group(); b.position.y = 0.2; g.add(b);
-  noseCone(b, 0.78, 0.06, 0.07, 0.3, C);
-  taper(b, 0.5, 0.14, 0.15, C, 0.55, 0.05, 0, 0.75, 0.75);
-  taper(b, 0.34, 0.1, 0.11, CAN, 0.52, 0.17, 0, 0.55, 0.7, -0.03);
-  tube(b, -0.66, 0.32, 0.11, 0.1, C, 0.02, 0, 8, 0.9);
-  box(b, 0.36, 0.1, 0.15, D, 0.26, -0.11, 0);                                                     // belly intake
+  // one smooth fuselage from the radome to the nozzle, the nose blending into the body (its axis lifted toward the nose)
+  lathe(b, [[-0.66, 0.088], [-0.45, 0.1], [-0.1, 0.108], [0.25, 0.104], [0.45, 0.092, 0.012], [0.62, 0.076, 0.025], [0.78, 0.056, 0.035], [0.92, 0.034, 0.04], [1.02, 0.014, 0.042], [1.07, 0.001, 0.042]], C, 0.02, 1.08, 14);
+  const cn = shade(new THREE.Mesh(new THREE.SphereGeometry(1, 14, 8, 0, TAU, 0, Math.PI / 2), CAN)); cn.scale.set(0.2, 0.085, 0.068); cn.position.set(0.55, 0.11, 0); b.add(cn);   // bubble canopy
+  const sp = shade(new THREE.Mesh(new THREE.SphereGeometry(1, 12, 6, 0, TAU, 0, Math.PI / 2), C)); sp.scale.set(0.5, 0.06, 0.07); sp.position.set(-0.02, 0.1, 0); b.add(sp);   // dorsal spine, canopy to fin
+  tube(b, 0.06, 0.42, 0.07, 0.066, C, -0.08, 0, 10, 0.85);                                         // chin intake duct
+  tube(b, 0.42, 0.45, 0.066, 0.066, D, -0.08, 0, 10, 0.85);                                        // its mouth
   pair(b, [[0.45, 0.07], [0.06, 0.14], [-0.28, 0.46], [-0.42, 0.46], [-0.42, 0.1]], 0.0, 0.03, C);  // LERX + wing
   pair(b, [[-0.48, 0.1], [-0.62, 0.32], [-0.72, 0.32], [-0.7, 0.1]], -0.01, 0.025, C);
   fin(b, -0.55, 0.1, 0, 0.36, 0.4, C2, 0.13);
@@ -231,8 +291,7 @@ function buildF16(color, big) {
 function buildF22(color, big) {
   const g = new THREE.Group(), C = M(color || 0x6e757c), C2 = M(0x5e656c), D = M(0x2a2e33), CAN = M(0x4a3f28, { shininess: 90, specular: 0xccaa55 });
   const b = new THREE.Group(); b.position.y = 0.2; g.add(b);
-  taper(b, 0.55, 0.13, 0.22, C, 0.78, 0.04, 0, 0.7, 0.5);                                         // chined forebody
-  const n = noseCone(b, 1.05, 0.04, 0.075, 0.3, C, 4); n.rotation.x = Math.PI / 4;
+  lathe(b, [[0.45, 0.13], [0.75, 0.115, 0.01], [1.0, 0.085, 0.02], [1.2, 0.045, 0.03], [1.36, 0.004, 0.035]], C, 0.04, 0.62, 4);   // chined forebody to the nose, one piece
   taper(b, 0.38, 0.1, 0.13, CAN, 0.72, 0.15, 0, 0.6, 0.7, -0.04);
   prism(b, [[0.6, 0.12], [0.3, 0.3], [-0.86, 0.33], [-0.86, -0.33], [0.3, -0.3], [0.6, -0.12]], -0.04, 0.12, C);
   for (const s of [-1, 1]) {
@@ -273,11 +332,10 @@ function buildA10(color, big) {
 
 /* ---------- airliner-type airframes (E-3, KC-46): fuselage, swept low wing, pods, tail ---------- */
 function airlinerBody(g, C, C2, L, r, wing, pods, fy) {
-  tube(g, -L * 0.42, L * 0.38, r, r, C, fy, 0, 10);
-  const nose = tube(g, L * 0.38, L * 0.48, r, r * 0.35, C, fy, 0, 10); nose.position.y = fy - r * 0.15;
-  const tail = tube(g, -L * 0.53, -L * 0.42, r * 0.25, r, C, fy, 0, 10); tail.position.y = fy + r * 0.35; tail.rotation.z = -Math.PI / 2 - 0.14;
-  box(g, 0.2, 0.06, r * 1.7, 0x14202c, L * 0.44, fy + r * 0.45, 0);                              // cockpit windows
-  pair(g, wing, fy - r * 0.55, 0.05, C);
+  transportBody(g, C, [[-L * 0.53, r * 0.18, r * 0.8], [-L * 0.49, r * 0.5, r * 0.48], [-L * 0.45, r * 0.85, r * 0.14], [-L * 0.41, r, 0], [L * 0.37, r, 0],
+    [L * 0.42, r * 0.88, -r * 0.06], [L * 0.46, r * 0.62, -r * 0.12], [L * 0.49, r * 0.3, -r * 0.16], [L * 0.505, r * 0.02, -r * 0.17]], fy, 1, L * 0.43, L * 0.46);
+  pair(g, wing.map(([x, z]) => [x, z < r * 1.2 ? r * 0.6 : z]), fy - r * 0.55, 0.05, C);   // the roots inside the fuselage (no gap)
+  taper(g, L * 0.22, r * 0.4, r * 1.5, C, L * 0.01, fy - r * 0.78, 0, 1, 0.8);             // wing-to-body fairing
   for (const [x, z, len, pr] of pods) for (const s of [-1, 1]) {
     tube(g, x - len, x, pr * 0.9, pr, C2, fy - r * 0.95, s * z, 10); tube(g, x - 0.02, x, pr * 0.8, pr * 0.8, 0x222, fy - r * 0.95, s * z, 10);
     box(g, len * 0.6, 0.12, 0.04, C, x - len * 0.4, fy - r * 0.62, s * z);
@@ -292,7 +350,7 @@ function buildE3(color) {
   for (const dz of [-0.06, 0.06]) strut(g, new V3(-0.55, fy + 0.18, dz), new V3(-0.75, fy + 0.62, dz * 1.5), 0.035, C2);
   const dome = new THREE.Group(); dome.position.set(-0.75, fy + 0.68, 0); g.add(dome);
   cyl(dome, 0.46, 0.46, 0.08, 20, 0xe6e8ea, 0, 0, 0); box(dome, 0.84, 0.085, 0.06, 0x2e3236, 0, 0, 0);
-  const gr = gear(g, [[1.5, 0], [-0.05, 0.36], [-0.05, -0.36]], 0.18);
+  const gr = gear(g, [[1.5, 0, 't'], [-0.05, 0.36, 'b4'], [-0.05, -0.36, 'b4']], 0.18);
   mergeStatic(g, [dome, gr]);
   return jetModel(g, gr, [], 0, 0, { more(dt, st) { if (st.airborne) dome.rotation.y += dt * 0.6; } });
 }
@@ -305,7 +363,7 @@ function buildKC46(color) {
   const B = KC46_BOOM, boom = new THREE.Group(); boom.position.set(B.x, fy + B.y - 0.28, 0); g.add(boom);
   const bm = tube(boom, -B.len, 0, 0.022, 0.03, 0x8a9096, 0, 0, 6); bm.castShadow = false;
   for (const s of [-1, 1]) box(boom, 0.18, 0.012, 0.16, 0x8a9096, -B.len * 0.7, 0, s * 0.09).rotation.x = s * 0.5;   // ruddevators
-  const gr = gear(g, [[1.65, 0], [-0.1, 0.42], [-0.1, -0.42]], 0.18);
+  const gr = gear(g, [[1.65, 0, 't'], [-0.1, 0.42, 'b4'], [-0.1, -0.42, 'b4']], 0.18);
   mergeStatic(g, [gr, boom]);
   let ext = 0;
   return jetModel(g, gr, [], 0, 0, { more(dt, st) { ext += ((st.hoseOut || 0) - ext) * Math.min(1, dt * 0.9); boom.rotation.z = lerp(0.12, B.down, ext); boom.scale.x = lerp(0.75, 1, ext); } });
@@ -317,15 +375,13 @@ const KC130_POD = { x: -0.42, y: 0.43, z: 1.62, len: 1.2, ang: 0.16 };   // hose
 function buildC130(v, color) {
   const ac = v === 'ac130', kc = v === 'kc130';
   const g = new THREE.Group(), C = M(color || (ac ? 0x575d63 : kc ? 0x6c7276 : 0x6f7568)), C2 = M(ac ? 0x4c5257 : 0x5e645a), D = M(0x2c3035), fy = 0.34, r = 0.21;
-  tube(g, -1.0, 1.08, r, r, C, fy, 0, 8, 1.05);
-  tube(g, 1.08, 1.4, r, r * 0.55, C, fy - 0.02, 0, 8, 1.05);
-  noseCone(g, 1.4, fy - 0.06, r * 0.55, 0.12, C, 8);
-  box(g, 0.12, 0.07, 0.3, 0x14202c, 1.3, fy + 0.12, 0);                                          // cockpit
-  const tl = tube(g, -1.75, -1.0, 0.06, r, C, fy + 0.12, 0, 8, 1.05); tl.rotation.z = -Math.PI / 2 - 0.16;   // upswept tail / ramp
+  transportBody(g, C, [[-1.76, 0.05, 0.16], [-1.55, 0.09, 0.12], [-1.3, 0.15, 0.06], [-1.05, 0.205, 0.005], [-0.9, r, 0], [1.05, r, 0],
+    [1.2, 0.185, -0.015], [1.32, 0.155, -0.03], [1.42, 0.115, -0.045], [1.5, 0.06, -0.055], [1.54, 0.005, -0.06]], fy, 1.05, 1.24, 1.36);   // upswept tail (the ramp) to the nose
   fin(g, -1.62, fy + 0.2, 0, 0.55, 0.8, C, 0.22, 0, 0.05);
   pair(g, [[-1.38, 0.08], [-1.55, 0.62], [-1.75, 0.62], [-1.72, 0.08]], fy + 0.2, 0.03, C);
-  const wy = fy + r * 1.02;
-  pair(g, [[0.32, 0.2], [0.13, 2.02], [-0.1, 2.02], [-0.18, 0.2]], wy, 0.05, C);
+  const wy = fy + r * 0.86;                                                                       // high wing, through the top of the fuselage
+  pair(g, [[0.32, 0], [0.13, 2.02], [-0.1, 2.02], [-0.18, 0]], wy, 0.05, C);
+  taper(g, 0.56, 0.07, r * 1.3, C, 0.07, wy + 0.06, 0, 0.75, 0.7);                               // wing-root fairing on top
   for (const s of [-1, 1]) taper(g, 0.6, 0.14, 0.12, C2, -0.1, fy - 0.14, s * 0.21, 0.9, 1);    // gear sponsons
   const props = [];
   for (const z of [0.68, 1.3]) for (const s of [-1, 1]) {
@@ -348,7 +404,7 @@ function buildC130(v, color) {
     for (const [x, len, rr] of [[-0.45, 0.32, 0.04], [0.15, 0.22, 0.025], [0.45, 0.18, 0.02]]) { const gb = cyl(g, rr, rr, len, 6, D, x, fy - 0.05, -r - len / 2 + 0.05); gb.rotation.x = Math.PI / 2; }   // 105 / 40 / 25 mm out of the left side
     const ball = shade(new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), D)); ball.position.set(1.12, fy - 0.2, -0.08); g.add(ball);
   }
-  const gr = gear(g, [[1.12, 0], [-0.15, 0.2], [-0.15, -0.2]], 0.13);
+  const gr = gear(g, [[1.12, 0, 't'], [-0.15, 0.2, 'tan'], [-0.15, -0.2, 'tan']], 0.13);
   const ramp = new THREE.Group(); ramp.position.set(-1.0, fy - r * 0.95, 0); g.add(ramp); box(ramp, 0.5, 0.03, 0.34, C2, -0.25, 0, 0);   // loading ramp (st.rampT)
   dyn.push(gr, ramp);
   navLights(g, [[0.0, wy + 0.03, -2.02, 0xff2a1a], [0.0, wy + 0.03, 2.02, 0x22ff66], [-1.9, fy + 0.3, 0, 0xffffff]], null, 0.9);
@@ -369,20 +425,19 @@ function buildC130(v, color) {
 /* ---------- C-17 Globemaster III — 53 m: high swept wing with winglets, four turbofans, T-tail ---------- */
 function buildC17(color) {
   const g = new THREE.Group(), C = M(color || 0x6a7177), C2 = M(0x5c6369), fy = 0.5, r = 0.33;
-  tube(g, -1.9, 1.85, r, r, C, fy, 0, 10, 1.05);
-  tube(g, 1.85, 2.4, r, r * 0.4, C, fy - 0.04, 0, 10, 1.05);
-  box(g, 0.16, 0.08, 0.45, 0x14202c, 2.2, fy + 0.15, 0);
-  const tl = tube(g, -2.65, -1.9, 0.12, r, C, fy + 0.2, 0, 10, 1.05); tl.rotation.z = -Math.PI / 2 - 0.2;
+  transportBody(g, C, [[-2.68, 0.08, 0.25], [-2.4, 0.16, 0.17], [-2.1, 0.26, 0.07], [-1.85, 0.32, 0.01], [-1.6, r, 0], [1.8, r, 0],
+    [2.05, 0.28, -0.03], [2.25, 0.2, -0.05], [2.38, 0.12, -0.06], [2.46, 0.04, -0.065], [2.48, 0.003, -0.065]], fy, 1.05, 2.12, 2.28);
   fin(g, -2.35, fy + 0.35, 0, 0.75, 1.0, C, 0.32, 0, 0.07);
   pair(g, [[-2.55, 0.03], [-2.8, 0.85], [-3.02, 0.85], [-2.98, 0.03]], fy + 1.34, 0.04, C);       // T-tail
-  const wy = fy + r * 0.98;
-  pair(g, [[0.75, 0.3], [-0.55, 2.55], [-0.85, 2.55], [-0.42, 0.3]], wy, 0.06, C);
+  const wy = fy + r * 0.86;                                                                       // high wing, through the top of the fuselage
+  pair(g, [[0.75, 0], [-0.55, 2.55], [-0.85, 2.55], [-0.42, 0]], wy, 0.06, C);
+  taper(g, 1.1, 0.09, r * 1.3, C, 0.12, wy + 0.08, 0, 0.75, 0.7);                                // wing-root fairing on top
   for (const s of [-1, 1]) { fin(g, -0.7, wy, s * 2.56, 0.26, 0.28, C, 0.12, 0, 0.03); taper(g, 1.0, 0.2, 0.18, C2, 0.1, fy - 0.22, s * 0.32, 0.9, 1); }
   for (const [x, z] of [[0.5, 0.95], [-0.08, 1.72]]) for (const s of [-1, 1]) {
     tube(g, x - 0.58, x, 0.1, 0.12, C2, wy - 0.18, s * z, 10); tube(g, x - 0.03, x, 0.1, 0.1, 0x222, wy - 0.18, s * z, 10);
     box(g, 0.4, 0.14, 0.04, C, x - 0.25, wy - 0.06, s * z);
   }
-  const gr = gear(g, [[1.75, 0], [-0.1, 0.3], [-0.1, -0.3]], 0.17);
+  const gr = gear(g, [[1.75, 0, 't'], [-0.1, 0.3, 'b6'], [-0.1, -0.3, 'b6']], 0.17);
   const ramp = new THREE.Group(); ramp.position.set(-1.9, fy - r * 0.95, 0); g.add(ramp); box(ramp, 0.8, 0.04, 0.55, C2, -0.4, 0, 0);   // loading ramp (st.rampT)
   navLights(g, [[-0.7, wy + 0.3, -2.56, 0xff2a1a], [-0.7, wy + 0.3, 2.56, 0x22ff66], [-2.7, fy + 0.4, 0, 0xffffff]], null, 1.0);
   navLights(g, [[-1.2, fy + 0.36, 0, 0xff2020]], { period: 1.2, duty: 0.15, phase: Math.random() }, 1.1);

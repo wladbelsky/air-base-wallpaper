@@ -591,18 +591,30 @@ function updateSite(dt) {
     const sw = sl.sweep, ang = sw.base + Math.sin(T * sw.speed + sw.ph) * sw.amp, h = sl.holder.position;
     sl.holder.lookAt(_w.set(h.x + Math.cos(ang) * sw.dist, 0, h.z - Math.sin(ang) * sw.dist));
   }
-  const bandit = AUD.armed && ENEMIES.find(e => (e.kind === 'bandit' || e.kind === 'heli') && enemyAlive(e) && !e.duel);
+  // sky lights: each keeps its own target (the nearest bandit / helicopter, kept while it lives, a pause before the
+  // next) or sweeps the sky; either way the beam slews (yaw / elevation at a limited, eased rate), it never jumps
   for (const sl of BASE.skyLights) {
     const s = sl.sky, h = sl.holder.position;
-    if (bandit && (sl.trackT = (sl.trackT || 0) + dt) > 0) { sl.aim = (sl.aim || _w.clone()).lerp(bandit.p, Math.min(1, dt * 1.5)); sl.holder.lookAt(sl.aim); continue; }
-    const a = T * s.speed + s.ph, el = s.elev + Math.sin(T * 0.13 + s.ph) * 0.25;
-    sl.aim = (sl.aim || new V3()).set(h.x + Math.cos(a) * Math.cos(el) * 40, h.y + Math.sin(el) * 40, h.z + Math.sin(a) * Math.cos(el) * 40);
+    if (sl.yaw == null) { sl.yaw = sl.sweep = s.ph; sl.el = s.elev; sl.wy = sl.we = 0; }
+    if (sl.tgt && !(AUD.armed && enemyAlive(sl.tgt))) { sl.tgt = null; sl.pause = 1.5; }
+    if (!sl.tgt && AUD.armed && (sl.pause = (sl.pause || 0) - dt) <= 0) {
+      let best = 1e9; for (const e of ENEMIES) if ((e.kind === 'bandit' || e.kind === 'heli') && !e.duel && enemyAlive(e)) { const d = e.p.distanceTo(h); if (d < best) { best = d; sl.tgt = e; } }
+      if (!sl.tgt) sl.pause = 1;
+    }
+    let ty, te;
+    if (sl.tgt) { const p = sl.tgt.p; ty = Math.atan2(p.z - h.z, p.x - h.x); te = Math.atan2(p.y - h.y, Math.hypot(p.x - h.x, p.z - h.z)); sl.sweep = sl.yaw; }
+    else { sl.sweep += Math.min(s.speed, SKY_SLEW * 0.8) * dt; ty = sl.sweep; te = s.elev + Math.sin(T * 0.13 + s.ph) * 0.25; }   // the sweep carries on from where it points
+    const dy = Math.atan2(Math.sin(ty - sl.yaw), Math.cos(ty - sl.yaw)), de = te - sl.el;
+    sl.wy += clamp(clamp(dy * 2, -SKY_SLEW, SKY_SLEW) - sl.wy, -dt, dt); sl.we += clamp(clamp(de * 2, -SKY_SLEW, SKY_SLEW) - sl.we, -dt, dt);
+    sl.yaw += sl.wy * dt; sl.el = clamp(sl.el + sl.we * dt, 0.15, 1.45);
+    sl.aim = (sl.aim || new V3()).set(h.x + Math.cos(sl.yaw) * Math.cos(sl.el) * 40, h.y + Math.sin(sl.el) * 40, h.z + Math.sin(sl.yaw) * Math.cos(sl.el) * 40);
     sl.holder.lookAt(sl.aim);
   }
 }
+const SKY_SLEW = 0.5;   // rad/s: the sky lights' fastest swing (reached gradually: 1 rad/s²)
 function updateLights() {
   for (const m of NAV_MATS) {
-    let a = ENV.lightsOn; const b = m.userData.blink;
+    let a = m.userData.day ? Math.max(ENV.lightsOn, 0.75) : ENV.lightsOn; const b = m.userData.blink;   // vehicle beacons flash by day too
     if (b) { const ph = ((T / b.period) + (b.phase || 0)) % 1; a *= ((ph + 1) % 1) < b.duty ? 1 : 0; }
     m.opacity = a; m.size = m.userData.scale * ENV.ppu;
   }

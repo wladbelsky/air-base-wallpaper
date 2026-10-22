@@ -11,6 +11,8 @@ function vnoise(x, z, seed) {
   const xi = Math.floor(x), zi = Math.floor(z), xf = x - xi, zf = z - zi, u = xf * xf * (3 - 2 * xf), v = zf * zf * (3 - 2 * zf);
   return lerp(lerp(h(xi, zi), h(xi + 1, zi), u), lerp(h(xi, zi + 1), h(xi + 1, zi + 1), u), v);
 }
+/* the air defence, tanks and light towers: no tree grows through them (filled from BASE in buildVeg) */
+const VEG_KEEP = [];
 /* areas kept free of vegetation: runway strip, taxiway, apron, buildings, roads (rectangles [x0, z0, x1, z1]) */
 function vegBlocked(x, z) {
   const R = BASE_LAYOUT.rwy;
@@ -20,6 +22,7 @@ function vegBlocked(x, z) {
   if (x > 4 && x < 36 && z > 26 && z < 50) return true;                                  // heliport
   if (x > -13 && x < 5 && z > 24 && z < 38) return true;                                 // fire station
   if (roadDist(x, z) < BL.ROAD_W / 2 + 1.2) return true;                                 // roads
+  for (const [kx, kz] of VEG_KEEP) if (Math.abs(x - kx) < 2.6 && Math.abs(z - kz) < 2.6) return true;   // guns, tanks, launchers, lights
   const gp = BASE_LAYOUT.gatePos, go = BASE_LAYOUT.gateOut;
   if (gp) { const dx = x - gp.x, dz = z - gp.z, along = dx * go.x + dz * go.z, side = Math.abs(dx * go.z - dz * go.x); if (along > -6 && side < 4) return true; }
   return false;
@@ -130,6 +133,8 @@ const TERRAIN = {
     for (const v of this.veg) { scene.remove(v); v.geometry.dispose(); v.dispose(); }   // the mesh too: its instance buffers
     for (const f of this.fill) { scene.remove(f); f.dispose(); }                         // shares the geometry of its kind
     this.veg = []; this.fill = [];
+    VEG_KEEP.length = 0;
+    if (typeof BASE !== 'undefined' && BASE) for (const o of [...Object.values(BASE.mounts).flat().map(m => m.yawG), BASE.patriotRadar, ...BASE.skyLights.map(s => s.holder), ...BASE.floods.map(f => f.holder)]) if (o) { const w = o.getWorldPosition(new V3()); VEG_KEEP.push([w.x, w.z]); }
     let seed = { spring: 11, summer: 23, autumn: 37, winter: 41 }[season];
     const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };   // same layout every rebuild
     for (const K of vegKinds(season)) {
@@ -154,7 +159,7 @@ const TERRAIN = {
       let m = 0; tries = 0;
       while (m < nF && tries++ < nF * 40) {
         const x = lerp(-66, 66, rnd()), z = lerp(10, 26, rnd());
-        if (!fillSpot(x, z) || (K.clump && vnoise(x / 14, z / 14, 9 + K.n) < 0.45)) continue;
+        if (!fillSpot(x, z) || VEG_KEEP.some(([kx, kz]) => Math.abs(x - kx) < 2.6 && Math.abs(z - kz) < 2.6) || (K.clump && vnoise(x / 14, z / 14, 9 + K.n) < 0.45)) continue;
         const s = lerp(K.size[0], K.size[1], rnd());
         _tq.setFromAxisAngle(WUP_T, rnd() * TAU); _ts.set(s, s * lerp(0.85, 1.2, rnd()), s);
         fill.setMatrixAt(m, _tm.compose(_tp.set(x, 0, z), _tq, _ts));
