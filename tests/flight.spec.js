@@ -6,7 +6,7 @@ const { test, expect, SEED } = require('./support/harness');
 /* boot with automatic flight ops, missions, fly-bys and tanker passes off, and a fresh air wing (no initial launches) */
 async function quietBase(wp, opts) {
   await wp.boot(opts);
-  await wp.run(() => { CFG.auto = false; CFG.missions = 0; CFG.flyby = 0; buildAirWing(); TANKER.timer = 1e9; __t.reset(); });
+  await wp.run(() => { CFG.auto = false; CFG.missions = 0; CFG.flyby = 0; buildAirWing(); TANKER.timer = 1e9; GROUND_OPS.emTimer = 1e9; __t.reset(); });
 }
 /* does `seq` contain `want` in order (other states may come in between)? */
 const inOrder = (seq, want) => { let i = 0; for (const s of seq) if (s === want[i]) i++; return i === want.length; };
@@ -63,6 +63,26 @@ for (const c of CASES) {
     expect(await wp.run(() => ({ rwy: AIRFIELD.rwy.size, arr: AIRFIELD.arrivals.size }))).toEqual({ rwy: 0, arr: 0 });
   });
 }
+
+test('takeoff: the roll uses half the runway or more, the turn toward the orbit comes past its end', async ({ wp }) => {
+  await quietBase(wp);
+  for (const k of ['f16', 'c17']) {
+    await wp.run((k) => { window.__a = AIRCRAFT.find(a => a.spec.key === k); __a.requestLaunch(); window.__lift = null; window.__turn = null; }, k);
+    for (let i = 0; i < 1600; i++) {
+      await wp.sim(0.25);
+      const done = await wp.run(() => {
+        if (__a.state === 'climb' && __lift === null) __lift = __a.mesh.position.x;
+        if (__lift !== null && __turn === null && Math.abs(Math.atan2(__a.fwd.z, __a.fwd.x)) > 0.09) __turn = __a.mesh.position.x;
+        return __turn !== null || __a.state === 'orbit';
+      });
+      if (done) break;
+    }
+    const r = await wp.run(() => ({ lift: __lift, turn: __turn }));
+    const frac = (r.lift - (-64 + 4.5)) / (64 - (-64 + 4.5));
+    expect(frac, `${k} lift-off point`).toBeGreaterThan(k === 'c17' ? 0.55 : 0.4);
+    expect(r.turn, `${k} first turn`).toBeGreaterThan(64);
+  }
+});
 
 test('a pair from one flight takes off side by side', async ({ wp }) => {
   await quietBase(wp);

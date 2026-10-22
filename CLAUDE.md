@@ -31,7 +31,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/combat.js` | enemies: `ENEMY_TYPES` (fighters, attack jets, bombers), `HELI_TYPES`, `ARMOR_TYPES`; kinds `bandit`, `cruise`, `ballistic`, `heli`, `armor`; columns (`spawnColumn`), beat-synced hit resolution, `groundHit`, `baseImpact` + `BASE_FIRES` |
 | `js/airwar.js` | `AIRWAR`: combat passes — armed aircraft wait off-screen (`cbt_wait`) and cross the screen chasing / chased by a dogfight bandit, on close air support runs (`cas`) or hunting armour (helicopters); gunships circle over the fight (`cbt_orbit`); screen helpers (`ndc`, `onScreen`, `groundAt`), pass weapons on the beat (`AIRWAR.onBeat`), pass radio |
 | `js/tanker.js` | `TANKER` (a mission-world object): refuelling passes — KC-46 boom with a fighter flight, KC-130 hoses with a helicopter pair (see "Refuelling passes") |
-| `js/groundops.js` | `GROUND_OPS` (a mission-world object): scenes on the ground — emergency landings (crash tenders, tug), unloading a transport (K-loader, pallets), parachutes of the paradrops; pooled vehicle templates `VEH_TEMPLATES` / `VEH_POOL` (see "Ground scenes") |
+| `js/groundops.js` | `GROUND_OPS` (a mission-world object): scenes on the ground — emergency landings (crash tenders, tug), unloading a transport (K-loader, pallets), parachutes of the paradrops, the ground crew (`ServiceScene`: fuel truck, ammo loader) and the pushback tug (`PushbackScene`); `Drive` (a vehicle on a smooth path, `vehHold`: gives way to aircraft); pooled vehicle templates `VEH_TEMPLATES` / `VEH_POOL` (see "Ground scenes") |
 | `js/main.js` | WE property listener, scene init, audio analysis + `onBeat`, base weapons (tanks, AA guns, flak, Patriot / NASAMS, Stingers, C-RAM), searchlights, missions, chatter, panel UI (aircraft list + base sites), main loop |
 | `js/properties.js` | **generated** from `project.json` — do not edit by hand |
 | `js/settings.js` | browser-only settings drawer, demo beat, audio-file player (returns early inside WE) |
@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=2`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=3`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -51,7 +51,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   `FIXED_ORDER`/`HELI_ORDER`, callsign pool in `radio.js`, `<key>count` slider in `project.json`, `CFG.counts` default.
   `spec` keys: ground — `park` (home kind: `'f'` fighter shelter / stand, `'h'` heavy hangar / stand, `'d'` drone
   hangar, `'heli'` pad), `big` (only the big hangar fits it), `len` / `span` (footprint for taxi spacing), `taxiV`,
-  `rollAcc`, `vR` (rotation speed), `decel`, `approachV`, `climbOut`; air — `speed`, `turnR`, `orbitR`, `alt`,
+  `toRoll` (lift-off distance down the runway; the roll accelerates to `vR` over it), `vR` (rotation speed), `decel`, `approachV`, `climbOut`; air — `speed`, `turnR`, `orbitR`, `alt`,
   `farOrbit` (orbit range for unarmed types during combat; `armed` types fly combat passes instead), `bankMax`;
   roles — `armed`, `cas` (close air support passes), `gunship` (circles over the fight, `cbt_orbit`), `awacs`,
   `tanker` + `tankKind` (`'boom'` / `'drogue'`), `refuel` (`'boom'` / `'probe'`: which tanker it can take fuel from),
@@ -99,9 +99,21 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   the way or close in front, and short of where a pushback ends). Nobody ever drives on through the one in front:
   aircraft blocking each other round a cycle (`knot`, fresh `blockBy` links only) → the pushback goes, else the first in
   `AIRCRAFT`. A pushback starts only with nobody near its path or taxiing toward its end (`pushbackClear`); one that
-  has waited 20 s (`wantsOut`) makes the traffic stop a gap short of its end (`yielding`). `onGround` = `GROUND_STATES`
+  has waited 20 s and may go (`wantsOut`: tug hooked, queue not full) makes the traffic stop a gap short of its end (`yielding`). `onGround` = `GROUND_STATES`
   (helicopters never). The harness flags two taxiing aircraft closer than 0.3 × their lengths (ground collision).
-- **FixedWing states**: `parked` → `ready` (engines, waits for the door and `pushbackClear`) → `pushback` →
+  The blocker also looks at where one on the move will be in a moment (no nosing into a lane in front of traffic).
+  **Merging** (`yieldsTo`): every taxiing aircraft keeps its route ahead (`look`, 5 points over 6 units, set in
+  `followDeck`); when two routes meet, the one farther from the meeting point waits (one still on the runway never
+  does). It is kept apart from the physical blocking (no `blockBy` link, never part of a knot) and never yields to one
+  stuck behind it. **Flow control** (`queueFull`): at most 4 departures taxiing out / at the hold / lining up — new
+  pushbacks wait at home (`ready`), so the queue never backs up over the runway exits (an arrival stuck on the runway
+  would keep it shut for the queue in front of it, for good).
+- **Out channels** (`BASE_LAYOUT.chIn` / `chOut`, `channels` = both): lane homes leave by the first out channel east
+  of where their pushback ends (`AIRFIELD.outFor`: 19.5 by the big hangar, 66.5 at the east end).
+- **Takeoff**: `spec.toRoll` = lift-off distance (the roll accelerates to `vR` over it: fighters ~half the runway,
+  heavies ~two thirds); the climb-out runs straight past the runway end before the Dubins turn to the orbit.
+  `canLineUp` lets the next departure line up behind one rolling fast; it rolls once that one is off the runway.
+- **FixedWing states**: `parked` → `ready` (engines, the tug hooks up (`tugReady`), waits for the door and `pushbackClear`) → `pushback` →
   `taxi_out` → `hold_short` → `lineup` → `takeoff_roll` (brakes, roll, rotate at `vR`) → `climb` → `orbit` →
   `approach` → `final` → `rollout` → `taxi_in` → `parked`; `go_around` (→ `orbit`, `landReq` kept); an emergency:
   `rollout` → `emergency` (stopped on the runway) → `towed` → `parked` (groundops.js).
@@ -151,6 +163,21 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - **Unloading** (`UnloadScene`): a transport parked with `a.cargo` on a stand (not in a hangar): `a.rampT` opens the
   ramp (C-130 / C-17 models), a K-loader comes from the cargo yard along the service road, three pallets slide onto it,
   it drives away; `a.groundBusy` holds the aircraft's departure in `ready` meanwhile.
+- **Ground crew** (`ServiceScene`): an aircraft that parks (`needsService`, set on landing) on an open row-a stand or
+  a helicopter pad (`crewSpot`) gets a fuel truck (`fueler`, its `hose` node scaled out to the aircraft) and, if armed,
+  an ammo loader (`ammo`): from the nearest `CREW_DEPOTS` along the service strip `SERVICE_Z` (between the taxiway
+  wingtips and the front-row tails) or from `HELI_DEPOT` up the corridors between the pads; ≤ 3 at a time.
+  `groundBusy` holds the departure (`ready`; a helicopter waits spun up in `spinup`) until they pull away; a launch
+  request cuts the work short. Vehicles (`CrewCar`) grow in / shrink out at the depots.
+- **Pushback tug** (`PushbackScene`, one per departure in `ready`): waits inside a shelter / hangar or drives up to
+  the nose on an open stand; rides at the nose during the pushback, then unhooks and backs off (the aircraft holds in
+  `taxi_out` while `tugHold`), and drives back inside (dropped once the door has shut) or to the depot.
+- **Vehicles vs aircraft**: aircraft never wait for vehicles; vehicles give way (`vehHold`: two points ahead of the
+  vehicle against the next 8 units of a taxiing aircraft's route — or straight on along its nose — one standing right in
+  the way, a pushback's end; a vehicle already in an aircraft's way drives on to clear it) and `pushbackClear`
+  waits for vehicles near its path (`GROUND_OPS.vehicleNear`). Scenes list their vehicles in `veh` (objects with a
+  `position`); the harness flags a vehicle under a taxiing aircraft's fuselage / inner wing. Drive routes are
+  `densify`d (no Catmull-Rom bow on long legs; the same for the taxi routes in `AIRFIELD.round`).
 - **Parachutes** (`dropChute`, `updateChutes`): open, drift with `WIND`, land, the canopy collapses, gone after ~16 s.
 
 ## Combat (`js/combat.js`, `js/airwar.js`, `js/main.js`)
@@ -163,7 +190,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
   site rows show DAMAGED). Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
   tracers with gravity (`dropBombStick`, `FixedWing.dropBombs`), resolved in `FX.tracers.onSplash`.
-- Base weapons on the beat (`onBeat`): tanks (`fireTank`: at armour in range, else far out past the wire), AA guns
+- Base weapons on the beat (`onBeat`): tanks (`fireTank`: at armour in range (110), else far out past the wire;
+  with nothing to shoot their turrets look around now and then, `scanT`), AA guns
   (`fireAA`, `fireFlak`), C-RAM bursts (`startCIWS`), Patriot / NASAMS (`launchSAM`; always at an incoming ballistic
   missile), Avenger Stingers (`launchStinger`); mounts track in `updateMounts`. Hits resolve on the next beat (`queueHit`).
 - Air: jets fly passes (`chase` / `chased` / `sweep`, `cas` for the A-10 and now and then an F-15E with bombs),
@@ -175,10 +203,10 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - **Peace only.** Trigger: the first 3–5 min after a start / rebuild, then every 5–9 min (4–7 min timer + gathering);
   while `combatOn()` the timer is frozen and `start()` refuses. A fight starting while the event still gathers
   (`!ev.P`) aborts it; a pass already on screen is flown to the end. If nobody is ready it looks again every
-  8–15 s for ~90 s, then waits for the next one. `nextKind()` picks the kind of the next pass (a tanker of that kind
-  and receivers exist); with auto flight ops that tanker is launched ~90 s before a pass is due (`launchTanker`;
+  8–15 s for ~3 min, then waits for the next one. `nextKind()` picks the kind of the next pass (a tanker of that kind
+  and receivers exist); with auto flight ops that tanker is launched ~3 min before a pass is due (`launchTanker`;
   `autoLaunch` never launches tankers, nor does `scrambleSupport` — AWACS only), and `autoRecover` keeps a tanker up
-  for `TANKER_STATION` (300 s) and never recovers it while a pass is due (`TANKER.timer < 120`).
+  for `TANKER_STATION` (300 s) and never recovers it while a pass is due (`TANKER.timer < 180`).
 - **Kinds** (`spec.tankKind` / receivers' `spec.refuel`): `boom` (KC-46 with up to 4 jets of one flight: one on the
   boom, the ones done on the left wing, the ones to go on the right — no swaps on screen) and `drogue` (KC-130 with a
   helicopter pair, both on the hoses, low and slow). Slots `TANK_SLOTS[kind]` `[gap behind, side, height]`.

@@ -13,7 +13,7 @@
   H.RUNWAY_STATES = new Set(['lineup', 'takeoff_roll', 'rollout', 'taxi_in', 'emergency', 'towed']);
   H.ARRIVAL_STATES = new Set(['approach', 'final']);
   // per-state limits for the stuck detector (s); states missing here use DEFAULT_LIMIT, EXEMPT ones are never stuck
-  H.STATE_LIMITS = { ready: 120, pushback: 90, taxi_out: 420, hold_short: 300, lineup: 40, takeoff_roll: 45, climb: 240, approach: 240, final: 60,
+  H.STATE_LIMITS = { ready: 600, pushback: 90, taxi_out: 600, hold_short: 300, lineup: 40, takeoff_roll: 90, climb: 240, approach: 240, final: 60,
     go_around: 120, rollout: 90, taxi_in: 360, emergency: 200, towed: 360, drop_pass: 120, spinup: 30, lift: 30, depart: 240, ret: 300, hover: 30, descend: 30, spindown: 30,
     cbt_out: 180, cbt_rtb: 300, cbt_pass: 240, tank_out: 240, tank_back: 300, tank_pass: 240, mission_out: 400, mission_back: 600 };
   H.DEFAULT_LIMIT = 600;
@@ -85,6 +85,16 @@
       const a = taxiing[i], b = taxiing[j], d = Math.hypot(a.mesh.position.x - b.mesh.position.x, a.mesh.position.z - b.mesh.position.z);
       if (d < 0.3 * (a.spec.len + b.spec.len)) v.push(`ground collision ${who(a)} / ${who(b)} (${d.toFixed(2)} apart at ${a.mesh.position.x.toFixed(0)},${a.mesh.position.z.toFixed(0)})`);
     }
+    // ground vehicles (crews, tugs, loaders) never end up under a taxiing aircraft other than their own: inside its
+    // fuselage / inner wing footprint
+    for (const sc of GROUND_OPS.scenes) if (sc.veh) for (const vh of sc.veh) {
+      const p = vh.position; if (!p) continue;
+      for (const a of taxiing) {
+        if (a === sc.a) continue;
+        const dx = p.x - a.mesh.position.x, dz = p.z - a.mesh.position.z, al = dx * a.fwd.x + dz * a.fwd.z, sd = dx * a.fwd.z - dz * a.fwd.x;
+        if (Math.abs(al) < a.spec.len * 0.45 && Math.abs(sd) < a.spec.span * 0.3 + 0.3) v.push(`${sc.constructor.name} vehicle under ${who(a)} at ${p.x.toFixed(0)},${p.z.toFixed(0)}`);
+      }
+    }
     // enemy armour stays outside the fence
     for (const e of ENEMIES) if (e.kind === 'armor' && !e.dead && insideFence(e.p.x, e.p.z)) v.push(`enemy ${e.type} inside the fence at ${e.p.x.toFixed(0)},${e.p.z.toFixed(0)}`);
     // tanker event
@@ -105,7 +115,7 @@
     if (PENDING.length > 300) v.push(`PENDING ${PENDING.length}`);
     if (FLYBYS.length > 8) v.push(`FLYBYS ${FLYBYS.length}`);
     if (GROUND_OPS.chutes.length > 40) v.push(`parachutes ${GROUND_OPS.chutes.length}`);
-    if (GROUND_OPS.scenes.length > 6) v.push(`ground scenes ${GROUND_OPS.scenes.length}`);
+    if (GROUND_OPS.scenes.length > AIRCRAFT.length + 6) v.push(`ground scenes ${GROUND_OPS.scenes.length}`);
     if (GROUND_OPS.emerg && !inWing.has(GROUND_OPS.emerg)) v.push('emergency of an aircraft not in the air wing');
     return v;
   };

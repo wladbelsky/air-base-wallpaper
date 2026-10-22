@@ -13,6 +13,17 @@
    two aircraft can never block each other for good).                                                          */
 const RW = BASE_LAYOUT.rwy, TWZ = BASE_LAYOUT.twy.z, LANE = BASE_LAYOUT.lane;
 const HOLD = BASE_LAYOUT.hold;
+/* extra points every `step` along the long straight legs of a route: a Catmull-Rom curve bows out sideways on a long
+   segment next to short ones (an aircraft rolled 1.6 off the taxiway line) */
+function densify(pts, step = 3) {
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, az] = pts[i - 1], [bx, bz] = pts[i], n = Math.floor(Math.hypot(bx - ax, bz - az) / step);
+    for (let k = 1; k < n; k++) out.push([ax + (bx - ax) * k / n, az + (bz - az) * k / n]);
+    out.push(pts[i]);
+  }
+  return out;
+}
 const AIRFIELD = {
   rwy: new Set(),            // aircraft on the runway (lining up, rolling, landing roll until clear)
   arrivals: new Set(),       // on approach or final
@@ -44,7 +55,7 @@ const AIRFIELD = {
       const l1 = Math.hypot(bx - ax, bz - az), l2 = Math.hypot(cx - bx, cz - bz), k1 = Math.min(r, l1 / 2) / l1, k2 = Math.min(r, l2 / 2) / l2;
       put(bx - (bx - ax) * k1, bz - (bz - az) * k1); put(bx + (cx - bx) * k2, bz + (cz - bz) * k2);
     }
-    put(...pts[pts.length - 1]); return out;
+    put(...pts[pts.length - 1]); return densify(out);
   },
   onLane: s => s.row !== 'a',
   /* pushback out of the home: backwards onto the taxiway (front row: ending nose west) or the lane (nose east) */
@@ -55,7 +66,7 @@ const AIRFIELD = {
   /* from the end of the pushback to the holding point (from the lane: east along it, out by the east channel) */
   toHold(s) {
     const pts = [];
-    if (this.onLane(s)) { const ec = BASE_LAYOUT.channels[2]; pts.push([s.x - 3.4, LANE], [ec, LANE], [ec, TWZ]); }
+    if (this.onLane(s)) { const ec = this.outFor(s); pts.push([s.x - 3.4, LANE], [ec, LANE], [ec, TWZ]); }
     else pts.push([s.x + 3.4, TWZ]);
     pts.push([HOLD.x, TWZ], [HOLD.x, HOLD.z]);
     return this.round(pts, 2.2);
@@ -63,7 +74,9 @@ const AIRFIELD = {
   // onto the runway; dz: side of the centreline (a pair takes off side by side), dx: further along (the lead of a pair)
   lineUp(dz, dx) { const z = RW.z + (dz || 0), x = HOLD.x + 4.5 + (dx || 0); return [[HOLD.x, HOLD.z], [HOLD.x, Math.min(z, RW.z) - 1.6], [HOLD.x + 2.2, z - 0.15], [x, z]]; },
   /* the lane is entered from the taxiway by the west or the centre channel, whichever is west of the slot */
-  channelFor: s => s.x > -4 ? -4 : -44,
+  channelFor: s => s.x > BASE_LAYOUT.chIn[1] ? BASE_LAYOUT.chIn[1] : BASE_LAYOUT.chIn[0],
+  /* and left by the first out channel east of the end of the pushback */
+  outFor: s => BASE_LAYOUT.chOut.find(c => c > s.x - 1.4) ?? BASE_LAYOUT.chOut[BASE_LAYOUT.chOut.length - 1],
   /* the runway exit for a landing aircraft that will be down to taxi speed at xStop: the first link it can use */
   exitFor(s, xStop) {
     const min = Math.max(xStop + 3, this.onLane(s) ? this.channelFor(s) + 4 : s.x + 5);
@@ -78,8 +91,10 @@ const AIRFIELD = {
   },
   /* ---- runway ---- */
   eta(a) { return a.path ? (a.path.length - a.ps) / Math.max(1, a.v) : 99; },
+  // the next departure may line up behind one already rolling fast down the runway (it rolls once that one is off)
   canLineUp(a) {
-    if (this.rwy.size || GROUND_OPS.emerg) return false;              // an emergency closes the runway until it is towed clear
+    if (GROUND_OPS.emerg) return false;                                 // an emergency closes the runway until it is towed clear
+    for (const b of this.rwy) if (!(b.state === 'takeoff_roll' && b.rolling && b.v > b.spec.vR * 0.5)) return false;
     for (const b of this.arrivals) if (b.state === 'final' || this.eta(b) < 32) return false;
     return true;
   },
@@ -118,17 +133,37 @@ const AIRFIELD = {
       if (b === a || !b.onGround || !b.mesh.visible || b.state === 'parked') continue;
       // one waiting to push back for a while: stop short of where its pushback ends and let it out (unless already there)
       if (b.state === 'ready') { if (a.state !== 'pushback' && this.wantsOut(b) && ahead(b, ...b.pb[b.pb.length - 1], a.blockBy === b ? 0.1 : this.gap(a, b))) return b; continue; }
-      if (ahead(b, b.mesh.position.x, b.mesh.position.z)) return b;
+      const q = b.mesh.position; if (ahead(b, q.x, q.z)) return b;
+      // where one on the move will be in a moment: don't nose into a lane / taxiway in front of traffic coming along it
+      if (b.v > 0.1 && b.state !== 'pushback') { const k = Math.min(3, b.v * 1.5); if (ahead(b, q.x + b.fwd.x * k, q.z + b.fwd.z * k)) return b; }
       if (b.state === 'pushback' && ahead(b, ...b.pb[b.pb.length - 1])) return b;   // keep clear of where a pushback ends
     }
     return null;
   },
-  wantsOut: b => b.state === 'ready' && b.t > 20 && !b.groundBusy && b.pb,
+  /* merging: both taxiing with routes that meet within the next 6 units (look: set in followDeck) — the one farther
+     from the meeting point waits (both see the same pair of distances, so exactly one of them yields). Kept apart from
+     the physical blocking above: it never forms a knot (no blockBy link), so nobody is let through by a knot into the
+     one in front of it */
+  yieldsTo(a, b) {
+    const A = a.look, B = b.look;
+    if (!A || !B || a.state === 'pushback' || b.state === 'pushback' || T - a.lookAt > 0.2 || T - b.lookAt > 0.2) return false;
+    const ra = this.rwy.has(a), rb = this.rwy.has(b);
+    if (ra && !rb) return false;                                // one still clearing the runway never waits (the runway would stay shut)
+    const d = (a.spec.span + b.spec.span) * 0.35 + 0.6;
+    let ia = 9, ib = 9;
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) if (Math.hypot(A[i * 2] - B[j * 2], A[i * 2 + 1] - B[j * 2 + 1]) < d) { ia = Math.min(ia, i); ib = Math.min(ib, j); }
+    return ia < 9 && (rb && !ra || ia > ib || (ia === ib && AIRCRAFT.indexOf(a) > AIRCRAFT.indexOf(b)));
+  },
+  wantsOut(b) { return b.state === 'ready' && b.t > 20 && !b.groundBusy && b.pb && b.tugReady && !this.queueFull(); },   // (only when it may go: else the traffic waits for nothing)
   gap: (a, b) => (a.spec.len + b.spec.len) * 0.5 + 1,       // nose to tail with room to spare
   yielding: (b, a) => b.blockBy === a && T - (b.blockAt ?? -1) < 0.2,
   blocked(a, dir, dt) {
     const b = a.blockBy = this.blocker(a, dir); a.blockAt = T;
-    if (!b) { a.blockT = 0; return false; }
+    if (!b) {
+      // nobody in the way: give way at a merge (not to one that is stuck behind us: that would never clear)
+      for (const c of AIRCRAFT) if (c !== a && c.onGround && !(c.blockBy === a && T - c.blockAt < 0.2) && this.yieldsTo(a, c)) { a.blockT = (a.blockT || 0) + dt; return true; }
+      a.blockT = 0; return false;
+    }
     a.blockT = (a.blockT || 0) + dt;
     const k = this.knot(a);
     return !k || this.knotFirst(k) !== a;
@@ -144,9 +179,14 @@ const AIRFIELD = {
     return null;
   },
   knotFirst: k => k.find(c => c.state === 'pushback') || k.reduce((m, c) => AIRCRAFT.indexOf(c) < AIRCRAFT.indexOf(m) ? c : m),
+  /* departures on their way to the runway (taxiing out, at the hold, lining up): at most 4, so their queue never
+     reaches back over the runway exits — an arrival that can't get off the runway would keep it shut, for good, for
+     the very queue in front of it */
+  queueFull() { let n = 0; for (const b of AIRCRAFT) if (b.state === 'taxi_out' || b.state === 'hold_short' || b.state === 'lineup') n++; return n >= 4; },
   /* a pushback waits until nobody is near its path or taxiing toward where it ends (it takes 10-20 s, blocking the lane /
      taxiway); after 20 s the traffic stops short of it (blocker), those holding for it a gap away don't count */
   pushbackClear(a, pts) {
+    if (this.queueFull()) return false;                           // flow control: enough on their way to the runway
     const [ex, ez] = pts[pts.length - 1];
     for (const b of AIRCRAFT) {
       if (b === a || !b.onGround || b.state === 'parked' || b.state === 'ready' || b instanceof Helicopter) continue;
@@ -156,6 +196,7 @@ const AIRFIELD = {
       const dx = ex - bp.x, dz = ez - bp.z, d = Math.hypot(dx, dz);
       if (d < 40 && dx * b.fwd.x + dz * b.fwd.z > 0.8 * d && b.v > 0.05) return false;   // moving toward it
     }
+    for (const [x, z] of pts) if (GROUND_OPS.vehicleNear(x, z, 1.2 + a.spec.len * 0.5, a)) return false;   // a ground vehicle in the way (it gives way to taxiing aircraft, but not to one still parked)
     return true;
   },
   /* ---- shelter / hangar doors: open while their aircraft moves in or out, closed otherwise ---- */

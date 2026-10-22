@@ -5,7 +5,7 @@
    it in AIRCRAFT_TYPES (and add a count property in project.json if wanted).
    Ground movement goes through airfield.js (homes, taxi routes, runway, doors).  */
 const WUP = new V3(0, 1, 0);
-const _po = new V3(), _v = new V3(), _q = new THREE.Quaternion(), _m4 = new THREE.Matrix4(), _r = new V3(), _u = new V3(), _u2 = new V3(), _r2 = new V3(), _gd = new V3();
+const _po = new V3(), _v = new V3(), _q = new THREE.Quaternion(), _m4 = new THREE.Matrix4(), _r = new V3(), _u = new V3(), _u2 = new V3(), _r2 = new V3(), _gd = new V3(), _gl = new V3();
 function orientFrom(obj, f, bank) {
   _r.crossVectors(f, WUP); if (_r.lengthSq() < 1e-6) _r.set(0, 0, 1); _r.normalize();
   _u.crossVectors(_r, f).normalize();
@@ -81,6 +81,10 @@ class Aircraft {
   followDeck(dt, h) {
     const u0 = this.ds / this.dlen, tg = this.dcurve.getTangentAt(Math.min(u0, 1));
     _gd.set(tg.x, 0, tg.z).normalize(); if (this.drev) _gd.negate();
+    // the route ahead (now and every 1.5 for 6), for the merge rule in AIRFIELD.blocker
+    const L = this.look || (this.look = new Float32Array(10));
+    for (let i = 0; i < 5; i++) { this.dcurve.getPointAt(Math.min(1, (this.ds + i * 1.5) / this.dlen), _gl); L[i * 2] = _gl.x; L[i * 2 + 1] = _gl.z; }
+    this.lookAt = T;
     const stop = AIRFIELD.blocked(this, this.drev ? _gd.clone().negate() : _gd, dt);
     const ease = smoothstep(0, 0.8, this.ds + 0.15) * (0.35 + 0.65 * smoothstep(0, 3, this.dlen - this.ds));
     this.dv += clamp((stop ? 0 : this.dspeed * ease) - this.dv, -dt * 2.5, dt * 1.2);
@@ -210,7 +214,7 @@ const ORBIT_C = new V3(0, 0, -4);   // orbits are flown around the airfield's ce
 
 /* ======================= Fixed wing (runway) ======================= */
 class FixedWing extends Aircraft {
-  static spec = Object.assign({}, Aircraft.spec, { approachV: 8.5, taxiV: 1.8, rollAcc: 1.5, vR: 8, decel: 1.6, climbOut: 26, bankMax: 1.0, park: 'f' });
+  static spec = Object.assign({}, Aircraft.spec, { approachV: 8.5, taxiV: 1.8, toRoll: 60, vR: 8, decel: 1.6, climbOut: 26, bankMax: 1.0, park: 'f' });
   get engineOn() { return this.state !== 'parked' && this.state !== 'towed' && this.state !== 'emergency'; }
   get gearDown() {
     if (this.state === 'orbit' || this.onMission || this.inCombat || this.tank) return false;
@@ -218,7 +222,7 @@ class FixedWing extends Aircraft {
     if (this.state === 'approach') return this.ps > this.finalS - 30;
     return true;
   }
-  beginLaunch() { this.state = 'ready'; this.t = 0; this.pb = AIRFIELD.pushback(this.spot); }
+  beginLaunch() { this.state = 'ready'; this.t = 0; this.pb = AIRFIELD.pushback(this.spot); this.needsService = false; }
   /* on the runway at x, rolling east */
   rwyPose(x, dz) { this.deckPose(x, RW.z + (dz || 0), 0, 0); this.fwd.set(1, 0, 0); }
   get rdz() { return this._rdz || 0; }
@@ -232,20 +236,21 @@ class FixedWing extends Aircraft {
     let glow = 0;
     switch (this.state) {
       case 'parked': this.deckPose(sp.x, sp.z, sp.yaw, 0); this.v = 0; break;
-      case 'ready':                                    // engines running; the tug waits for the door and for traffic (and for an unloading to end)
+      case 'ready':                                    // engines running; the tug (groundops.js) hooks up, waits for the door and for traffic (and for the crew to finish)
         glow = 0.12; this.deckPose(sp.x, sp.z, sp.yaw, 0); this.mesh.visible = true;
         if (this.groundBusy) { this.t = 0; break; }
-        if (this.t > 2 && (!AIRFIELD.sheltered(sp) || sp.door > 0.95) && AIRFIELD.pushbackClear(this, this.pb)) {
+        if (this.t > 2 && (this.tugReady || this.t > 90) && (!AIRFIELD.sheltered(sp) || sp.door > 0.95) && AIRFIELD.pushbackClear(this, this.pb)) {
           this.startDeckPath(this.pb, 0.7, true); this.state = 'pushback';
           if (Math.random() < 0.5) this.call('taxiReq');
         }
         break;
       case 'pushback':
         glow = 0.12;
-        if (this.followDeck(dt)) { this.startDeckPath(AIRFIELD.toHold(sp), S.taxiV); this.state = 'taxi_out'; this.t = 0; if (Math.random() < 0.6) this.tower('taxiClear'); }
+        if (this.followDeck(dt)) { this.startDeckPath(AIRFIELD.toHold(sp), S.taxiV); this.state = 'taxi_out'; this.t = 0; this.tugHold = !!this.tug; if (Math.random() < 0.6) this.tower('taxiClear'); }
         break;
       case 'taxi_out':
         glow = 0.15;
+        if (this.tugHold && this.t < 12) { this.v = 0; break; }   // the tug is still unhooking in front of it
         if (this.followDeck(dt)) { this.state = 'hold_short'; this.t = 0; }
         break;
       case 'hold_short': {
@@ -270,18 +275,19 @@ class FixedWing extends Aircraft {
         if (!this.rolling) {                           // brakes on, spooling up; a pair's lead waits for its wingman, who rolls a second after it
           glow = 0.5; this.rwyPose(this.rx, this.rdz);
           const W = this.pairW, L = this.pairL;
-          const go = L ? !(L.state === 'takeoff_roll' && !L.rolling) && (L.state !== 'takeoff_roll' || L.t > 0.9) : this.t > 1.2 && (!W || W.pairL !== this || W.state === 'takeoff_roll' || this.t > 14);
+          let ahead = false; for (const b of AIRFIELD.rwy) if (b !== this && b !== L && b !== W && b.state === 'takeoff_roll') ahead = true;   // the one before is still rolling
+          const go = !ahead && (L ? !(L.state === 'takeoff_roll' && !L.rolling) && (L.state !== 'takeoff_roll' || L.t > 0.9) : this.t > 1.2 && (!W || W.pairL !== this || W.state === 'takeoff_roll' || this.t > 14));
           if (go && this.t > 0.6) { this.rolling = true; this.t = 0; }
           break;
         }
-        glow = 1; this.v += S.rollAcc * dt; this.rx += this.v * dt;
+        glow = 1; this.v += S.vR * S.vR / (2 * S.toRoll) * dt; this.rx += this.v * dt;   // lifts off toRoll down the runway
         const rot = smoothstep(S.vR * 0.85, S.vR, this.v);
         this.rwyPose(this.rx, this.rdz); this.mesh.rotateZ(rot * 0.12);
         if (Math.random() < dt * 8) FX.smoke.spawn(new V3(this.rx - 1.2, 0.2, RW.z + this.rdz), { s0: 0.5, s1: 1.8, life: 1.2, a0: 0.2, color: 0xd8d8d0, v: new V3(-1, 0.3, 0) });
         if (this.v >= S.vR) {
           AIRFIELD.rwy.delete(this); this.pairL = this.pairW = null;
           const p0 = this.mesh.position.clone(), f = new V3(1, 0, 0);
-          const p1 = p0.clone().addScaledVector(f, S.climbOut); p1.y += 4.5;
+          const p1 = p0.clone().addScaledVector(f, Math.max(S.climbOut, RW.x1 + 10 - p0.x)); p1.y += 5;   // straight out past the runway end, then the turn
           const P = new FlightPath().addLine(p0, p1);
           this.pickOrbit(true); this.pathToOrbit(P, p1, 0, 0.9);
           this.fly(P, this.v, S.speed);
@@ -340,7 +346,7 @@ class FixedWing extends Aircraft {
       case 'towed':
         glow = this.state === 'towed' ? 0 : 0.12;
         if (AIRFIELD.rwy.has(this) && this.mesh.position.z < RW.z - RW.w / 2 - 1.2) AIRFIELD.rwy.delete(this);
-        if (this.followDeck(dt)) { AIRFIELD.rwy.delete(this); this.state = 'parked'; this.t = 0; }
+        if (this.followDeck(dt)) { AIRFIELD.rwy.delete(this); this.state = 'parked'; this.t = 0; this.needsService = true; }   // the ground crew comes (groundops.js)
         break;
     }
     this.glow = glow;
@@ -397,7 +403,7 @@ class Helicopter extends Aircraft {
   }
   dispose() { if (this.lit) HELI_LIGHTS.n--; super.dispose(); }      // its real light can go to the next helicopter
   get onGround() { return false; }                                   // pads are their own: no ground traffic rules
-  beginLaunch() { this.state = 'spinup'; this.t = 0; }
+  beginLaunch() { this.state = 'spinup'; this.t = 0; this.needsService = false; }
   orientFlight(dir, bankT, dt) {
     this.bank += (bankT - this.bank) * Math.min(1, dt * 1.5);
     // own scratch vectors: orbitStep() passes the shared _v in as `dir`
@@ -412,7 +418,7 @@ class Helicopter extends Aircraft {
     const s = this.spot, S = this.spec; let air = 0;
     if (this.combatFlow(dt)) { air = 1; this.rotor = 1; } else switch (this.state) {
       case 'parked': this.rotor = 0; this.deckPose(s.x, s.z, s.yaw, 0); break;
-      case 'spinup': this.rotor = Math.min(1, this.t / 3.5); this.deckPose(s.x, s.z, s.yaw, 0); if (this.t > 3.5) { this.state = 'lift'; this.t = 0; } break;
+      case 'spinup': this.rotor = Math.min(1, this.t / 3.5); this.deckPose(s.x, s.z, s.yaw, 0); if (this.groundBusy) this.t = Math.min(this.t, 3.4); else if (this.t > 3.5) { this.state = 'lift'; this.t = 0; } break;   // a hot refuel finishes first
       case 'lift':
         air = 1; this.rotor = 1;
         this.deckPose(s.x, s.z, s.yaw, smoothstep(0, 3, this.t) * 4);
@@ -442,7 +448,7 @@ class Helicopter extends Aircraft {
         break;
       case 'spindown':
         this.rotor = Math.max(0, 1 - this.t / 3.5); this.deckPose(s.x, s.z, s.yaw, 0);
-        if (this.t > 3.5) { const n = TAU / (S.blades || 4); this.rotorAng = Math.round(this.rotorAng / n) * n; this.state = 'parked'; this.t = 0; }
+        if (this.t > 3.5) { const n = TAU / (S.blades || 4); this.rotorAng = Math.round(this.rotorAng / n) * n; this.state = 'parked'; this.t = 0; this.needsService = true; }
         break;
     }
     this.rotorAng += this.rotor * 30 * dt;
@@ -476,30 +482,30 @@ class Helicopter extends Aircraft {
    len / span: ground footprint (units, scaled) for taxi spacing; park: home kind ('f' fighter, 'h' heavy, 'd' drone);
    refuel: 'boom' (KC-46) / 'probe' (KC-130); tankKind on the tankers; gunship: circles over the fight (cbt_orbit) */
 const FW = FixedWing.spec, HELI = Helicopter.spec;
-const fighter = o => Object.assign({}, FW, { speed: 17, turnR: 22, orbitR: [30, 70], alt: [12, 17], armed: true, refuel: 'boom', len: 2.4, span: 1.7, vR: 8, rollAcc: 1.5 }, o);
-const heavy = o => Object.assign({}, FW, { scale: 1.05, park: 'h', taxiV: 1.6, rollAcc: 0.55, vR: 6.5, decel: 0.9, approachV: 7.5, climbOut: 34, bankMax: 0.55, callsignGroup: 1, turnR: 24 }, o);
+const fighter = o => Object.assign({}, FW, { speed: 17, turnR: 22, orbitR: [30, 70], alt: [12, 17], armed: true, refuel: 'boom', len: 2.4, span: 1.7, vR: 8, toRoll: 62 }, o);
+const heavy = o => Object.assign({}, FW, { scale: 1.05, park: 'h', taxiV: 1.6, toRoll: 80, vR: 6.5, decel: 0.9, approachV: 7.5, climbOut: 34, bankMax: 0.55, callsignGroup: 1, turnR: 24 }, o);
 class F15 extends FixedWing { static spec = fighter({ key: 'f15', tag: 'F-15E', speed: 17.5, alt: [13, 18] }); buildModel() { return buildF15(); } }
-class F16 extends FixedWing { static spec = fighter({ key: 'f16', tag: 'F-16C', turnR: 20, alt: [12, 16], len: 1.9, span: 1.2, vR: 7.5, rollAcc: 1.6 }); buildModel() { return buildF16(); } }
+class F16 extends FixedWing { static spec = fighter({ key: 'f16', tag: 'F-16C', turnR: 20, alt: [12, 16], len: 1.9, span: 1.2, vR: 7.5 }); buildModel() { return buildF16(); } }
 class F22 extends FixedWing { static spec = fighter({ key: 'f22', tag: 'F-22A', speed: 18.5, turnR: 22, alt: [15, 20] }); buildModel() { return buildF22(); } }
 class F35 extends FixedWing { static spec = fighter({ key: 'f35', tag: 'F-35A', alt: [13, 18], len: 2.0, span: 1.4 }); buildModel() { return buildF35(); } }
-class A10 extends FixedWing { static spec = fighter({ key: 'a10', tag: 'A-10C', speed: 12, turnR: 15, orbitR: [24, 56], alt: [8, 12], cas: true, len: 2.1, span: 2.2, vR: 6, rollAcc: 0.9, approachV: 7 }); buildModel() { return buildA10(); } }
-class E3 extends FixedWing { static spec = heavy({ key: 'e3', tag: 'E-3', speed: 12, turnR: 26, orbitR: [46, 80], farOrbit: [72, 88], alt: [21, 24], awacs: true, voice: 'awacs', len: 4.9, span: 4.6 }); buildModel() { return buildE3(); } }
+class A10 extends FixedWing { static spec = fighter({ key: 'a10', tag: 'A-10C', speed: 12, turnR: 15, orbitR: [24, 56], alt: [8, 12], cas: true, len: 2.1, span: 2.2, vR: 6, toRoll: 55, approachV: 7 }); buildModel() { return buildA10(); } }
+class E3 extends FixedWing { static spec = heavy({ key: 'e3', tag: 'E-3', speed: 12, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [21, 24], awacs: true, voice: 'awacs', len: 4.9, span: 4.6, toRoll: 88 }); buildModel() { return buildE3(); } }
 /* tankers fly refuelling passes with a flight in tow (js/tanker.js), no missions; the KC-46 has a boom, the KC-130 two hoses */
 class KC46 extends FixedWing {
-  static spec = heavy({ key: 'kc46', tag: 'KC-46', speed: 13, orbitR: [44, 76], farOrbit: [70, 86], alt: [18, 21], tanker: true, tankKind: 'boom', voice: 'tanker', missions: [], len: 5.3, span: 5.0, big: true });
+  static spec = heavy({ key: 'kc46', tag: 'KC-46', speed: 13, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [18, 21], tanker: true, tankKind: 'boom', voice: 'tanker', missions: [], len: 5.3, span: 5.0, big: true, toRoll: 88 });
   get hoseOut() { return this.tank && this.state === 'tank_pass' ? 1 : 0; }
   buildModel() { return buildKC46(); }
 }
 class KC130 extends FixedWing {
-  static spec = heavy({ key: 'kc130', tag: 'KC-130J', speed: 10, orbitR: [34, 66], farOrbit: [64, 80], alt: [11, 14], tanker: true, tankKind: 'drogue', voice: 'tanker', missions: [], len: 3.2, span: 4.2, vR: 5.5, rollAcc: 0.6 });
+  static spec = heavy({ key: 'kc130', tag: 'KC-130J', speed: 10, orbitR: [52, 86], farOrbit: [80, 96], alt: [11, 14], tanker: true, tankKind: 'drogue', voice: 'tanker', missions: [], len: 3.2, span: 4.2, vR: 5.5 });
   get hoseOut() { return this.tank && this.state === 'tank_pass' ? 1 : 0; }
   buildModel() { return buildC130('kc130'); }
 }
-class C130 extends FixedWing { static spec = heavy({ key: 'c130', tag: 'C-130J', speed: 10, orbitR: [34, 70], farOrbit: [64, 80], alt: [14, 18], transport: true, missions: ['airlift', 'paradrop'], len: 3.2, span: 4.2, vR: 5.5, rollAcc: 0.6 }); buildModel() { return buildC130('c130'); } }
-class AC130 extends FixedWing { static spec = heavy({ key: 'ac130', tag: 'AC-130J', speed: 9.5, orbitR: [36, 60], alt: [16, 20], armed: true, gunship: true, len: 3.2, span: 4.2, vR: 5.5, rollAcc: 0.6 }); buildModel() { return buildC130('ac130'); } }
-class C17 extends FixedWing { static spec = heavy({ key: 'c17', tag: 'C-17', speed: 12, orbitR: [44, 78], farOrbit: [70, 86], alt: [16, 20], transport: true, missions: ['airlift', 'paradrop'], len: 5.6, span: 5.4, big: true, vR: 6, rollAcc: 0.6 }); buildModel() { return buildC17(); } }
+class C130 extends FixedWing { static spec = heavy({ key: 'c130', tag: 'C-130J', speed: 10, orbitR: [52, 86], farOrbit: [80, 96], alt: [14, 18], transport: true, missions: ['airlift', 'paradrop'], len: 3.2, span: 4.2, vR: 5.5 }); buildModel() { return buildC130('c130'); } }
+class AC130 extends FixedWing { static spec = heavy({ key: 'ac130', tag: 'AC-130J', speed: 9.5, orbitR: [46, 76], alt: [16, 20], armed: true, gunship: true, len: 3.2, span: 4.2, vR: 5.5 }); buildModel() { return buildC130('ac130'); } }
+class C17 extends FixedWing { static spec = heavy({ key: 'c17', tag: 'C-17', speed: 12, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [16, 20], transport: true, missions: ['airlift', 'paradrop'], len: 5.6, span: 5.4, big: true, vR: 6, toRoll: 88 }); buildModel() { return buildC17(); } }
 /* unmanned: no radio of its own on the ground (its operator talks for it), circles over the fight with Hellfires */
-class MQ9 extends FixedWing { static spec = Object.assign({}, FW, { key: 'mq9', tag: 'MQ-9', scale: 1.15, park: 'd', speed: 8, turnR: 14, orbitR: [40, 70], alt: [18, 22], armed: true, gunship: true, drone: true, callsignGroup: 1, len: 1.3, span: 2.3, taxiV: 1.5, vR: 4.5, rollAcc: 0.8, approachV: 5.5, decel: 1.2, bankMax: 0.5 }); buildModel() { return buildMQ9(); } }
+class MQ9 extends FixedWing { static spec = Object.assign({}, FW, { key: 'mq9', tag: 'MQ-9', scale: 1.15, park: 'd', speed: 8, turnR: 14, orbitR: [40, 70], alt: [18, 22], armed: true, gunship: true, drone: true, callsignGroup: 1, len: 1.3, span: 2.3, taxiV: 1.5, vR: 4.5, toRoll: 45, approachV: 5.5, decel: 1.2, bankMax: 0.5 }); buildModel() { return buildMQ9(); } }
 class UH60 extends Helicopter { static spec = Object.assign({}, HELI, { key: 'uh60', tag: 'UH-60', speed: 7.5, orbitR: [18, 46], farOrbit: [50, 62], alt: [8.5, 10.5], transport: true, refuel: 'probe' }); buildModel() { return buildUH60(); } }
 class AH64 extends Helicopter { static spec = Object.assign({}, HELI, { key: 'ah64', tag: 'AH-64D', speed: 8.5, orbitR: [15, 40], alt: [7, 9], armed: true }); buildModel() { return buildAH64(); } }
 class UH1 extends Helicopter { static spec = Object.assign({}, HELI, { key: 'uh1', tag: 'UH-1Y', speed: 7, orbitR: [16, 42], alt: [7.5, 9.5], armed: true, blades: 2, doorGuns: true }); buildModel() { return buildUH1(); } }

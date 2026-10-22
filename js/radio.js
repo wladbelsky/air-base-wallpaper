@@ -704,6 +704,12 @@ LINES.emergency = {
   tow: ['{C}, tug is hooked up. Runway reopens shortly.', 'Towing {C} clear of the runway.', 'Runway will be open in two minutes. Tug has {C}.']
 };
 LINES.unload = ['Ramp down. Unloading.', 'Cargo is off. Thanks, ground.', 'Loadmaster says all pallets are clear.', 'Pallets off, ramp coming up.'];
+// the ground crew is done with {C} (ground crew scenes, groundops.js)
+LINES.service = {
+  peace: ['{C} is fueled and good to go.', 'Fuel is in, {C} is ready.', '{C}: tanks full, panels closed.', 'Turnaround on {C} complete.'],
+  calm: ['{C} rearmed and refueled. Ready for launch.', 'Ordnance loaded, fuel in. {C} is good.', 'Hot pit done, {C} can go.'],
+  panic: ['{C} is turned, get it out of here!', 'Fuel and ammo in, {C} go go go!']
+};
 LINES.paradrop = {
   jump: ['Green light! Go, go, go!', 'Jumpers away!', 'Green light, everybody out!', 'Stick away, good canopies.'],
   cargo: ['Load clear of the ramp!', 'Cargo away, chutes open!', 'Drop complete, ramp closing.']

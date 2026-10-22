@@ -184,6 +184,28 @@ test('airfield: taxi routes never loop — no more than a U-turn within 6 units 
   expect(r).toEqual([]);
 });
 
+test('takeoff: fighters lift off around mid-runway, heavies further down; lines and the fuel farm where they belong', async ({ wp }) => {
+  const r = await wp.run(() => {
+    const out = [], run = RW.x1 - (HOLD.x + 4.5);
+    for (const [k, C] of Object.entries(AIRCRAFT_TYPES)) {
+      const S = C.spec; if (!(C.prototype instanceof FixedWing)) continue;
+      const f = S.toRoll / run, want = S.park === 'h' ? [0.55, 0.75] : S.drone ? [0.3, 0.5] : [0.4, 0.6];
+      if (!(f >= want[0] && f <= want[1])) out.push(`${k} lifts off ${(f * 100).toFixed(0)}% down the runway`);
+    }
+    // the yellow lines (channels, the lane) lie on concrete: the apron, the remote stands, the channel strips, the taxiway
+    const A = BASE_LAYOUT.apron, TW = BASE_LAYOUT.twy, L = BASE_LAYOUT.lane;
+    const rects = [[A.x0, A.z1, A.x1, A.z0], ...BASE_LAYOUT.remote.map(q => [q.x0, q.z1, q.x1, A.z0]), ...BASE_LAYOUT.channels.map(c => [c - 1.6, L - 1.6, c + 1.6, A.z0]), [TW.x0, TW.z - TW.w / 2, TW.x1, TW.z + TW.w / 2]];
+    const onConc = (x, z) => rects.some(([x0, z0, x1, z1]) => x >= x0 - 1e-6 && x <= x1 + 1e-6 && z >= z0 - 1e-6 && z <= z1 + 1e-6);
+    for (const c of BASE_LAYOUT.channels) for (let z = L; z <= TW.z; z += 0.25) if (!onConc(c, z)) out.push(`channel ${c} line off the concrete at z ${z}`);
+    for (let x = BASE_LAYOUT.chIn[0]; x <= BASE_LAYOUT.chOut[BASE_LAYOUT.chOut.length - 1]; x += 0.25) if (!onConc(x, L)) out.push(`lane line off the concrete at x ${x}`);
+    for (const [x, z] of BASE_LAYOUT.fuel) if (roadDist(x, z) - BASE_LAYOUT.FUEL_R - BASE_LAYOUT.ROAD_W / 2 < 0.3) out.push(`fuel tank at ${x},${z} on a road`);
+    // every lane home leaves by an out channel east of where its pushback ends
+    for (const s of [...PARKING.shelters, ...PARKING.hangars, ...PARKING.remote].filter(AIRFIELD.onLane)) if (!(AIRFIELD.outFor(s) > s.x - 3.4)) out.push(`home ${s.x} leaves by ${AIRFIELD.outFor(s)}`);
+    return [...new Set(out)];
+  });
+  expect(r).toEqual([]);
+});
+
 test('roads stay off the runway, the taxiway and the apron, and nothing grows on them', async ({ wp }) => {
   const r = await wp.run(() => {
     const out = [], R = BASE_LAYOUT.rwy;

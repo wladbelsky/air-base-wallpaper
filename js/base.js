@@ -12,13 +12,17 @@ const BASE_LAYOUT = {
   hold: { x: -64, z: 2.6 },                                 // holding point of the departure link
   apron: { x0: -42, x1: 42, z0: -3.1, z1: -26 },
   lane: -16,                                                // apron taxi lane (z), eastbound
-  channels: [-44, -4, 66.5],                                // apron <-> taxiway: west and centre channels in (north), the east one out (south, east of the last runway link: no head-on meeting there)
+  // apron <-> taxiway channels: in (north) west and centre; out (south) by the big hangar and at the east end (east of the
+  // last runway link: no head-on meeting there)
+  chIn: [-44, -4], chOut: [19.5, 66.5],
   // remote stands at both ends of the apron (slabs joined to it, kept inside the fence): stand xs, rows (z)
-  remote: [{ x0: -67.5, x1: -42, z1: -15, xs: [-63, -54], rows: [-9] }, { x0: 42, x1: 66, z1: -26, xs: [49, 58], rows: [-9, -20] }],
+  remote: [{ x0: -67.2, x1: -42, z1: -17.6, xs: [-63, -54], rows: [-9] }, { x0: 42, x1: 66, z1: -26, xs: [49, 58], rows: [-9, -20] }],
   fence: [[-80, -2], [-63, -43], [-24, -66], [12, -70], [56, -53], [81, -14], [74, 22], [44, 54], [8, 72], [-28, 64], [-58, 42], [-76, 18]],
-  gate: 9                                                   // fence segment with the main gate (index of its first point)
+  gate: 9,                                                  // fence segment with the main gate (index of its first point)
+  fuel: [[-47, -40], [-40, -44], [-35, -40]], FUEL_R: 1.85   // fuel farm tanks (the spur road runs in between)
 };
 const BL = BASE_LAYOUT;
+BL.channels = [...BL.chIn, ...BL.chOut];
 /* service roads inside the fence ([x, z] polylines): in from the gate past the fire station to the heli pad and the
    barracks, out to the Patriot battery, behind the hangars to the tower, the ops buildings, the fuel farm and the
    radar, and the perimeter road just inside the fence (its points pulled 5 units in toward the centre) */
@@ -45,7 +49,7 @@ function roadDist(x, z) {
 function layoutParking() {
   const P = { shelters: [], hangars: [], stands: [], remote: [], heli: [] }, N = 90 * DEG;   // N: yaw of a nose pointing north (−Z)
   for (let k = 0; k < 7; k++) P.stands.push({ x: -37 + 4.6 * k, z: -9, kind: 'f', row: 'a' });
-  for (const x of [5, 14, 23, 32]) P.stands.push({ x, z: -10, kind: 'h', row: 'a' });
+  for (const x of [4, 13, 26, 35]) P.stands.push({ x, z: -9.5, kind: 'h', row: 'a' });   // the gap: out channel 19.5; the noses (and their tugs) clear of the lane
   for (const x of [-37.5, -32, -26.5, -21, -15.5]) P.shelters.push({ x, z: -22, kind: 'f', row: 'b', door: 0, w: 4.4, d: 5.6 });
   P.hangars.push({ x: 4.5, z: -23.8, kind: 'h', row: 'b', door: 0, w: 11, d: 9, size: 'big' });
   P.hangars.push({ x: 17.5, z: -23, kind: 'h', row: 'b', door: 0, w: 8.6, d: 7.4, size: 'medium' });
@@ -237,9 +241,9 @@ function buildBase() {
   for (const sz of [-0.15, 0.15]) deckLine(g, BL.hold.x - 1.1, BL.hold.z + sz, BL.hold.x + 1.1, BL.hold.z + sz, 0.07, 0xd8b030, my);
   slab(g, A.x0, A.z1, A.x1, A.z0, 0.03, CONC);
   for (const r of BL.remote) slab(g, r.x0, r.z1, r.x1, A.z0, 0.03, CONC);
-  const ec = BL.channels[2]; slab(g, ec - 1.6, BL.lane - 1.6, ec + 1.6, A.z0, 0.03, CONC);   // the east channel
+  for (const cx of BL.channels) slab(g, cx - 1.6, BL.lane - 1.6, cx + 1.6, A.z0, 0.03, CONC);   // channels and the lane's ends on concrete
   for (const cx of BL.channels) deckLine(g, cx, TW.z, cx, BL.lane, 0.08, 0xd8b030, my - 0.012);
-  deckLine(g, BL.channels[0], BL.lane, BL.channels[2], BL.lane, 0.08, 0xd8b030, my - 0.012);
+  deckLine(g, BL.chIn[0], BL.lane, BL.chOut[BL.chOut.length - 1], BL.lane, 0.08, 0xd8b030, my - 0.012);
   // --- heli pad (south of the runway), the fire station with its apron onto the runway, the roads
   slab(g, 7.5, 14.5, 32.5, 33.5, 0.03, CONC);
   slab(g, -7.5, R.z + R.w / 2 + 0.9, -0.5, 15.7, 0.03, CONC);
@@ -255,7 +259,7 @@ function buildBase() {
   buildBuilding(g, 52, 32, 10, 3.6, 2.2, win, 0.5, 0x8a8370); buildBuilding(g, 40, 42, 10, 3.6, 2.2, win, 0.5, 0x8a8370);   // barracks
   buildBuilding(g, -4, 18, 6, 4.5, 2.0, win, 0, 0x9a6a5a);                                    // fire station
   for (let i = 0; i < 3; i++) box(g, 1.6, 1.5, 0.05, 0x8a2a20, -6 + i * 2, 0.8, 15.73);       // its doors, onto the runway
-  for (const [x, z] of [[-48, -44], [-43, -48], [-38, -44]]) { cyl(g, 1.8, 1.8, 2.0, 12, 0xd8d8d0, x, 1.0, z); cyl(g, 1.85, 1.85, 0.12, 12, ROOF_MAT, x, 2.06, z); }   // fuel farm
+  for (const [x, z] of BL.fuel) { cyl(g, BL.FUEL_R - 0.05, BL.FUEL_R - 0.05, 2.0, 12, 0xd8d8d0, x, 1.0, z); cyl(g, BL.FUEL_R, BL.FUEL_R, 0.12, 12, ROOF_MAT, x, 2.06, z); }   // fuel farm
   // --- fence, guard towers, gate road
   dyn.push(buildFence(g));
   const guards = [];
@@ -290,7 +294,7 @@ function buildBase() {
   // structures the enemy aims at: a world point on each (cruise missiles, bombs) and the panel's site rows
   const targets = [
     ...P.shelters.map(s => ({ p: new V3(s.x, 1.6, s.z), name: 'HAS' })), ...P.hangars.slice(0, 2).map(s => ({ p: new V3(s.x, s.H * 0.8, s.z), name: 'HANGAR' })),
-    { p: new V3(-7, 4.5, -31), name: 'TOWER' }, { p: new V3(-24, 1.4, -35), name: 'OPS' }, { p: new V3(-43, 1.5, -46), name: 'FUEL' },
+    { p: new V3(-7, 4.5, -31), name: 'TOWER' }, { p: new V3(-24, 1.4, -35), name: 'OPS' }, { p: new V3(-41, 1.5, -41.5), name: 'FUEL' },
     { p: new V3(-40, 1.2, 22), name: 'PATRIOT' }, { p: new V3(-4, 1.2, 18), name: 'FIRE STN' }, { p: new V3(20, 0.5, R.z), name: 'RUNWAY' }, { p: new V3(-20, 0.5, R.z), name: 'RUNWAY' }
   ];
   return { group: g, winMat: win, deckY: 0, mounts, radars: [radar], navs, rabbit, floods, guards, skyLights, targets, patriotRadar: pr, name: 'base' };

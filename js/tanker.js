@@ -28,9 +28,9 @@ const TANKER = registerMissionWorld({
   update(dt) {
     if (this.ev) { this.tick(this.ev, dt); return; }
     if (combatOn()) return;                                      // peace only: the timer waits out the fight
-    if ((this.timer -= dt) > 0) { if (this.timer < 90 && CFG.auto) this.launchTanker(); return; }   // up in time for the pass
-    if (this.start() || ++this.miss > 8) { this.miss = 0; this.timer = rand(240, 420); this.next = null; return; }   // + gathering: every 5-9 min
-    this.timer = rand(8, 15);   // nobody ready: look again soon (a down tanker is launched above); after ~90 s give up until the next one, so it can be recovered
+    if ((this.timer -= dt) > 0) { if (this.timer < 180 && CFG.auto) this.launchTanker(); return; }   // up in time for the pass (tug, taxi and the queue at the hold take a while)
+    if (this.start() || ++this.miss > 16) { this.miss = 0; this.timer = rand(240, 420); this.next = null; return; }   // + gathering: every 5-9 min
+    this.timer = rand(8, 15);   // nobody ready: look again soon (a down tanker is launched above); after ~3 min give up until the next one, so it can be recovered
   },
   /* the tanker kind of the next pass: one that has a tanker and receivers in the air wing */
   nextKind() {

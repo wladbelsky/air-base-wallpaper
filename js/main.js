@@ -420,6 +420,7 @@ function updateMounts(dt) {
   }
   for (const m of ALL_TANKS) {
     if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['armor'], 110); if (m.track) aimMountAt(m, m.track.p); } else m.track = null;
+    if (!m.track && (m.scanT = (m.scanT ?? rand(2, 8)) - dt) <= 0) { m.scanT = rand(5, 12); mountRetarget(m); m.tPitch = rand(m.pmin, m.pmin + 0.1); }   // nothing to shoot: the crew looks around
     mountUpdate(m, dt);
   }
   for (const m of ALL_SHORAD) {
@@ -518,7 +519,7 @@ function autoRecover() {
     const air = all.filter(a => (a.state === 'orbit' || a.inCombat) && !a.landReq);
     // a pair whose flight-mates are still down waits for them to join instead of being recovered
     // a tanker isn't recovered while a refuelling pass is due (TANKER.update would launch it again right away)
-    const minUp = armed ? CBT_SORTIE : all[0].spec.tanker ? (TANKER.timer < 120 ? Infinity : TANKER_STATION) : 25;
+    const minUp = armed ? CBT_SORTIE : all[0].spec.tanker ? (TANKER.timer < 180 ? Infinity : TANKER_STATION) : 25;
     if (!air.length || air.length < all.length || air.some(a => a.airT < minUp)) continue;
     // an armed flight leaves the fight only while another one stays engaged
     if (armed && air[0].spec.armed && combatOn() && !groups.some(l => l !== all && l.some(engaged))) continue;
