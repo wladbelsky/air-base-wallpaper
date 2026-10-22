@@ -342,6 +342,10 @@ function airlinerBody(g, C, C2, L, r, wing, pods, fy) {
   }
   fin(g, -L * 0.47, fy + r * 0.5, 0, L * 0.12, L * 0.17, C, L * 0.05, 0, 0.06);
   pair(g, [[-L * 0.42, r * 0.8], [-L * 0.5, L * 0.16], [-L * 0.54, L * 0.16], [-L * 0.52, r * 0.8]], fy + r * 0.3, 0.035, C);
+  // nav lights at the wingtips (red left, green right) and the tail, red anti-collision beacons on top and underneath
+  const zt = Math.max(...wing.map(q => q[1])), tip = wing.filter(q => q[1] === zt), xt = tip.reduce((a, q) => a + q[0], 0) / tip.length, wy = fy - r * 0.55 + 0.06;
+  navLights(g, [[xt, wy, -zt, 0xff2a1a], [xt, wy, zt, 0x22ff66], [-L * 0.53, fy + r * 0.8, 0, 0xffffff]], null, 1.0);
+  navLights(g, [[L * 0.06, fy + r + 0.02, 0, 0xff2020], [L * 0.02, fy - r - 0.02, 0, 0xff2020]], { period: 1.2, duty: 0.15, phase: Math.random() }, 1.1);
 }
 /* ---------- E-3 Sentry (AWACS) — 46.6 m 707 airframe with the 9 m rotodome on two struts ---------- */
 function buildE3(color) {

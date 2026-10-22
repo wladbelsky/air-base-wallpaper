@@ -215,7 +215,11 @@ class Aircraft {
     this.t += dt;
     this.updateState(dt);
     this.model.tick(dt, this);
+    const on = this.lightsOn;                                       // nav lights / beacons: off while shut down on the ground
+    if (on !== this.navOn) { this.navOn = on; if (!this.navPts) { this.navPts = []; this.mesh.traverse(o => { if (o.isPoints) this.navPts.push(o); }); } for (const p of this.navPts) p.visible = on; }
   }
+  /* engines running (or stopped on the runway in an emergency): nav lights and beacons on */
+  get lightsOn() { return this.state !== 'parked' && this.state !== 'towed'; }
 }
 const ORBIT_C = new V3(0, 0, -4);   // orbits are flown around the airfield's centre
 

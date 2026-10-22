@@ -84,6 +84,18 @@ test('takeoff: the roll uses half the runway or more, the turn toward the orbit 
   }
 });
 
+test('nav lights and beacons are off while an aircraft or helicopter is parked and shut down, on with the engines', async ({ wp }) => {
+  await quietBase(wp);
+  const lit = () => wp.run(() => __f.map(a => { let n = 0, on = 0; a.mesh.traverse(o => { if (o.isPoints) { n++; if (o.visible) on++; } }); return [a.spec.key, n, on]; }));
+  await wp.run(() => { window.__f = ['c130', 'c17', 'e3', 'kc46', 'uh60'].map(k => AIRCRAFT.find(a => a.spec.key === k)); });
+  await wp.sim(1);
+  for (const [k, n, on] of await lit()) { expect(n, `${k} has nav lights`).toBeGreaterThan(0); expect(on, `${k} parked: lights off`).toBe(0); }
+  await wp.run(() => __f.forEach(a => a.requestLaunch()));
+  const up = await wp.until(() => __f.every(a => a.state !== 'parked'), 60);
+  expect(up.done).toBe(true);
+  for (const [k, n, on] of await lit()) expect(on, `${k} engines on: lights on`).toBe(n);
+});
+
 test('climb-out eases into level flight; the landing roll is long, longer for heavies', async ({ wp }) => {
   await quietBase(wp);
   for (const [k, minFrac] of [['f16', 0.25], ['c17', 0.45]]) {

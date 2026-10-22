@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=6`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=7`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -113,6 +113,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 - **Takeoff**: `spec.toRoll` = lift-off distance (the roll accelerates to `vR` over it: fighters ~half the runway,
   heavies ~two thirds); the climb-out runs straight past the runway end before the Dubins turn to the orbit.
   `canLineUp` lets the next departure line up behind one rolling fast; it rolls once that one is off the runway.
+- **Aircraft lights**: an airframe's nav lights / beacons (its `Points` nodes) are shown only while `lightsOn` (not
+  `parked` or `towed`: engines running, or stopped on the runway in an emergency) — `Aircraft.update`.
 - **FixedWing states**: `parked` → `ready` (engines, the tug hooks up (`tugReady`), waits for the door and `pushbackClear`) → `pushback` →
   `taxi_out` → `hold_short` → `lineup` → `takeoff_roll` (brakes, roll, rotate at `vR`) → `climb` → `orbit` →
   `approach` → `final` → `rollout` → `taxi_in` → `parked`; `go_around` (→ `orbit`, `landReq` kept); an emergency:
