@@ -8,9 +8,13 @@ your PC: air defence, tanks and aircraft fire to the beat, Ace Combat style radi
 screen, the time of day follows your PC clock and the ground follows the seasons.
 The sequel to [Carrier Strike Group](https://github.com/wladbelsky/carrier-wallpaper).
 
-![screenshot](screenshot.jpg)
+![Autumn afternoon air raid: jets fighting low over the shelters, the fuel farm burning](screenshots/dogfight.jpg)
 
 - **Live demo** (runs in the browser): https://wladbelsky.github.io/air-base-wallpaper/
+
+| Winter night under attack | Refuelling pass (KC-46 and F-16s) | Emergency on 09R while 09L keeps launching |
+|---|---|---|
+| ![Night attack](screenshots/night.jpg) | ![Refuelling pass](screenshots/refuel.jpg) | ![Emergency landing](screenshots/emergency.jpg) |
 
 ## Install
 
