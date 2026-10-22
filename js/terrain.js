@@ -14,11 +14,11 @@ function vnoise(x, z, seed) {
 /* areas kept free of vegetation: runway strip, taxiway, apron, buildings, roads (rectangles [x0, z0, x1, z1]) */
 function vegBlocked(x, z) {
   const R = BASE_LAYOUT.rwy;
-  if (x > R.x0 - 40 && x < R.x1 + 12 && Math.abs(z - R.z) < 9) return true;           // runway strip + approach lights
+  if (x > R.x0 - 40 && x < R.x1 + 12 && (Math.abs(z - R.z) < 9 || Math.abs(z - BASE_LAYOUT.rwy2.z) < 9)) return true;   // runway strips + approach lights (both, whatever the mode)
   if (x > -76 && x < 76 && z > -32 && z < 2) return true;                               // taxiway, apron, remote stands
   if (x > -54 && x < 46 && z > -54 && z < -30) return true;                             // hangars, tower, buildings
-  if (x > 4 && x < 36 && z > 12 && z < 36) return true;                                  // heli pad
-  if (x > -10 && x < 2 && z > 10 && z < 24) return true;                                 // fire station
+  if (x > 4 && x < 36 && z > 26 && z < 50) return true;                                  // heliport
+  if (x > -13 && x < 5 && z > 24 && z < 38) return true;                                 // fire station
   if (roadDist(x, z) < BL.ROAD_W / 2 + 1.2) return true;                                 // roads
   const gp = BASE_LAYOUT.gatePos, go = BASE_LAYOUT.gateOut;
   if (gp) { const dx = x - gp.x, dz = z - gp.z, along = dx * go.x + dz * go.z, side = Math.abs(dx * go.z - dz * go.x); if (along > -6 && side < 4) return true; }
@@ -77,8 +77,19 @@ function vegKinds(season) {
 /* the leafy part of a deciduous geometry is white in the vertex colours: only it takes the tint; trunks stay brown —
    done by tinting per instance and letting the trunk colour be dark enough not to show the tint much */
 
+/* the south runway's strip with one runway: scrub and trees (TERRAIN.fill), clear of the yard there and the fire
+   station's way up to the runway */
+function fillSpot(x, z) {
+  const R = BASE_LAYOUT.rwy, R2 = BASE_LAYOUT.rwy2;
+  if (x < R2.x0 - 1 || x > R2.x1 + 1 || z < R.z + R.w / 2 + 2.2 || z > 25.6) return false;
+  if (x > -9.5 && x < 1.5) return false;
+  for (const [cx, cz, r] of BASE_LAYOUT.fillYard) if (Math.hypot(x - cx, z - cz) < r) return false;
+  return true;
+}
 const TERRAIN = {
-  season: null, ground: null, veg: [], tex: null, weather: null,
+  season: null, ground: null, veg: [], fill: [], fillOn: false, tex: null, weather: null,
+  /* the fill shows with one runway only (BASE.setRunways) */
+  setFill(on) { this.fillOn = on; for (const f of this.fill) f.visible = on; },
   /* build or rebuild for a season */
   build(season) {
     this.season = season;
@@ -117,7 +128,8 @@ const TERRAIN = {
   },
   buildVeg(season) {
     for (const v of this.veg) { scene.remove(v); v.geometry.dispose(); }
-    this.veg = [];
+    for (const f of this.fill) scene.remove(f);                                          // shares the geometry of its kind
+    this.veg = []; this.fill = [];
     let seed = { spring: 11, summer: 23, autumn: 37, winter: 41 }[season];
     const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };   // same layout every rebuild
     for (const K of vegKinds(season)) {
@@ -137,6 +149,21 @@ const TERRAIN = {
       inst.count = n; inst.castShadow = true; inst.receiveShadow = true;
       if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
       scene.add(inst); this.veg.push(inst);
+      // the fill on the south runway's strip: denser, in groves (snow drifts / rocks stay scattered)
+      const nF = Math.round(K.n * 0.09), fill = new THREE.InstancedMesh(K.geo, VEG_MAT, nF);
+      let m = 0; tries = 0;
+      while (m < nF && tries++ < nF * 40) {
+        const x = lerp(-66, 66, rnd()), z = lerp(10, 26, rnd());
+        if (!fillSpot(x, z) || (K.clump && vnoise(x / 14, z / 14, 9 + K.n) < 0.45)) continue;
+        const s = lerp(K.size[0], K.size[1], rnd());
+        _tq.setFromAxisAngle(WUP_T, rnd() * TAU); _ts.set(s, s * lerp(0.85, 1.2, rnd()), s);
+        fill.setMatrixAt(m, _tm.compose(_tp.set(x, 0, z), _tq, _ts));
+        fill.setColorAt(m, _tc.setHex(K.tint[Math.floor(rnd() * K.tint.length)]));
+        m++;
+      }
+      fill.count = m; fill.castShadow = true; fill.receiveShadow = true; fill.visible = this.fillOn;
+      if (fill.instanceColor) fill.instanceColor.needsUpdate = true;
+      scene.add(fill); this.fill.push(fill);
     }
   },
   /* snowflakes / leaves: a pool of points falling through a box around the screen centre; spawn by time, not by frame */

@@ -121,10 +121,10 @@ function segDist(px, pz, ax, az, bx, bz) {
 /* vehicles pop in / out at their depots: a quick grow / shrink */
 const vehScale = (m, k) => m.scale.setScalar(Math.max(0.01, Math.min(1, k)));
 
-const FIRE_STATION = { x: -4, z: 14.6 }, SERVICE_Z = -5.8, CARGO_YARD = { x: 41, z: SERVICE_Z };   // the service strip: between the taxiway's wingtips and the tails on the front row
+const FIRE_STATION = { x: -4, z: 28.6 }, SERVICE_Z = -5.8, CARGO_YARD = { x: 41, z: SERVICE_Z };   // the service strip: between the taxiway's wingtips and the tails on the front row
 // ground crew depots: the cargo yard (east) and a west one, on the service strip between the taxiway and the front row;
 // HELI_DEPOT: on the road by the helicopter pad
-const CREW_DEPOTS = [CARGO_YARD, { x: -66.2, z: SERVICE_Z }], HELI_DEPOT = { x: 5.5, z: 23 };
+const CREW_DEPOTS = [CARGO_YARD, { x: -66.2, z: SERVICE_Z }], HELI_DEPOT = { x: 5.5, z: 27.2 };
 const nearestDepot = x => CREW_DEPOTS.reduce((b, d) => Math.abs(d.x - x) < Math.abs(b.x - x) ? d : b);
 const GROUND_OPS = registerMissionWorld({
   scenes: [], chutes: [], emerg: null, emTimer: rand(420, 720),
@@ -167,7 +167,7 @@ const GROUND_OPS = registerMissionWorld({
   startEmergency(a) {
     this.emerg = a; a.emerg = true; a.requestLand();
     a.say(radioLine(LINES.emergency.mayday), { prio: 3 });
-    RADIO.say(RADIO_NAMES.tower, radioLine(LINES.emergency.tower, { C: a.callsign }), { role: 'tower', prio: 3, delay: 2.5 });
+    RADIO.say(RADIO_NAMES.tower, radioLine(LINES.emergency.tower, { C: a.callsign, R: rwyName(AIRFIELD.landR()) }), { role: 'tower', prio: 3, delay: 2.5 });
   },
   /* the aircraft has stopped on the runway: crash tenders out, then the tug */
   onStopped(a) { this.scenes.push(new EmergencyScene(a)); },
@@ -250,12 +250,12 @@ class UnloadScene {
 class EmergencyScene {
   constructor(a) {
     this.a = a; this.t = 0; this.phase = 'roll';
-    const x = a.mesh.position.x, R = BASE_LAYOUT.rwy;
+    const x = a.mesh.position.x, R = a.rwyL || BASE_LAYOUT.rwy;
     this.trucks = [-1, 1].map(i => {
       const m = takeVehicle('firetruck'), to = [x + i * 2.4, R.z + R.w / 2 + 1.3];
       return { m, tur: m.getObjectByName('turret'), d: new Drive(m, [[FIRE_STATION.x + i * 1.2, FIRE_STATION.z], [FIRE_STATION.x + i * 1.2, R.z + R.w / 2 + 2.6], [to[0] - Math.sign(to[0] - FIRE_STATION.x) * 3, to[1] + 0.2], to], 4.5), home: [[to[0], to[1]], [to[0] - Math.sign(to[0] - FIRE_STATION.x || 1) * 3, to[1] + 0.6], [FIRE_STATION.x + i * 1.2, R.z + R.w / 2 + 2.6], [FIRE_STATION.x + i * 1.2, FIRE_STATION.z]] };
     });
-    RADIO.say(RADIO_NAMES.tower, radioLine(LINES.emergency.rolling), { role: 'tower', prio: 2 });
+    RADIO.say(RADIO_NAMES.tower, radioLine(LINES.emergency.rolling, { R: rwyName(a.rwyL) }), { role: 'tower', prio: 2 });
   }
   update(dt) {
     const a = this.a; this.t += dt;
@@ -275,7 +275,7 @@ class EmergencyScene {
         if (this.t > 7) {
           this.phase = 'tug'; this.t = 0;
           this.tug = takeVehicle('tug'); const nose = a.mesh.position.clone().addScaledVector(a.fwd, a.spec.len * 0.5 + 0.8);
-          this.tugD = new Drive(this.tug, [[FIRE_STATION.x + 3, FIRE_STATION.z], [FIRE_STATION.x + 3, BASE_LAYOUT.rwy.z + 4.4], [nose.x + 3, nose.z + 1], [nose.x + 0.9, nose.z]], 3);
+          this.tugD = new Drive(this.tug, [[FIRE_STATION.x + 3, FIRE_STATION.z], [FIRE_STATION.x + 3, (a.rwyL || BASE_LAYOUT.rwy).z + 4.4], [nose.x + 3, nose.z + 1], [nose.x + 0.9, nose.z]], 3);
           for (const k of this.trucks) k.d = new Drive(k.m, k.home, 2.5);
         }
         break;
@@ -286,7 +286,7 @@ class EmergencyScene {
         break;
       }
       case 'tow':                                          // the tug leads the aircraft home (Aircraft.towed state)
-        if (GROUND_OPS.emerg === a && !AIRFIELD.rwy.has(a)) GROUND_OPS.emerg = null;   // off the runway: it reopens (the tow may queue behind departures)
+        if (GROUND_OPS.emerg === a && !AIRFIELD.setOf(a.rwyL).has(a)) GROUND_OPS.emerg = null;   // off its runway: it reopens (the tow may queue behind departures)
         for (const k of this.trucks) if (k.d.step(dt)) { k.m.visible = false; }
         if (a.state === 'towed') { const ahead = a.mesh.position.clone().addScaledVector(a.fwd, a.spec.len * 0.5 + 0.7); this.tug.position.copy(ahead).setY(0); this.tug.rotation.set(0, Math.atan2(-a.fwd.z, a.fwd.x), 0); }
         else { this.phase = 'back'; this.tugD = new Drive(this.tug, [[this.tug.position.x, this.tug.position.z], [this.tug.position.x, this.tug.position.z + 2], [FIRE_STATION.x + 3, FIRE_STATION.z - 1]], 2.5); GROUND_OPS.done(a); }

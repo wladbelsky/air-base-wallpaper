@@ -46,7 +46,7 @@ class Aircraft {
   buildModel() { throw new Error('buildModel() not implemented'); }
   dispose() {
     scene.remove(this.mesh);
-    AIRFIELD.release(this); AIRFIELD.rwy.delete(this); AIRFIELD.arrivals.delete(this);
+    AIRFIELD.release(this); AIRFIELD.rwy.delete(this); AIRFIELD.rwy2.delete(this); AIRFIELD.arrivals.delete(this);
     this.mesh.traverse(o => { if (o.isPoints) { const i = NAV_MATS.indexOf(o.material); if (i >= 0) NAV_MATS.splice(i, 1); } });
     for (const s of this.searchlights) { const i = SEARCHLIGHTS.indexOf(s); if (i >= 0) SEARCHLIGHTS.splice(i, 1); }
     disposeTree(this.mesh);
@@ -85,7 +85,7 @@ class Aircraft {
     const L = this.look || (this.look = new Float32Array(10));
     for (let i = 0; i < 5; i++) { this.dcurve.getPointAt(Math.min(1, (this.ds + i * 1.5) / this.dlen), _gl); L[i * 2] = _gl.x; L[i * 2 + 1] = _gl.z; }
     this.lookAt = T;
-    const stop = AIRFIELD.blocked(this, this.drev ? _gd.clone().negate() : _gd, dt);
+    const stop = AIRFIELD.blocked(this, this.drev ? _gd.clone().negate() : _gd, dt) || AIRFIELD.holdCross(this);
     const ease = smoothstep(0, 0.8, this.ds + 0.15) * (0.35 + 0.65 * smoothstep(0, 3, this.dlen - this.ds));
     this.dv += clamp((stop ? 0 : this.dspeed * ease) - this.dv, -dt * 2.5, dt * 1.2);
     this.ds = Math.min(this.dlen, this.ds + this.dv * dt);
@@ -223,8 +223,8 @@ class FixedWing extends Aircraft {
     return true;
   }
   beginLaunch() { this.state = 'ready'; this.t = 0; this.pb = AIRFIELD.pushback(this.spot); this.needsService = false; }
-  /* on the runway at x, rolling east */
-  rwyPose(x, dz) { this.deckPose(x, RW.z + (dz || 0), 0, 0); this.fwd.set(1, 0, 0); }
+  /* on the runway L (the north one by default) at x, rolling east */
+  rwyPose(x, dz, L = RW) { this.deckPose(x, L.z + (dz || 0), 0, 0); this.fwd.set(1, 0, 0); }
   get rdz() { return this._rdz || 0; }
   set rdz(v) { this._rdz = v; }
 
@@ -275,7 +275,7 @@ class FixedWing extends Aircraft {
         if (!this.rolling) {                           // brakes on, spooling up; a pair's lead waits for its wingman, who rolls a second after it
           glow = 0.5; this.rwyPose(this.rx, this.rdz);
           const W = this.pairW, L = this.pairL;
-          let ahead = false; for (const b of AIRFIELD.rwy) if (b !== this && b !== L && b !== W && b.state === 'takeoff_roll') ahead = true;   // the one before is still rolling
+          let ahead = false; for (const b of AIRFIELD.rwy) if (b !== this && b !== L && b !== W && (b.state === 'takeoff_roll' || b.cross)) ahead = true;   // the one before is still rolling, or one is crossing
           const go = !ahead && (L ? !(L.state === 'takeoff_roll' && !L.rolling) && (L.state !== 'takeoff_roll' || L.t > 0.9) : this.t > 1.2 && (!W || W.pairL !== this || W.state === 'takeoff_roll' || this.t > 14));
           if (go && this.t > 0.6) { this.rolling = true; this.t = 0; }
           break;
@@ -301,9 +301,9 @@ class FixedWing extends Aircraft {
       case 'orbit':
         glow = 0.3; this.airT += dt; this.orbitStep(dt); if (this.emerg) this.trail(dt);
         if (this.landReq && AIRFIELD.canApproach(this)) {
-          AIRFIELD.arrivals.add(this);
+          const L = this.rwyL = AIRFIELD.landR(); AIRFIELD.arrivals.add(this);
           // straight-in from the west: a Dubins turn to the gate, then the glide path to the touchdown point
-          const td = new V3(RW.td, 0.02, RW.z), gate = new V3(RW.td - 52, 6.5, RW.z), flare = new V3(RW.td - 9, 0.9, RW.z);
+          const td = new V3(L.td, 0.02, L.z), gate = new V3(L.td - 52, 6.5, L.z), flare = new V3(L.td - 9, 0.9, L.z);
           const P = new FlightPath().addDubins(this.mesh.position, headingOf(this.fwd), gate, 0, S.turnR).addLine(gate, flare).addLine(flare, td);
           this.finalS = P.lastDubinsEnd;
           this.fly(P, this.orbit.v, S.approachV); this.state = 'approach'; this.landReq = false;
@@ -320,39 +320,41 @@ class FixedWing extends Aircraft {
         if (this.state === 'final' && this.ps > this.path.length - 14 && !AIRFIELD.clearToLand(this, true)) { this.goAround(); break; }   // something rolled out in front
         if (this.emerg) this.trail(dt);
         if (this.followPath(dt)) {
-          AIRFIELD.arrivals.delete(this); AIRFIELD.rwy.add(this);
+          AIRFIELD.arrivals.delete(this); AIRFIELD.setOf(this.rwyL).add(this);
           this.state = 'rollout'; this.rx = this.mesh.position.x; this.v = S.approachV;
           const xStop = this.rx + (this.v * this.v - S.taxiV * S.taxiV) / (2 * S.decel);
           this.exitX = AIRFIELD.exitFor(this.spot, xStop);
-          for (let i = 0; i < 4; i++) FX.smoke.spawn(new V3(this.rx, 0.15, RW.z + rand(-0.4, 0.4)), { s0: 0.4, s1: 1.6, life: 1.4, a0: 0.45, color: 0xd8d8d0, v: new V3(rand(0.5, 2), 0.3, 0) });   // tyre smoke
+          for (let i = 0; i < 4; i++) FX.smoke.spawn(new V3(this.rx, 0.15, this.rwyL.z + rand(-0.4, 0.4)), { s0: 0.4, s1: 1.6, life: 1.4, a0: 0.45, color: 0xd8d8d0, v: new V3(rand(0.5, 2), 0.3, 0) });   // tyre smoke
           if (Math.random() < 0.6) this.call('touchdown', { delay: 0.4 });
         }
         break;
       case 'rollout': {
         glow = 0.12;
         if (this.emerg) {                              // an emergency stops on the runway: crash crews and a tug (groundops.js)
-          this.v = Math.max(0, this.v - S.decel * dt); this.rx += this.v * dt; this.rwyPose(this.rx, 0); this.trail(dt);
+          this.v = Math.max(0, this.v - S.decel * dt); this.rx += this.v * dt; this.rwyPose(this.rx, 0, this.rwyL); this.trail(dt);
           if (this.v <= 0) { this.state = 'emergency'; this.t = 0; this.smokeOut = 1; GROUND_OPS.onStopped(this); }
           break;
         }
         // brake to a fast taxi on the runway, down to taxi speed for the turn off
         this.v = Math.max(this.rx < this.exitX - 10 ? S.taxiV * 1.8 : S.taxiV, this.v - S.decel * dt); this.rx += this.v * dt;
-        this.rwyPose(this.rx, 0);
-        if (this.rx >= this.exitX - 4.5 || this.rx > RW.x1 - 2) { this.startDeckPath(AIRFIELD.homeRoute(this.spot, this.rx, this.exitX), S.taxiV); this.dv = this.v; this.state = 'taxi_in'; }
+        this.rwyPose(this.rx, 0, this.rwyL);
+        if (this.rx >= this.exitX - 4.5 || this.rx > this.rwyL.x1 - 2) { this.startDeckPath(AIRFIELD.homeRoute(this.spot, this.rx, this.exitX, this.rwyL), S.taxiV); this.dv = this.v; this.state = 'taxi_in'; this.crossAt(this.exitX); }
         break;
       }
-      case 'emergency': this.rwyPose(this.rx, 0); this.v = 0; this.trail(dt); break;
+      case 'emergency': this.rwyPose(this.rx, 0, this.rwyL); this.v = 0; this.trail(dt); break;
       case 'taxi_in':
       case 'towed':
         glow = this.state === 'towed' ? 0 : 0.12;
-        if (AIRFIELD.rwy.has(this) && this.mesh.position.z < RW.z - RW.w / 2 - 1.2) AIRFIELD.rwy.delete(this);
-        if (this.followDeck(dt)) { AIRFIELD.rwy.delete(this); this.state = 'parked'; this.t = 0; this.needsService = true; }   // the ground crew comes (groundops.js)
+        for (const L of [RW, RW2]) { const set = AIRFIELD.setOf(L); if (set.has(this) && this.mesh.position.z < L.z - L.w / 2 - 1.2) set.delete(this); }   // north of a runway's edge: clear of it
+        if (this.followDeck(dt)) { AIRFIELD.rwy.delete(this); AIRFIELD.rwy2.delete(this); this.state = 'parked'; this.t = 0; this.needsService = true; this.cross = null; }   // the ground crew comes (groundops.js)
         break;
     }
     this.glow = glow;
   }
   /* the tug has it: towed home along the way it would have taxied */
-  startTow() { this.startDeckPath(AIRFIELD.homeRoute(this.spot, this.rx, AIRFIELD.exitFor(this.spot, this.rx)), 1.0); this.state = 'towed'; this.t = 0; }
+  startTow() { const lk = AIRFIELD.exitFor(this.spot, this.rx); this.startDeckPath(AIRFIELD.homeRoute(this.spot, this.rx, lk, this.rwyL), 1.0); this.state = 'towed'; this.t = 0; this.crossAt(lk); }
+  /* home from the south runway: across the north one at the connector lk (AIRFIELD.holdCross) */
+  crossAt(lk) { this.cross = this.rwyL === RW2 ? { ok: false, x: lk, t: null } : null; }
   /* an emergency: smoke from the engine (it thins out once the crash crews have foamed it) */
   trail(dt) {
     const k = this.smokeOut ?? 1; if (k <= 0.02) return;

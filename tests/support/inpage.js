@@ -54,10 +54,15 @@
     const v = [], known = new Set(Object.keys(STATUS)), inWing = new Set(AIRCRAFT);
     const who = a => a ? `${a.callsign}[${a.state}]` : String(a);
     // runway and arrivals
-    for (const a of AIRFIELD.rwy) if (!inWing.has(a)) v.push(`runway held by an aircraft not in the air wing ${who(a)}`); else if (!H.RUNWAY_STATES.has(a.state)) v.push(`runway held by ${who(a)}`);
+    for (const set of [AIRFIELD.rwy, AIRFIELD.rwy2]) for (const a of set) if (!inWing.has(a)) v.push(`runway held by an aircraft not in the air wing ${who(a)}`); else if (!H.RUNWAY_STATES.has(a.state)) v.push(`runway held by ${who(a)}`);
+    for (const a of AIRFIELD.rwy2) if (a.rwyL !== BASE_LAYOUT.rwy2) v.push(`south runway held by one not using it ${who(a)}`);
+    for (const a of AIRFIELD.arrivals) if (!a.rwyL) v.push(`arrival without a runway ${who(a)}`);
     for (const a of AIRFIELD.arrivals) if (!inWing.has(a) || !H.ARRIVAL_STATES.has(a.state)) v.push(`arrival list holds ${who(a)}`);
     for (const a of AIRCRAFT) if (H.ARRIVAL_STATES.has(a.state) && !AIRFIELD.arrivals.has(a)) v.push(`on approach but not sequenced ${who(a)}`);
-    if ([...AIRFIELD.rwy].filter(a => a.state === 'rollout').length > 1) v.push('two landing rolls on the runway');
+    for (const set of [AIRFIELD.rwy, AIRFIELD.rwy2]) if ([...set].filter(a => a.state === 'rollout').length > 1) v.push('two landing rolls on one runway');
+    // crossing the north runway (home from the south one): only with nothing lining up or rolling toward the connector
+    for (const a of AIRCRAFT) if (a.cross && a.cross.ok && AIRFIELD.rwy.has(a) && a.mesh.position.z > BASE_LAYOUT.rwy.z - BASE_LAYOUT.rwy.w / 2 && a.mesh.position.z < BASE_LAYOUT.crossZ)
+      for (const b of AIRFIELD.rwy) if (b !== a && (b.state === 'lineup' || (b.state === 'takeoff_roll' && b.rolling && b.rx < a.cross.x + 2 && b.rx > a.cross.x - 30))) v.push(`${who(a)} crossing the runway in front of ${who(b)}`);
     // homes: every slot's occupant lives there, every aircraft has its own home (shared only past the base's capacity)
     for (const l of [PARKING.stands, PARKING.shelters, PARKING.hangars, PARKING.remote, PARKING.heli]) for (const sp of l) {
       if (!sp.occ) continue;

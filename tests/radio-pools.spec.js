@@ -1,7 +1,7 @@
 // Every radio line pool: well-formed tiers, no empty / duplicate lines, only known placeholders
 const { test, expect } = require('./support/harness');
 
-const PLACEHOLDERS = ['c', 'C', 'T', 'B', 'D', 'N', 'Q', 'K', 'S', 'G', 'P', 'W', 'V', 'F', 'A'];
+const PLACEHOLDERS = ['c', 'C', 'T', 'B', 'D', 'N', 'Q', 'K', 'S', 'G', 'P', 'W', 'V', 'F', 'A', 'R'];
 
 test('all line pools are well formed', async ({ wp }) => {
   await wp.boot();

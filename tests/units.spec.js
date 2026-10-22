@@ -174,9 +174,9 @@ test('airfield: taxi routes never loop — no more than a U-turn within 6 units 
     const out = [];
     for (const s of [...PARKING.stands, ...PARKING.shelters, ...PARKING.hangars, ...PARKING.remote]) {
       for (const [name, pts] of [['pushback', AIRFIELD.pushback(s)], ['taxi out', AIRFIELD.toHold(s)]]) if (loop(pts) > 150) out.push(`${name} from ${s.x},${s.z}`);
-      for (let xStop = RW.td; xStop < RW.x1; xStop += 3) {
+      for (const L of [RW, BASE_LAYOUT.rwy2]) for (let xStop = L.td; xStop < L.x1; xStop += 3) {
         const lk = AIRFIELD.exitFor(s, xStop);
-        for (const x0 of [lk - 4.5, lk - 4.3]) { const w = loop(AIRFIELD.homeRoute(s, x0, lk)); if (w > 150) out.push(`home to ${s.x},${s.z} by link ${lk}: ${w.toFixed(0)}°`); }
+        for (const x0 of [lk - 4.5, lk - 4.3]) { const w = loop(AIRFIELD.homeRoute(s, x0, lk, L)); if (w > 150) out.push(`home to ${s.x},${s.z} by link ${lk} from z ${L.z}: ${w.toFixed(0)}°`); }
       }
     }
     return [...new Set(out)];
@@ -211,8 +211,16 @@ test('roads stay off the runway, the taxiway and the apron, and nothing grows on
     const out = [], R = BASE_LAYOUT.rwy;
     for (const road of BASE_LAYOUT.roads) for (let i = 0; i < road.length - 1; i++) for (let u = 0; u <= 1; u += 0.05) {
       const x = road[i][0] + (road[i + 1][0] - road[i][0]) * u, z = road[i][1] + (road[i + 1][1] - road[i][1]) * u;
-      if (x > R.x0 - 2 && x < R.x1 + 2 && Math.abs(z - R.z) < R.w / 2 + 1.6) out.push(`road on the runway at ${x.toFixed(0)},${z.toFixed(0)}`);
+      for (const L of [R, BASE_LAYOUT.rwy2]) if (x > L.x0 - 2 && x < L.x1 + 2 && Math.abs(z - L.z) < L.w / 2 + 1.6) out.push(`road on a runway at ${x.toFixed(0)},${z.toFixed(0)}`);
+      if (x > 7.5 && x < 32.5 && z > 28.5 && z < 47.5) out.push(`road across the heliport at ${x.toFixed(0)},${z.toFixed(0)}`);
     }
+    // the south runway inside the fence, clear of the perimeter road; the heliport pads off both runways
+    const R2 = BASE_LAYOUT.rwy2;
+    for (let x = R2.x0 - 2; x <= R2.x1 + 2; x += 0.5) for (const z of [R2.z - R2.w / 2 - 0.8, R2.z + R2.w / 2 + 0.8]) {
+      if (!insideFence(x, z)) out.push(`south runway outside the fence at ${x.toFixed(0)}`);
+      if (roadDist(x, z) < BASE_LAYOUT.ROAD_W / 2 + 0.2) out.push(`road across the south runway at ${x.toFixed(0)},${z.toFixed(1)}`);
+    }
+    for (const s of PARKING.heli) if (Math.abs(s.z - R2.z) < R2.w / 2 + 0.8 + 2) out.push(`heli pad ${s.x},${s.z} on the south runway`);
     // the remote stand slabs and the taxiway: inside the fence, clear of the perimeter road
     const A = BASE_LAYOUT.apron, TW = BASE_LAYOUT.twy;
     for (const [x0, z0, x1, z1] of [...BASE_LAYOUT.remote.map(r => [r.x0, r.z1, r.x1, A.z0]), [TW.x0, TW.z - TW.w / 2, TW.x1, TW.z + TW.w / 2]])

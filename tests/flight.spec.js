@@ -60,7 +60,7 @@ for (const c of CASES) {
     expect(r.home, 'parked at its own home again').toBe(true);
     expect(r.at, 'parked on its slot').toBeLessThan(0.2);
     // the runway is free again, no arrival is left in the sequence
-    expect(await wp.run(() => ({ rwy: AIRFIELD.rwy.size, arr: AIRFIELD.arrivals.size }))).toEqual({ rwy: 0, arr: 0 });
+    expect(await wp.run(() => ({ rwy: AIRFIELD.rwy.size + AIRFIELD.rwy2.size, arr: AIRFIELD.arrivals.size }))).toEqual({ rwy: 0, arr: 0 });
   });
 }
 
@@ -84,6 +84,53 @@ test('takeoff: the roll uses half the runway or more, the turn toward the orbit 
   }
 });
 
+test('two runways: departures from the north one while arrivals land on the south one and cross back', async ({ wp }) => {
+  await quietBase(wp);
+  await wp.run(() => { window.__in = AIRCRAFT.filter(a => ['f16', 'f15'].includes(a.spec.key)).slice(0, 3); __in.forEach(a => a.requestLaunch()); });
+  expect((await wp.until(() => __in.every(a => a.state === 'orbit'), 600)).done).toBe(true);
+  // they come back while others depart
+  await wp.run(() => { __in.forEach(a => a.requestLand()); window.__out = AIRCRAFT.filter(a => ['f22', 'f35', 'a10'].includes(a.spec.key) && a.state === 'parked').slice(0, 3); __out.forEach(a => a.requestLaunch()); __t.track(); window.__seen = { r2: 0, cross: 0, both: 0 }; });
+  for (let i = 0; i < 240; i++) {
+    const r = await wp.sim(2);
+    expect(r.violations).toEqual([]);
+    const done = await wp.run(() => {
+      if (AIRFIELD.rwy2.size) __seen.r2++;
+      if (AIRCRAFT.some(a => a.cross && a.cross.ok && AIRFIELD.rwy.has(a))) __seen.cross++;
+      if (AIRFIELD.rwy2.size && [...AIRFIELD.rwy].some(b => b.state === 'takeoff_roll')) __seen.both++;
+      return __in.every(a => a.state === 'parked') && __out.every(a => a.state === 'orbit');
+    });
+    if (done) break;
+  }
+  const r = await wp.run(() => ({ seen: __seen, in: __in.map(a => a.state), out: __out.map(a => a.state), lands: __in.every(a => a.rwyL === BASE_LAYOUT.rwy2), log: __t.log.get(__in[0].callsign) }));
+  expect(r.in.every(s => s === 'parked'), JSON.stringify(r)).toBe(true);
+  expect(r.out.every(s => s === 'orbit'), JSON.stringify(r)).toBe(true);
+  expect(r.lands, 'they landed on the south runway').toBe(true);
+  expect(r.seen.r2).toBeGreaterThan(0); expect(r.seen.cross, 'crossed the north runway').toBeGreaterThan(0);
+  expect(await wp.stuck()).toEqual([]);
+});
+
+test('one runway: everything on the north one; switching to one mid-approach to the south one still lands there', async ({ wp }) => {
+  await quietBase(wp);
+  await wp.run(() => { CFG.runways = 1; window.__a = AIRCRAFT.find(a => a.spec.key === 'f16'); __a.requestLaunch(); });
+  expect((await wp.until(() => __a.state === 'orbit', 400)).done).toBe(true);
+  await wp.run(() => __a.requestLand());
+  expect((await wp.until(() => __a.state === 'parked', 600)).done).toBe(true);
+  expect(await wp.run(() => [__a.rwyL === BASE_LAYOUT.rwy, BASE.rwy2.visible, BASE.fill.visible])).toEqual([true, false, true]);
+  // two runways, an approach to the south one, then back to one: it lands there all the same, the runway is drawn till it is home
+  await wp.run(() => { CFG.runways = 2; __a.requestLaunch(); });
+  expect((await wp.until(() => __a.state === 'orbit', 400)).done).toBe(true);
+  await wp.run(() => __a.requestLand());
+  expect((await wp.until(() => __a.state === 'approach', 200)).done).toBe(true);
+  await wp.run(() => { CFG.runways = 1; });
+  await wp.sim(2);
+  expect(await wp.run(() => [__a.rwyL === BASE_LAYOUT.rwy2, BASE.rwy2.visible])).toEqual([true, true]);
+  const home = await wp.until(() => __a.state === 'parked', 600);
+  expect(home.violations).toEqual([]);
+  expect(home.done).toBe(true);
+  await wp.sim(1);
+  expect(await wp.run(() => [BASE.rwy2.visible, BASE.fill.visible])).toEqual([false, true]);
+});
+
 test('a pair from one flight takes off side by side', async ({ wp }) => {
   await quietBase(wp);
   await wp.run(() => { const f = AIRCRAFT.filter(a => a.spec.key === 'f16').slice(0, 2); window.__f = f; f.forEach(a => a.requestLaunch()); __t.track(); });
@@ -102,10 +149,10 @@ test('an arrival finding the runway occupied goes around and lands afterwards', 
   // something sits on the runway when it reaches its final
   await wp.run(() => { __a.requestLand(); window.__blk = AIRCRAFT.find(a => a.spec.key === 'c130'); });
   await wp.until(() => __a.state === 'approach', 120);
-  await wp.run(() => { AIRFIELD.rwy.add(__blk); __blk.state = 'lineup'; __blk.startDeckPath(AIRFIELD.lineUp(0, 0), 0.0001); });
+  await wp.run(() => { AIRFIELD.setOf(__a.rwyL).add(__blk); __blk.state = 'lineup'; __blk.startDeckPath(AIRFIELD.lineUp(0, 0), 0.0001); });
   const ga = await wp.until(() => __a.state === 'go_around', 200, { check: false });
   expect(ga.done).toBe(true);
-  await wp.run(() => { AIRFIELD.rwy.delete(__blk); __blk.state = 'parked'; });
+  await wp.run(() => { AIRFIELD.setOf(__a.rwyL).delete(__blk); __blk.state = 'parked'; });
   const down = await wp.until(() => __a.state === 'parked', 600);
   expect(down.violations).toEqual([]);
   expect(down.done).toBe(true);
@@ -124,7 +171,7 @@ test('LAUNCH ALL / RECOVER ALL buttons cycle the whole air wing', async ({ wp })
   expect(await wp.stuck()).toEqual([]);
   const home = await wp.run(() => ({
     all: AIRCRAFT.every(a => a.spot.occ === a && a.mesh.position.distanceTo(new THREE.Vector3(a.spot.x, 0, a.spot.z)) < 0.2),
-    free: AIRFIELD.rwy.size === 0 && AIRFIELD.arrivals.size === 0
+    free: AIRFIELD.rwy.size === 0 && AIRFIELD.rwy2.size === 0 && AIRFIELD.arrivals.size === 0
   }));
   expect(home).toEqual({ all: true, free: true });
 });

@@ -228,19 +228,19 @@ const OPS = {
     panic: ["Taxiing now, don't stop me!", "We're moving, clear the way!"]
   },
   taxiClear: {
-    peace: ['{c}, taxi to runway zero-niner via Alpha, hold short.', '{c}, taxi via the parallel, hold short of zero-niner.', '{c}, follow the traffic ahead, hold short runway zero-niner.',
+    peace: ['{c}, taxi to runway {R} via Alpha, hold short.', '{c}, taxi via the parallel, hold short of {R}.', '{c}, follow the traffic ahead, hold short runway {R}.',
       '{c}, cleared to taxi. Altimeter two-niner-niner-two.', '{c}, taxi Alpha to the holding point, report ready.'],
-    calm: ['{c}, taxi immediately, hold short zero-niner!', '{c}, expedite taxi, they need you up there!', '{c}, taxi now, no delay!'],
+    calm: ['{c}, taxi immediately, hold short {R}!', '{c}, expedite taxi, they need you up there!', '{c}, taxi now, no delay!'],
     panic: ['{c}, just go, take any taxiway!', "{c}, move it, we're under attack!", '{c}, taxi, taxi, get off the apron!']
   },
   takeoffClear: {
-    peace: ['{c}, wind calm, runway zero-niner, cleared for takeoff.', '{c}, runway zero-niner, cleared for takeoff. Good flight.', '{c}, line up and take off. Have a good one.',
+    peace: ['{c}, wind calm, runway {R}, cleared for takeoff.', '{c}, runway {R}, cleared for takeoff. Good flight.', '{c}, line up and take off. Have a good one.',
       '{c}, cleared for takeoff, turn as required.', '{c}, the runway is yours. Cleared for takeoff.', '{c}, wind two-seven-zero at five, cleared for takeoff.'],
     calm: ['{c}, scramble! Cleared for takeoff!', '{c}, runway is clear, go get them!', '{c}, cleared for immediate takeoff!', "{c}, bandits inbound. Cleared, go!"],
     panic: ["{c}, take off NOW! They're right on top of us!", "{c}, go, go, go! The base is under fire!", '{c}, get airborne before the next strike!', "{c}, don't wait for clearance, GO!"]
   },
   takeoffClearPair: {
-    peace: ['{c}, flight of two, runway zero-niner, cleared for formation takeoff.', '{c} and wingman, cleared for takeoff together. Nice and tight.'],
+    peace: ['{c}, flight of two, runway {R}, cleared for formation takeoff.', '{c} and wingman, cleared for takeoff together. Nice and tight.'],
     calm: ['{c}, flight of two, scramble! Cleared for takeoff!', '{c}, both of you, go now!'],
     panic: ['{c}, both of you, GO! Get off the ground!']
   },
@@ -260,7 +260,7 @@ const OPS = {
     panic: ["I'm hit, coming in! Clear the runway!", 'Winchester and bingo, coming home under fire!', 'Battle damage, I need that runway now!']
   },
   landClear: {
-    peace: ['{c}, runway zero-niner, wind calm, cleared to land.', '{c}, cleared to land, number one.', '{c}, check gear down, cleared to land.', '{c}, runway zero-niner, cleared to land. Welcome home.'],
+    peace: ['{c}, runway {R}, wind calm, cleared to land.', '{c}, cleared to land, number one.', '{c}, check gear down, cleared to land.', '{c}, runway {R}, cleared to land. Welcome home.'],
     calm: ['{c}, cleared to land, make it quick!', '{c}, runway is yours, get down fast!', '{c}, cleared to land, bandits in the area!'],
     panic: ['{c}, just get it down!', "{c}, land now, we're taking fire!", '{c}, cleared, cleared, get on the ground!']
   },
@@ -268,6 +268,11 @@ const OPS = {
     peace: ['Down and rolling.', 'On the ground. Thanks, tower.', 'Touchdown. Taxiing to parking.', 'Down safe. Good to be home.'],
     calm: ['Down! Rearm and refuel, fast!', 'On the ground. Ordnance crews, move!', 'Touchdown. Get this bird turned around!'],
     panic: ['Down! Get me to the shelter!', 'On the ground — more bandits inbound!', "Down! That was too close!"]
+  },
+  crossClear: {                                                                  // home from the south runway, across the north one
+    peace: ['{c}, cross runway {R}, no delay.', '{c}, cleared to cross {R}, then taxi to parking.', '{c}, cross {R}. Welcome home.', '{c}, traffic holding, cross runway {R}.'],
+    calm: ['{c}, cross {R} now, departures are waiting!', '{c}, cross {R}, expedite!', '{c}, cleared to cross, keep it moving!'],
+    panic: ["{c}, cross {R}, don't stop!", '{c}, cross now, cross now!']
   },
   goAround: {
     peace: ['{c}, go around, runway occupied.', '{c}, go around, traffic on the runway.', '{c}, go around. Re-enter the pattern.'],
@@ -365,7 +370,12 @@ const OPS_UNARMED = {
 function opsLine(key, a) {
   const v = OPS_VOICE[a.spec.voice] && OPS_VOICE[a.spec.voice][key], armed = AUD.armed;
   const pool = (v && (armed || v.peace) && v) || (armed && !a.spec.armed && OPS_UNARMED[key]) || OPS[key];
-  return [radioLine(pool, { c: a.callsign }), armed];
+  return [radioLine(pool, { c: a.callsign, R: rwyName(key === 'landClear' ? a.rwyL : BASE_LAYOUT.rwy) }), armed];   // {R}: departures / crossings the north runway
+}
+/* {R}: the runway's name for the radio — zero-niner, or with two runways zero-niner left (north) / right (south) */
+function rwyName(L) {
+  const two = CFG.runways > 1 || L === BASE_LAYOUT.rwy2;
+  return !two ? 'zero-niner' : L === BASE_LAYOUT.rwy2 ? 'zero-niner right' : 'zero-niner left';
 }
 
 /* ===== Combat chatter by stress tier ===== */
@@ -698,8 +708,8 @@ const ENEMY_LINES = {
 LINES.emergency = {
   mayday: ['Mayday, mayday! Engine fire, request immediate landing!', 'Pan-pan, pan-pan, hydraulic failure, request priority landing.', 'Mayday! Fire light on the left engine, coming straight in!',
     'Emergency! Losing oil pressure, landing now.', 'Mayday, mayday! Bird strike, engine damaged, coming home.'],
-  tower: ['{C}, runway zero-niner is yours, all traffic hold. Crash crews rolling.', '{C}, copy your mayday. Straight in, cleared to land.', '{C}, emergency vehicles standing by. Cleared to land, any runway exit.'],
-  rolling: ['Crash crews, runway zero-niner, go, go!', 'Fire trucks rolling. Runway closed.', 'All traffic, runway closed for an emergency.'],
+  tower: ['{C}, runway {R} is yours, all traffic hold. Crash crews rolling.', '{C}, copy your mayday. Straight in, cleared to land.', '{C}, emergency vehicles standing by. Cleared to land, any runway exit.'],
+  rolling: ['Crash crews, runway {R}, go, go!', 'Fire trucks rolling. Runway closed.', 'All traffic, runway closed for an emergency.'],
   foam: ['Foam on the aircraft. Fire is out.', 'Pilot is out and okay. Fire suppressed.', 'Engine fire out. Hot brakes cooling.'],
   tow: ['{C}, tug is hooked up. Runway reopens shortly.', 'Towing {C} clear of the runway.', 'Runway will be open in two minutes. Tug has {C}.']
 };

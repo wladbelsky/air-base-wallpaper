@@ -11,7 +11,7 @@
    The runway is shared: lining up needs it empty and no arrival close in; an arrival that finds it occupied at the
    start of its final goes around. AIRFIELD.blocked() is the car-following rule on the ground (with a time-out, so
    two aircraft can never block each other for good).                                                          */
-const RW = BASE_LAYOUT.rwy, TWZ = BASE_LAYOUT.twy.z, LANE = BASE_LAYOUT.lane;
+const RW = BASE_LAYOUT.rwy, RW2 = BASE_LAYOUT.rwy2, TWZ = BASE_LAYOUT.twy.z, LANE = BASE_LAYOUT.lane;
 const HOLD = BASE_LAYOUT.hold;
 /* extra points every `step` along the long straight legs of a route: a Catmull-Rom curve bows out sideways on a long
    segment next to short ones (an aircraft rolled 1.6 off the taxiway line) */
@@ -25,10 +25,11 @@ function densify(pts, step = 3) {
   return out;
 }
 const AIRFIELD = {
-  rwy: new Set(),            // aircraft on the runway (lining up, rolling, landing roll until clear)
-  arrivals: new Set(),       // on approach or final
+  rwy: new Set(),            // aircraft on the north runway (lining up, rolling, landing roll until clear, crossing it)
+  rwy2: new Set(),           // on the south one (landing roll until clear) — used with CFG.runways = 2
+  arrivals: new Set(),       // on approach or final (to a.rwyL)
   reset() {
-    this.rwy.clear(); this.arrivals.clear();
+    this.rwy.clear(); this.rwy2.clear(); this.arrivals.clear();
     for (const l of [PARKING.stands, PARKING.shelters, PARKING.hangars, PARKING.remote, PARKING.heli]) for (const s of l) s.occ = null;
     for (const s of [...PARKING.shelters, ...PARKING.hangars]) { s.door = 0; this.setDoor(s); }
   },
@@ -83,38 +84,67 @@ const AIRFIELD = {
     const links = BASE_LAYOUT.links.slice(1).filter(x => x >= min);
     return links.length ? links[0] : 64;
   },
-  homeRoute(s, x0, lk) {
-    const pts = [[x0, RW.z], [lk - 3.2, RW.z], [lk, RW.z - 2.6], [lk, TWZ]];
+  homeRoute(s, x0, lk, L = RW) {   // from the runway L (the south one: across the north one on the connector)
+    const pts = [[x0, L.z], [lk - 3.2, L.z], [lk, L.z - 2.6], [lk, TWZ]];
     if (this.onLane(s)) { const cx = this.channelFor(s); pts.push([cx, TWZ], [cx, LANE], [s.x - 5, LANE], [s.x, LANE - 3.2], [s.x, s.z]); }
     else pts.push([s.x + 5, TWZ], [s.x, TWZ - 3.2], [s.x, s.z]);
     return this.round(pts, 2.4);
   },
-  /* ---- runway ---- */
+  /* ---- runways: with two the north one (RW) takes the departures, the south one (RW2) the arrivals; every rule goes by
+     the runway an aircraft actually uses (a.rwyL, fixed when its approach starts), so the mode may change any time ---- */
+  setOf(L) { return L === RW2 ? this.rwy2 : this.rwy; },
+  onRunway(a) { return this.rwy.has(a) || this.rwy2.has(a); },
+  landR: () => CFG.runways > 1 ? RW2 : RW,
+  /* the south runway is drawn while in use, even after a switch to one runway (BASE.setRunways, from update) */
+  r2InUse() { if (this.rwy2.size) return true; for (const a of AIRCRAFT) if (a.rwyL === RW2 && (this.arrivals.has(a) || a.cross)) return true; return false; },
   eta(a) { return a.path ? (a.path.length - a.ps) / Math.max(1, a.v) : 99; },
   // the next departure may line up behind one already rolling fast down the runway (it rolls once that one is off)
   canLineUp(a) {
-    if (GROUND_OPS.emerg) return false;                                 // an emergency closes the runway until it is towed clear
+    const e = GROUND_OPS.emerg; if (e && (e.rwyL || this.landR()) === RW) return false;   // an emergency closes its runway until it is towed clear
     for (const b of this.rwy) if (!(b.state === 'takeoff_roll' && b.rolling && b.v > b.spec.vR * 0.5)) return false;
-    for (const b of this.arrivals) if (b.state === 'final' || this.eta(b) < 32) return false;
+    for (const b of this.arrivals) if (b.rwyL === RW && (b.state === 'final' || this.eta(b) < 32)) return false;
+    for (const b of AIRCRAFT) if (b.cross && !b.cross.ok && b.cross.t != null && T - b.cross.t > 20) return false;   // one has waited to cross: its turn
     return true;
   },
   // one arrival at a time (the next may start its approach once the one ahead is on final); a departure kept waiting
   // at the holding point gets its turn: no new approaches until it has gone
   canApproach(a) {
-    if (a.emerg) return ![...this.arrivals].some(b => b.state === 'final');   // priority: the ones on approach will go around
-    if (GROUND_OPS.emerg) return false;
-    if (AIRCRAFT.some(b => b.state === 'hold_short' && b.t > 25)) return false;
-    for (const b of this.arrivals) if (b.state !== 'final') return false;
-    return this.arrivals.size < 2;
+    const L = this.landR(); let n = 0;
+    if (a.emerg) { for (const b of this.arrivals) if (b.rwyL === L && b.state === 'final') return false; return true; }   // priority: the ones on approach will go around
+    const e = GROUND_OPS.emerg; if (e && (e.rwyL || L) === L) return false;
+    if (L === RW && AIRCRAFT.some(b => b.state === 'hold_short' && b.t > 25)) return false;   // sharing the runway with departures
+    for (const b of this.arrivals) if (b.rwyL === L) { if (b.state !== 'final') return false; n++; }
+    return n < 2;
   },
   // at the start of its final the runway has to be clear but for a landing roll or a departure rolling fast;
   // close in (late) nothing may be left on it but a departure about to lift off
   clearToLand(a, late) {
-    for (const b of this.rwy) {
+    const L = a.rwyL || RW;
+    for (const b of this.setOf(L)) {
       if (b.state === 'takeoff_roll' && b.rolling && b.v > b.spec.vR * (late ? 0.75 : 0.4)) continue;
-      if (!late && (b.state === 'rollout' || b.state === 'taxi_in') && b.mesh.position.x > RW.td + 25) continue;
+      if (!late && (b.state === 'rollout' || b.state === 'taxi_in') && b.mesh.position.x > L.td + 25) continue;
       return false;
     }
+    return true;
+  },
+  /* ---- crossing the north runway, on the way home from the south one: hold at the line on the connector (crossZ)
+     until the runway is clear there, then it holds the runway (rwy) until across. Called from followDeck. ---- */
+  holdCross(a) {
+    const c = a.cross; if (!c || c.ok) return false;
+    if (a.mesh.position.z - a.spec.len * 0.5 > BASE_LAYOUT.crossZ + 1.0) return false;          // its nose not at the line yet
+    if (c.t == null) c.t = T;
+    if (!this.canCross(a, c.x)) return true;
+    c.ok = true; this.rwy.add(a); if (a.state !== 'towed') a.tower('crossClear');
+    return false;
+  },
+  canCross(a, lx) {
+    for (const b of this.rwy) {
+      if (b === a) continue;
+      if (b.state === 'lineup') return false;
+      if (b.state === 'takeoff_roll') { if (b.rolling ? b.rx < lx + 4 : b.rx > lx - 6) return false; continue; }   // rolling toward the connector (one waiting further back doesn't move yet)
+      if (Math.abs(b.mesh.position.x - lx) < 8) return false;                                    // a landing roll / a tow / another crossing there
+    }
+    for (const b of this.arrivals) if (b.rwyL === RW && (b.state === 'final' || this.eta(b) < 20)) return false;   // landing on it (one runway)
     return true;
   },
   /* ---- ground traffic: stop behind whoever is close ahead (parked ones sit in their homes, off the routes). Aircraft
@@ -147,7 +177,7 @@ const AIRFIELD = {
   yieldsTo(a, b) {
     const A = a.look, B = b.look;
     if (!A || !B || a.state === 'pushback' || b.state === 'pushback' || T - a.lookAt > 0.2 || T - b.lookAt > 0.2) return false;
-    const ra = this.rwy.has(a), rb = this.rwy.has(b);
+    const ra = this.onRunway(a), rb = this.onRunway(b);
     if (ra && !rb) return false;                                // one still clearing the runway never waits (the runway would stay shut)
     const d = (a.spec.span + b.spec.span) * 0.35 + 0.6;
     let ia = 9, ib = 9;
@@ -213,6 +243,8 @@ const AIRFIELD = {
     if (s.panels) for (const q of s.panels) q.g.position.x = lerp(q.x0, q.x1, k);
   },
   update(dt) {
+    const n = CFG.runways > 1 || this.r2InUse() ? 2 : 1;                       // the south runway drawn while needed
+    if (n !== this.shown && BASE.setRunways) { this.shown = n; BASE.setRunways(n); }
     for (const s of [...PARKING.shelters, ...PARKING.hangars]) {
       const t = this.doorWanted(s); if (t === s.door) continue;
       s.door += clamp(t - s.door, -dt * 0.4, dt * 0.4); this.setDoor(s);

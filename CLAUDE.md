@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=3`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=4`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -118,10 +118,21 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   `approach` → `final` → `rollout` → `taxi_in` → `parked`; `go_around` (→ `orbit`, `landReq` kept); an emergency:
   `rollout` → `emergency` (stopped on the runway) → `towed` → `parked` (groundops.js).
   A pair of one flight lines up side by side (`rdz` ±1) and rolls a second apart.
-- **Runway**: `AIRFIELD.rwy` = aircraft on it (lineup … until clear of it); `arrivals` = on approach / final.
-  `canLineUp`: runway empty, no arrival on final or within 32 s. `canApproach`: one arrival at a time (the next once the
-  one ahead is on final), none while a departure has waited > 25 s at the hold. `clearToLand` at the start of the final
-  (a landing roll far ahead or a fast departure is fine) and close in (strict) — else `goAround()`.
+- **Runways** (`BASE_LAYOUT.rwy` north, `rwy2` south, property **Runways** `CFG.runways` 1–2, URL `?runways=`):
+  with two the north one takes the departures, the south one the arrivals. Every rule goes by the runway an aircraft
+  actually uses: `a.rwyL`, set when its approach starts (`AIRFIELD.landR()`), so the mode can change any time.
+  `AIRFIELD.rwy` / `rwy2` = aircraft on each (`setOf(L)`, `onRunway(a)`); `arrivals` = on approach / final.
+  `canLineUp` (north): empty but for one rolling fast, no arrival to it on final or within 32 s, its emergency towed off,
+  nobody waiting to cross for > 20 s. `canApproach`: per landing runway, one at a time (the next once the one ahead is
+  on final), none while a departure has waited > 25 s at the hold when they share it. `clearToLand` over the arrival's
+  runway at the start of the final and close in (strict) — else `goAround()`. `rwyPose(x, dz, L)`.
+- **Crossing**: home from the south runway (`homeRoute(s, x0, lk, L)`, `a.cross = { ok, x, t }`, `crossAt`) an aircraft
+  holds at `BASE_LAYOUT.crossZ` on the connector (`holdCross`, in `followDeck`) until `canCross` (no lineup, no roll
+  toward the connector, nothing near it on the runway, no arrival to it close in); then it holds the north runway
+  (`rwy`) until across (the tower: `OPS.crossClear`). A departure waiting on the runway doesn't roll while one crosses.
+  A runway set drops an aircraft once it is north of that runway's edge. `AIRFIELD.update` shows the south runway while
+  in use even after a switch to one (`r2InUse`, `BASE.setRunways`): with one runway the strip is a yard and scrub
+  (`BASE.fill` + `TERRAIN.fill`, `BASE_LAYOUT.fillYard`), the north designators read 09/27 instead of 09L/27R.
 - **Helicopters**: `parked` → `spinup` → `lift` → `depart` → `orbit` → `ret` → `hover` → `descend` → `spindown` → `parked`, on their own pad.
 - **Doors**: shelters and hangars open while their aircraft moves in or out (`doorWanted`), an aircraft parked
   behind a closed door is hidden.
@@ -156,7 +167,7 @@ Missions fly beyond the screen edge while there is no music. `dispatchFlight` (`
 clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / returned to `VEH_POOL` (`takeVehicle` /
 `dropVehicle`, never disposed); `Drive` moves one along a smooth path. Scenes are objects with `update(dt)`, `done`, `end()`.
 - **Emergency landing**: every 8–15 min in peace (`emTimer`) a jet in orbit declares one (`a.emerg`, smoke `trail`);
-  `canApproach` gives it priority, `canLineUp` is closed while `GROUND_OPS.emerg`; it stops on the runway
+  `canApproach` gives it priority, its runway (`a.rwyL`: the south one with two) is closed while `GROUND_OPS.emerg`; it stops on the runway
   (`emergency`), `EmergencyScene`: two crash tenders from the fire station foam it, a tug tows it home (`towed`, via
   `AIRFIELD.homeRoute`), the runway opens as soon as it is towed off it (`GROUND_OPS.emerg` cleared: the tow may
   queue behind departures).
@@ -204,9 +215,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   while `combatOn()` the timer is frozen and `start()` refuses. A fight starting while the event still gathers
   (`!ev.P`) aborts it; a pass already on screen is flown to the end. If nobody is ready it looks again every
   8–15 s for ~3 min, then waits for the next one. `nextKind()` picks the kind of the next pass (a tanker of that kind
-  and receivers exist); with auto flight ops that tanker is launched ~3 min before a pass is due (`launchTanker`;
+  and receivers exist); with auto flight ops that tanker is launched ~5 min before a pass is due (`launchTanker`;
   `autoLaunch` never launches tankers, nor does `scrambleSupport` — AWACS only), and `autoRecover` keeps a tanker up
-  for `TANKER_STATION` (300 s) and never recovers it while a pass is due (`TANKER.timer < 180`).
+  for `TANKER_STATION` (300 s) and never recovers it while a pass is due (`TANKER.timer < 300`).
 - **Kinds** (`spec.tankKind` / receivers' `spec.refuel`): `boom` (KC-46 with up to 4 jets of one flight: one on the
   boom, the ones done on the left wing, the ones to go on the right — no swaps on screen) and `drogue` (KC-130 with a
   helicopter pair, both on the hoses, low and slow). Slots `TANK_SLOTS[kind]` `[gap behind, side, height]`.
@@ -237,7 +248,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - **Placeholders** `{name}` are filled from `vars` (`radioLine(pool, { C: callsign, T: type })`); unknown ones stay as
   they are. In use: `{c}` tower-call callsign, `{C}` callsign, `{T}` enemy type, `{B}` bearing words, `{D}` compass
   direction, `{N}` bandit count, `{Q}` enemy squadron, `{K}` enemy callsign just lost; missions also use `{S}` sector,
-  `{G}` grid, `{P}` passengers, `{W}` pounds; refuelling passes `{F}` the flight, `{A}` the tanker.
+  `{G}` grid, `{P}` passengers, `{W}` pounds; refuelling passes `{F}` the flight, `{A}` the tanker; tower calls and
+  emergencies `{R}` the runway (`rwyName`: zero-niner, or zero-niner left / right with two).
 - **Roles** (`ROLE_COLOR`): `pilot`, `awacs`, `tower`, `ground` (air defence, tanks, C-RAM: `RADIO_NAMES.patriot` /
   `armor` / `cram`), `heli`, `ace`, `enemy`.
 - **Enemy lines** go through `enemySay(who, pool, vars, o)` (`combat.js`): role `enemy` (red), one at most every

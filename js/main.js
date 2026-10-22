@@ -12,6 +12,7 @@ const QS = new URLSearchParams(location.search);
 if (QS.has('hour')) { CFG.timeMode = 'fixed'; CFG.fixedHour = parseFloat(QS.get('hour')); }
 if (QS.has('zoom')) CFG.zoom = parseFloat(QS.get('zoom'));
 if (QS.has('season')) CFG.season = QS.get('season');
+if (QS.has('runways')) CFG.runways = clamp(parseInt(QS.get('runways'), 10) || 2, 1, 2);
 
 /* ---- Wallpaper Engine properties ---- */
 function rgbFromWE(str) { return str.split(' ').map(c => Math.round(clamp(parseFloat(c), 0, 1) * 255)).join(','); }
@@ -40,6 +41,7 @@ window.wallpaperPropertyListener = {
     if (has('missionfrequency')) CFG.missions = p.missionfrequency.value;
     if (has('camerashake')) CFG.shake = p.camerashake.value;
     if (has('enemies')) CFG.enemies = p.enemies.value;
+    if (has('runways')) CFG.runways = clamp(Math.round(p.runways.value), 1, 2);   // switched live: AIRFIELD.update shows / hides the south runway
     if (has('basename')) CFG.baseName = String(p.basename.value || '').trim().toUpperCase().slice(0, 20) || 'SAND ISLAND';
     for (const k of Object.keys(AIRCRAFT_TYPES)) if (has(k + 'count')) { const v = Math.round(p[k + 'count'].value); if (CFG.counts[k] !== v) { CFG.counts[k] = v; airWingDirty = true; } }
     applySettings();
@@ -519,7 +521,7 @@ function autoRecover() {
     const air = all.filter(a => (a.state === 'orbit' || a.inCombat) && !a.landReq);
     // a pair whose flight-mates are still down waits for them to join instead of being recovered
     // a tanker isn't recovered while a refuelling pass is due (TANKER.update would launch it again right away)
-    const minUp = armed ? CBT_SORTIE : all[0].spec.tanker ? (TANKER.timer < 180 ? Infinity : TANKER_STATION) : 25;
+    const minUp = armed ? CBT_SORTIE : all[0].spec.tanker ? (TANKER.timer < 300 ? Infinity : TANKER_STATION) : 25;
     if (!air.length || air.length < all.length || air.some(a => a.airT < minUp)) continue;
     // an armed flight leaves the fight only while another one stays engaged
     if (armed && air[0].spec.armed && combatOn() && !groups.some(l => l !== all && l.some(engaged))) continue;

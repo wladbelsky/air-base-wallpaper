@@ -21,14 +21,14 @@ test('emergency landing: smoke, priority approach, stop on the runway, crash ten
   const stop = await wp.until(() => __a.state === 'emergency', 400);
   expect(stop.violations).toEqual([]);
   expect(stop.done, (await wp.run(() => __t.log.get(__a.callsign))).join(' > ')).toBe(true);
-  // the runway is closed: nobody lines up while it is there
-  expect(await wp.run(() => AIRFIELD.rwy.has(__a) && !AIRFIELD.canLineUp({}))).toBe(true);
+  // its runway is closed (the south one with two runways: the north one keeps taking departures)
+  expect(await wp.run(() => [AIRFIELD.setOf(__a.rwyL).has(__a), AIRFIELD.canLineUp({}) === (__a.rwyL === BASE_LAYOUT.rwy2)])).toEqual([true, true]);
   const trucks = await wp.until(() => GROUND_OPS.scenes.some(s => s.phase === 'foam'), 120);
   expect(trucks.done, 'the crash tenders reach it and foam it').toBe(true);
   const home = await wp.until(() => __a.state === 'parked' && !GROUND_OPS.scenes.length, 600);
   expect(home.violations).toEqual([]);
   expect(home.done, (await wp.run(() => __t.log.get(__a.callsign))).join(' > ')).toBe(true);
-  const r = await wp.run(() => ({ log: __t.log.get(__a.callsign), emerg: !!GROUND_OPS.emerg || __a.emerg, rwy: AIRFIELD.rwy.size, home: __a.mesh.position.distanceTo(new THREE.Vector3(__a.spot.x, 0, __a.spot.z)) }));
+  const r = await wp.run(() => ({ log: __t.log.get(__a.callsign), emerg: !!GROUND_OPS.emerg || __a.emerg, rwy: AIRFIELD.rwy.size + AIRFIELD.rwy2.size, home: __a.mesh.position.distanceTo(new THREE.Vector3(__a.spot.x, 0, __a.spot.z)) }));
   expect(r.log.join('>')).toMatch(/approach>final>rollout>emergency>towed>parked/);
   expect(r.emerg).toBe(false);
   expect(r.rwy).toBe(0);

@@ -6,7 +6,8 @@
    shelters, hangars, tower), south of it the helicopter pad, the fire station, air defence and the tank line.
    BASE_LAYOUT is the one source of positions: the models below and the ground traffic (airfield.js) both read it. */
 const BASE_LAYOUT = {
-  rwy: { x0: -64, x1: 64, z: 8, w: 4.4, td: -54 },          // td: touchdown point (x)
+  rwy: { x0: -64, x1: 64, z: 8, w: 4.4, td: -54 },          // td: touchdown point (x); 09L/27R with two runways: takeoffs
+  rwy2: { x0: -61, x1: 61, z: 22, w: 4.4, td: -51 },        // 09R/27L, south of it: landings (CFG.runways = 2); a little shorter (the perimeter road)
   twy: { z: -2, x0: -66, x1: 68, w: 2.2 },                  // parallel taxiway (westbound)
   links: [-64, -30, 0, 32, 64],                             // runway <-> taxiway links (x); -64 = departure end
   hold: { x: -64, z: 2.6 },                                 // holding point of the departure link
@@ -19,16 +20,20 @@ const BASE_LAYOUT = {
   remote: [{ x0: -67.2, x1: -42, z1: -17.6, xs: [-63, -54], rows: [-9] }, { x0: 42, x1: 66, z1: -26, xs: [49, 58], rows: [-9, -20] }],
   fence: [[-80, -2], [-63, -43], [-24, -66], [12, -70], [56, -53], [81, -14], [74, 22], [44, 54], [8, 72], [-28, 64], [-58, 42], [-76, 18]],
   gate: 9,                                                  // fence segment with the main gate (index of its first point)
-  fuel: [[-47, -40], [-40, -44], [-35, -40]], FUEL_R: 1.85   // fuel farm tanks (the spur road runs in between)
+  fuel: [[-47, -40], [-40, -44], [-35, -40]], FUEL_R: 1.85,  // fuel farm tanks (the spur road runs in between)
+  // with one runway the south strip is a storage yard and scrub: these footprints [x, z, r] (and the fire station's way
+  // up to the runway, x −9…1) are kept free of the trees there (TERRAIN.fill)
+  fillYard: [[-38, 19, 6.5], [-22, 18, 6.5], [22, 18.5, 3.5], [30, 20, 3.5], [48, 18.5, 3]]
 };
 const BL = BASE_LAYOUT;
+BL.crossZ = BL.rwy.z + BL.rwy.w / 2 + 1.6;   // holding line on the runway connectors in front of the north runway (crossing it)
 BL.channels = [...BL.chIn, ...BL.chOut];
 /* service roads inside the fence ([x, z] polylines): in from the gate past the fire station to the heli pad and the
    barracks, out to the Patriot battery, behind the hangars to the tower, the ops buildings, the fuel farm and the
    radar, and the perimeter road just inside the fence (its points pulled 5 units in toward the centre) */
 BL.roads = [
-  [[-43, 53], [-37, 46], [-24, 33], [-12, 23], [5.5, 23], [5.5, 35.5], [34, 35.5], [46, 37]],
-  [[-24, 33], [-30, 25], [-37, 25]],
+  [[-43, 53], [-36, 47], [-24, 40], [-14, 27.2], [36, 27.2], [44, 35]],   // between the south runway and the heliport
+  [[-36, 47], [-41, 41], [-41, 34.5]], [[5.5, 27.2], [5.5, 48.5]],
   [[-44, -26], [-44, -28.7], [36, -28.7], [40, -26]],
   [[-43, -28.7], [-43, -41.5]], [[-18, -28.7], [-18, -38]], [[4, -28.7], [4, -32.2]], [[16, -28.7], [16, -33.5]], [[30, -28.7], [30, -30.6]],
   [[36, -28.7], [41, -36]], [[-2, -28.7], [-2, -47.5]],
@@ -55,7 +60,7 @@ function layoutParking() {
   P.hangars.push({ x: 17.5, z: -23, kind: 'h', row: 'b', door: 0, w: 8.6, d: 7.4, size: 'medium' });
   for (const x of [27, 32.5]) P.hangars.push({ x, z: -21.6, kind: 'd', row: 'b', door: 0, w: 4.6, d: 4.4, size: 'small' });
   for (const r of BL.remote) for (const z of r.rows) for (const x of r.xs) P.remote.push({ x, z, kind: 'r', row: z > -15 ? 'a' : 'c' });   // the east channel runs past the east end
-  for (const z of [18, 24, 30]) for (const x of [11, 17, 23, 29]) P.heli.push({ x, z, yaw: 0, kind: 'heli', occ: null });
+  for (const z of [32, 38, 44]) for (const x of [11, 17, 23, 29]) P.heli.push({ x, z, yaw: 0, kind: 'heli', occ: null });   // south of the south runway
   for (const l of [P.stands, P.shelters, P.hangars, P.remote]) for (const s of l) { s.yaw = N; s.occ = null; }
   return P;
 }
@@ -218,11 +223,10 @@ function buildSkyLight(p, x, z) {
   return sl;
 }
 
-/* the whole base; returns its parts (mounts, lights, doors, structures to hit) for main.js / airfield.js */
-function buildBase() {
-  const g = new THREE.Group(), dyn = [], win = windowMat(), R = BL.rwy, TW = BL.twy, A = BL.apron;
-  const lines = [];   // light lists for navLights
-  // --- runway: asphalt with shoulders, threshold bars, designators, centreline, touchdown zones, edge lines
+/* a runway: asphalt with shoulders, threshold bars, centreline, touchdown zones, edge lines; its edge / threshold /
+   approach lights and PAPI into `lines` (papi: -1 north side, 1 south), the sequenced flashers into `rabbit`.
+   Returns the designator decals ([09…, 27…] per set of names) so the caller can switch them. */
+function buildRunway(g, R, names, lines, rabbit, papi) {
   slab(g, R.x0 - 2, R.z - R.w / 2 - 0.8, R.x1 + 2, R.z + R.w / 2 + 0.8, 0.02, ASPH2);
   slab(g, R.x0, R.z - R.w / 2, R.x1, R.z + R.w / 2, 0.04, ASPH);
   const my = 0.046, W = 0xe6e6de;
@@ -233,7 +237,35 @@ function buildBase() {
     deckLine(g, x0 + dir * 0.25, R.z - R.w / 2 + 0.2, x0 + dir * 0.25, R.z + R.w / 2 - 0.2, 0.14, W, my);
     for (const k of [12, 18]) for (const sz of [-1, 1]) deckLine(g, x0 + dir * k, R.z + sz * 1.2, x0 + dir * (k + 2), R.z + sz * 1.2, 0.36, W, my);   // touchdown zone / aiming point
   }
-  textDecal(g, '09', 3.2, 1.6, R.x0 + 6.5, my + 0.002, R.z, -Math.PI / 2); textDecal(g, '27', 3.2, 1.6, R.x1 - 6.5, my + 0.002, R.z, Math.PI / 2);
+  const decals = names.map(([a, b]) => [textDecal(g, a, 3.2, 1.6, R.x0 + 6.5, my + 0.002, R.z, -Math.PI / 2), textDecal(g, b, 3.2, 1.6, R.x1 - 6.5, my + 0.002, R.z, Math.PI / 2)]);
+  for (let x = R.x0; x <= R.x1 + 0.01; x += 6) for (const sz of [-1, 1]) lines.push([x, 0.1, R.z + sz * (R.w / 2 + 0.25), 0xfff2c8]);
+  for (let z = R.z - R.w / 2; z <= R.z + R.w / 2 + 0.01; z += 0.55) { lines.push([R.x0 - 0.3, 0.1, z, 0x30ff60]); lines.push([R.x1 + 0.3, 0.1, z, 0xff3020]); }
+  for (let x = R.x0 - 4; x > R.x0 - 34; x -= 3) for (let k = -2; k <= 2; k++) lines.push([x, 0.15, R.z + k * 0.45, 0xffffff]);
+  for (const sx of [-1, 1]) for (let x = R.x0 - 8; x > R.x0 - 18; x -= 3) lines.push([x, 0.15, R.z + sx * 1.6, 0xff4030]);
+  for (let i = 0; i < 4; i++) lines.push([R.td + 2, 0.18, R.z + papi * (R.w / 2 + 1.2 + i * 0.5), i < 2 ? 0xffffff : 0xff3020]);   // PAPI: two white, two red = on the glide path
+  for (let i = 0; i < 10; i++) rabbit.push(navLights(g, [[R.x0 - 34 + i * 3, 0.2, R.z, 0xffffff]], { period: 0.5, duty: 0.07, phase: -i * 0.05 }, 1.3));   // sequenced flashers run toward the runway
+  return decals;
+}
+/* the whole base; returns its parts (mounts, lights, doors, structures to hit) for main.js / airfield.js */
+function buildBase() {
+  const g = new THREE.Group(), dyn = [], win = windowMat(), R = BL.rwy, TW = BL.twy, A = BL.apron;
+  const lines = [];   // light lists for navLights
+  const rabbit = [], my = 0.046;
+  // --- runways: the north one (designators 09/27, or 09L/27R with two); the south one in its own group (shown with two
+  // runways, see setRunways), with the connectors on from the links and a holding line in front of the north runway
+  const desig1 = buildRunway(g, R, [['09', '27'], ['09L', '27R']], lines, rabbit, -1);
+  dyn.push(...desig1.flat());
+  const g2 = new THREE.Group(), R2 = BL.rwy2, lines2 = [];
+  buildRunway(g2, R2, [['09R', '27L']], lines2, rabbit, 1);
+  for (const lx of BL.links.slice(1)) {
+    slab(g2, lx - TW.w / 2, R.z + R.w / 2, lx + TW.w / 2, R2.z - R2.w / 2, 0.035, ASPH2);
+    deckLine(g2, lx, R.z + R.w / 2, lx, R2.z - R2.w / 2, 0.08, 0xd8b030, my - 0.006);
+    for (const dz of [0, 0.3]) deckLine(g2, lx - TW.w / 2 + 0.15, BL.crossZ + dz, lx + TW.w / 2 - 0.15, BL.crossZ + dz, 0.07, 0xd8b030, my);   // hold short of the north runway
+    for (const sx of [-1, 1]) for (let z = R.z + R.w / 2 + 1.6; z < R2.z - R2.w / 2 - 1; z += 3) lines2.push([lx + sx * (TW.w / 2 + 0.2), 0.1, z, 0x4a7cff]);
+  }
+  slab(g2, -7.5, R2.z + R2.w / 2 + 0.9, -0.5, 29.7, 0.03, CONC);   // the fire station's apron out onto it
+  navLights(g2, lines2, null, 0.8);
+  mergeStatic(g2, []);
   // --- taxiway, links, apron, remote stands, holding point
   slab(g, TW.x0, TW.z - TW.w / 2, TW.x1, TW.z + TW.w / 2, 0.035, ASPH2);
   deckLine(g, TW.x0, TW.z, TW.x1, TW.z, 0.08, 0xd8b030, my - 0.006);
@@ -244,9 +276,8 @@ function buildBase() {
   for (const cx of BL.channels) slab(g, cx - 1.6, BL.lane - 1.6, cx + 1.6, A.z0, 0.03, CONC);   // channels and the lane's ends on concrete
   for (const cx of BL.channels) deckLine(g, cx, TW.z, cx, BL.lane, 0.08, 0xd8b030, my - 0.012);
   deckLine(g, BL.chIn[0], BL.lane, BL.chOut[BL.chOut.length - 1], BL.lane, 0.08, 0xd8b030, my - 0.012);
-  // --- heli pad (south of the runway), the fire station with its apron onto the runway, the roads
-  slab(g, 7.5, 14.5, 32.5, 33.5, 0.03, CONC);
-  slab(g, -7.5, R.z + R.w / 2 + 0.9, -0.5, 15.7, 0.03, CONC);
+  // --- heliport and the fire station south of the south runway (its apron with the south runway, above), the roads
+  slab(g, 7.5, 28.5, 32.5, 47.5, 0.03, CONC);
   buildRoads(g);
   // --- shelters, hangars, tower, radar, buildings
   const P = PARKING;
@@ -257,8 +288,8 @@ function buildBase() {
   buildBuilding(g, -24, -32, 8, 3.6, 1.8, win); buildBuilding(g, -24, -38, 8, 3.6, 1.8, win);   // ops, squadron buildings
   buildBuilding(g, 4, -34, 6, 3.4, 2.6, win); buildBuilding(g, 30, -32.5, 5, 4, 1.8, win);
   buildBuilding(g, 52, 32, 10, 3.6, 2.2, win, 0.5, 0x8a8370); buildBuilding(g, 40, 42, 10, 3.6, 2.2, win, 0.5, 0x8a8370);   // barracks
-  buildBuilding(g, -4, 18, 6, 4.5, 2.0, win, 0, 0x9a6a5a);                                    // fire station
-  for (let i = 0; i < 3; i++) box(g, 1.6, 1.5, 0.05, 0x8a2a20, -6 + i * 2, 0.8, 15.73);       // its doors, onto the runway
+  buildBuilding(g, -4, 32, 6, 4.5, 2.0, win, 0, 0x9a6a5a);                                    // fire station
+  for (let i = 0; i < 3; i++) box(g, 1.6, 1.5, 0.05, 0x8a2a20, -6 + i * 2, 0.8, 29.73);       // its doors, onto the south runway
   for (const [x, z] of BL.fuel) { cyl(g, BL.FUEL_R - 0.05, BL.FUEL_R - 0.05, 2.0, 12, 0xd8d8d0, x, 1.0, z); cyl(g, BL.FUEL_R, BL.FUEL_R, 0.12, 12, ROOF_MAT, x, 2.06, z); }   // fuel farm
   // --- fence, guard towers, gate road
   dyn.push(buildFence(g));
@@ -269,33 +300,45 @@ function buildBase() {
   // --- air defence, tanks (mounts are dynamic)
   const mounts = { ciws: [], aa: [], tanks: [], sams: [], shorad: [] };
   const add = (list, m) => { list.push(m); dyn.push(m.yawG, m.pitchG); if (m.barrelG) dyn.push(m.barrelG); return m; };
-  add(mounts.ciws, buildCRAM(g, -14, 21, 225, 120)); add(mounts.ciws, buildCRAM(g, -2, -50, 135, 120)); add(mounts.ciws, buildCRAM(g, 44, -4, 45, 120));
-  add(mounts.aa, buildAAGun(g, -56, -16, 200, 140)); add(mounts.aa, buildAAGun(g, 52, 18, 20, 140)); add(mounts.aa, buildAAGun(g, -40, 38, 235, 140)); add(mounts.aa, buildAAGun(g, 30, -52, 90, 140));
-  for (const [x, z, f] of [[-26, 44, 230], [-6, 56, 255], [18, 58, 290], [-56, 24, 200]]) add(mounts.tanks, buildTank(g, x, z, f, 70, true));
-  const pr = buildPatriotRadar(g, -40, 22, 215);
-  for (const [x, z, f] of [[-48, 28, 215], [-44, 32, 230], [-34, 30, 245], [-50, 18, 200]]) add(mounts.sams, buildSamLauncher(g, x, z, f, 70, 'patriot'));
+  add(mounts.ciws, buildCRAM(g, -12, 35, 225, 120)); add(mounts.ciws, buildCRAM(g, -2, -50, 135, 120)); add(mounts.ciws, buildCRAM(g, 44, -4, 45, 120));
+  add(mounts.aa, buildAAGun(g, -56, -16, 200, 140)); add(mounts.aa, buildAAGun(g, 59, 15, 20, 140)); add(mounts.aa, buildAAGun(g, -20, 57, 235, 140)); add(mounts.aa, buildAAGun(g, 30, -52, 90, 140));
+  for (const [x, z, f] of [[-22, 49, 230], [-6, 56, 255], [18, 58, 290], [-56, 28.5, 200]]) add(mounts.tanks, buildTank(g, x, z, f, 70, true));
+  const pr = buildPatriotRadar(g, -40, 32, 215);
+  for (const [x, z, f] of [[-49, 38, 215], [-30, 33, 230], [-33, 40, 245], [-50, 28, 200]]) add(mounts.sams, buildSamLauncher(g, x, z, f, 70, 'patriot'));
   for (const [x, z, f] of [[38, -40, 60], [44, -34, 40]]) add(mounts.sams, buildSamLauncher(g, x, z, f, 80, 'nasams'));
-  add(mounts.shorad, buildAvenger(g, -60, 4, 180, 150)); add(mounts.shorad, buildAvenger(g, 60, -20, 20, 150)); add(mounts.shorad, buildAvenger(g, 30, 40, 300, 150));
+  add(mounts.shorad, buildAvenger(g, -60, 4, 180, 150)); add(mounts.shorad, buildAvenger(g, 60, -20, 20, 150)); add(mounts.shorad, buildAvenger(g, -14, 50, 300, 150));
   // --- lights: runway edge, thresholds, approach lights + sequenced flashers, PAPI, taxiway edges, apron masts
-  for (let x = R.x0; x <= R.x1 + 0.01; x += 6) for (const sz of [-1, 1]) lines.push([x, 0.1, R.z + sz * (R.w / 2 + 0.25), 0xfff2c8]);
-  for (let z = R.z - R.w / 2; z <= R.z + R.w / 2 + 0.01; z += 0.55) { lines.push([R.x0 - 0.3, 0.1, z, 0x30ff60]); lines.push([R.x1 + 0.3, 0.1, z, 0xff3020]); }
-  for (let x = R.x0 - 4; x > R.x0 - 34; x -= 3) for (let k = -2; k <= 2; k++) lines.push([x, 0.15, R.z + k * 0.45, 0xffffff]);
-  for (const sx of [-1, 1]) for (let x = R.x0 - 8; x > R.x0 - 18; x -= 3) lines.push([x, 0.15, R.z + sx * 1.6, 0xff4030]);
-  for (let i = 0; i < 4; i++) lines.push([R.td + 2, 0.18, R.z - R.w / 2 - 1.2 - i * 0.5, i < 2 ? 0xffffff : 0xff3020]);   // PAPI: two white, two red = on the glide path
   for (let x = TW.x0; x <= TW.x1; x += 4) for (const sz of [-1, 1]) lines.push([x, 0.1, TW.z + sz * (TW.w / 2 + 0.2), 0x4a7cff]);
   const navs = [navLights(g, lines, null, 0.8), ...tower.lights];
-  const rabbit = [];
-  for (let i = 0; i < 10; i++) rabbit.push(navLights(g, [[R.x0 - 34 + i * 3, 0.2, R.z, 0xffffff]], { period: 0.5, duty: 0.07, phase: -i * 0.05 }, 1.3));   // sequenced flashers run toward the runway
   const floods = [];
-  for (const [x, z, ax, az, real] of [[-30, -4.2, -30, -16, true], [16, -4.2, 18, -16, true], [-48, -12, -54, -14, false], [56, -12, 56, -14, false], [20, 13.8, 20, 24, false]]) floods.push(buildLightMast(g, x, z, ax, az, real));
+  for (const [x, z, ax, az, real] of [[-30, -4.2, -30, -16, true], [16, -4.2, 18, -16, true], [-48, -12, -54, -14, false], [56, -12, 56, -14, false], [34.5, 31, 22, 38, false]]) floods.push(buildLightMast(g, x, z, ax, az, real));
   const skyLights = [[-30, 52], [60, -36], [-62, 30], [40, 52]].map(([x, z]) => buildSkyLight(g, x, z));
   dyn.push(...floods.map(f => f.holder), ...guards.map(s => s.holder), ...skyLights.map(s => s.holder));
   mergeStatic(g, dyn);
+  g.add(g2);                                                 // after the merge: the south runway keeps its own meshes
   // structures the enemy aims at: a world point on each (cruise missiles, bombs) and the panel's site rows
   const targets = [
     ...P.shelters.map(s => ({ p: new V3(s.x, 1.6, s.z), name: 'HAS' })), ...P.hangars.slice(0, 2).map(s => ({ p: new V3(s.x, s.H * 0.8, s.z), name: 'HANGAR' })),
     { p: new V3(-7, 4.5, -31), name: 'TOWER' }, { p: new V3(-24, 1.4, -35), name: 'OPS' }, { p: new V3(-41, 1.5, -41.5), name: 'FUEL' },
-    { p: new V3(-40, 1.2, 22), name: 'PATRIOT' }, { p: new V3(-4, 1.2, 18), name: 'FIRE STN' }, { p: new V3(20, 0.5, R.z), name: 'RUNWAY' }, { p: new V3(-20, 0.5, R.z), name: 'RUNWAY' }
+    { p: new V3(-40, 1.2, 32), name: 'PATRIOT' }, { p: new V3(-4, 1.2, 32), name: 'FIRE STN' }, { p: new V3(20, 0.5, R.z), name: 'RUNWAY' }, { p: new V3(-20, 0.5, R.z), name: 'RUNWAY' }
   ];
-  return { group: g, winMat: win, deckY: 0, mounts, radars: [radar], navs, rabbit, floods, guards, skyLights, targets, patriotRadar: pr, name: 'base' };
+  // --- with one runway: a storage yard on the south strip (containers, a warehouse, sheds, a sandbag position) and the
+  // fire station's apron all the way up to the runway; trees around them come from TERRAIN.fill
+  const gF = new THREE.Group();
+  slab(gF, -7.5, R.z + R.w / 2 + 0.9, -0.5, 29.7, 0.03, CONC);
+  buildBuilding(gF, -38, 19, 9, 4, 2.2, win, 0, 0x8a8370);                                   // warehouse
+  const CONT = [0x7a4a32, 0x3f5a6a, 0x5a6a3a, 0x8a7a4a, 0x6a3a3a];
+  for (let i = 0; i < 4; i++) for (const [dz, k] of [[-0.7, 0], [0.7, 1]]) for (let j = 0; j < (i + k) % 3 + 1 && j < 2; j++) {   // container stacks
+    box(gF, 2.4, 0.95, 1.1, CONT[(i * 2 + k + j) % CONT.length], -25.5 + i * 2.6, 0.48 + j * 0.97, 18 + dz);
+  }
+  buildBuilding(gF, 22, 18.5, 4, 3, 1.6, win, 0.2, WALL2); buildBuilding(gF, 30, 20, 4, 3, 1.6, win, -0.3, WALL2);   // sheds
+  for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; taper(gF, 1.1, 0.5, 0.6, 0x9a8a62, 48 + Math.cos(a) * 1.8, 0.25, 18.5 + Math.sin(a) * 1.8, 0.8, 0.8).rotation.y = -a; }   // sandbag ring
+  mergeStatic(gF, []);
+  g.add(gF);
+  const setRunways = n => {
+    g2.visible = n > 1; gF.visible = n < 2; desig1[0].forEach(m => m.visible = n < 2); desig1[1].forEach(m => m.visible = n > 1);
+    if (typeof TERRAIN !== 'undefined') TERRAIN.setFill(n < 2);
+  };
+  setRunways(CFG.runways);
+  return { group: g, rwy2: g2, fill: gF, setRunways, winMat: win, deckY: 0, mounts, radars: [radar], navs, rabbit, floods, guards, skyLights, targets, patriotRadar: pr, name: 'base' };
 }

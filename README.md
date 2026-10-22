@@ -39,6 +39,10 @@ From source:
   spring — green grass and trees; summer — desert, saguaro cacti, rocks and dry shrubs; autumn — golden and red trees,
   falling leaves. **Snowfall / falling leaves** can be switched off.
 - **Base name** property: the tower's radio callsign and the panel title (default SAND ISLAND).
+- **Runways** property (1–2, default 2): with two, the north runway (09L) takes the departures and the south one (09R)
+  the arrivals, which then hold short of the north runway on the connector and cross it when the tower clears them;
+  with one, everything uses the north runway and the south strip is a storage yard among trees. It can be switched
+  live: an aircraft already on its way to the south runway still lands there.
 
 ## Air wing
 
