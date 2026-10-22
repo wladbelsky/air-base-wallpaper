@@ -126,6 +126,14 @@ const FIRE_STATION = { x: -4, z: 28.6 }, SERVICE_Z = -5.8, CARGO_YARD = { x: 41,
 // HELI_DEPOT: on the road by the helicopter pad
 const CREW_DEPOTS = [CARGO_YARD, { x: -66.2, z: SERVICE_Z }], HELI_DEPOT = { x: 5.5, z: 27.2 };
 const nearestDepot = x => CREW_DEPOTS.reduce((b, d) => Math.abs(d.x - x) < Math.abs(b.x - x) ? d : b);
+const tugDepot = s => s.row === 'c' ? CARGO_YARD : nearestDepot(s.x);
+/* a tug's way from the depot D to the nose (z nz) of an aircraft on the open home s: round its wingtip, in from the side
+   (not out over the lane); the east remote rows from the cargo yard. Reversed: the way back. */
+function tugWay(a, s, D, nz) {
+  const sx = s.x + (Math.sign(D.x - s.x) || 1) * (a.spec.span / 2 + 0.6);
+  return s.row === 'c' ? [[D.x, D.z], [44.6, SERVICE_Z - 1.2], [44.6, nz - 1.6], [s.x - 1, nz - 1.6], [s.x, nz]]
+    : [[D.x, D.z], [sx + (Math.sign(D.x - sx) || 1) * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, s.z], [sx, nz + 0.2], [s.x + (sx - s.x) * 0.45, nz - 0.45], [s.x, nz]];
+}
 const GROUND_OPS = registerMissionWorld({
   scenes: [], chutes: [], emerg: null, emTimer: rand(420, 720),
   reset() {
@@ -289,14 +297,21 @@ class EmergencyScene {
         if (GROUND_OPS.emerg === a && !AIRFIELD.setOf(a.rwyL).has(a)) GROUND_OPS.emerg = null;   // off its runway: it reopens (the tow may queue behind departures)
         for (const k of this.trucks) if (k.d.step(dt)) { k.m.visible = false; }
         if (a.state === 'towed') { const ahead = a.mesh.position.clone().addScaledVector(a.fwd, a.spec.len * 0.5 + 0.7); this.tug.position.copy(ahead).setY(0); this.tug.rotation.set(0, Math.atan2(-a.fwd.z, a.fwd.x), 0); }
-        else { this.phase = 'back'; this.tugD = new Drive(this.tug, [[this.tug.position.x, this.tug.position.z], [this.tug.position.x, this.tug.position.z + 2], [FIRE_STATION.x + 3, FIRE_STATION.z - 1]], 2.5); GROUND_OPS.done(a); }
+        else {                                               // home: it stays in a shelter / hangar (the door shuts on it), else round the wingtip to a depot
+          const s = a.spot, p = this.tug.position; this.t = 0; GROUND_OPS.done(a);
+          if (AIRFIELD.sheltered(s)) { this.phase = 'inside'; break; }
+          const pts = tugWay(a, s, tugDepot(s), s.z - a.spec.len / 2 - 0.75).reverse(); pts[0] = [p.x, p.z];
+          this.phase = 'back'; this.tugD = new Drive(this.tug, pts, 2.5);
+        }
         break;
-      case 'back': if (this.tugD.step(dt)) this.done = true; break;
+      case 'back': if (this.tugD.step(dt, vehHold(this.tugD, a))) { this.phase = 'fade'; this.k = 1; } break;
+      case 'fade': vehScale(this.tug, this.k -= dt * 2.5); if (this.k <= 0) this.done = true; break;
+      case 'inside': if (this.a.spot.door < 0.05 || this.t > 40) this.done = true; break;
     }
   }
   end() {
     for (const k of this.trucks) dropVehicle('firetruck', k.m);
-    if (this.tug) dropVehicle('tug', this.tug);
+    if (this.tug) { vehScale(this.tug, 1); dropVehicle('tug', this.tug); }
     if (this.a.emerg) GROUND_OPS.done(this.a);
   }
 }
@@ -404,10 +419,8 @@ class PushbackScene {
       this.inside = true; this.phase = 'hooked'; a.tugReady = true;
       this.m.position.set(s.x, 0, this.nz); this.m.rotation.set(0, -Math.PI / 2, 0);   // nose south, to the aircraft
     } else {
-      const D = this.D = s.row === 'c' ? CARGO_YARD : nearestDepot(s.x), sx = s.x + (Math.sign(D.x - s.x) || 1) * (a.spec.span / 2 + 0.6);
-      const pts = s.row === 'c' ? [[D.x, D.z], [44.6, SERVICE_Z - 1.2], [44.6, this.nz - 1.6], [s.x - 1, this.nz - 1.6], [s.x, this.nz]]
-        : [[D.x, D.z], [sx + (Math.sign(D.x - sx) || 1) * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, s.z], [sx, this.nz + 0.2], [s.x + (sx - s.x) * 0.45, this.nz - 0.45], [s.x, this.nz]];   // round the wingtip, in from the side (not out over the lane)
-      this.d = new Drive(this.m, pts, 3); this.d.step(0, true); this.k = 0; vehScale(this.m, 0.01);
+      const D = this.D = tugDepot(s);
+      this.d = new Drive(this.m, tugWay(a, s, D, this.nz), 3); this.d.step(0, true); this.k = 0; vehScale(this.m, 0.01);
       this.phase = 'in';
     }
   }

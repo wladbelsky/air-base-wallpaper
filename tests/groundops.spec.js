@@ -15,9 +15,12 @@ async function airborne(wp, pick) {
 }
 const pools = wp => wp.run(() => Object.fromEntries(Object.entries(VEH_POOL).map(([k, l]) => [k, l.length])));
 
-test('emergency landing: smoke, priority approach, stop on the runway, crash tenders, tow home, runway open again', async ({ wp }) => {
-  await airborne(wp, "a.spec.key === 'f15' && /\\s1$/.test(a.callsign)");
-  await wp.run(() => { window.__a = __f[0]; GROUND_OPS.startEmergency(__a); });
+// an F-15 (a shelter: the tug stays in it) with two runways; one for an open stand with one runway (the tug drives off)
+for (const [name, pick, runways] of [['', "a.spec.key === 'f15' && /\\s1$/.test(a.callsign)", 2],
+  [', open stand, one runway', "a === AIRCRAFT.find(b => b instanceof FixedWing && !AIRFIELD.sheltered(b.spot))", 1]])
+test('emergency landing: smoke, priority approach, stop on the runway, crash tenders, tow home, runway open again' + name, async ({ wp }) => {
+  await airborne(wp, pick);
+  await wp.run((n) => { CFG.runways = n; window.__a = __f[0]; GROUND_OPS.startEmergency(__a); }, runways);
   const stop = await wp.until(() => __a.state === 'emergency', 400);
   expect(stop.violations).toEqual([]);
   expect(stop.done, (await wp.run(() => __t.log.get(__a.callsign))).join(' > ')).toBe(true);
@@ -25,9 +28,18 @@ test('emergency landing: smoke, priority approach, stop on the runway, crash ten
   expect(await wp.run(() => [AIRFIELD.setOf(__a.rwyL).has(__a), AIRFIELD.canLineUp({}) === (__a.rwyL === BASE_LAYOUT.rwy2)])).toEqual([true, true]);
   const trucks = await wp.until(() => GROUND_OPS.scenes.some(s => s.phase === 'foam'), 120);
   expect(trucks.done, 'the crash tenders reach it and foam it').toBe(true);
-  const home = await wp.until(() => __a.state === 'parked' && !GROUND_OPS.scenes.length, 600);
+  // the tug goes home round the wingtip to a depot (or stays in the shelter), never across a runway
+  await wp.run(() => { window.__tugOn = null; window.__tugBack = false; });
+  const home = await wp.until(() => {
+    const sc = GROUND_OPS.scenes.find(x => x instanceof EmergencyScene), q = sc && (sc.phase === 'back' || sc.phase === 'fade') && sc.tug.position;
+    if (q) __tugBack = true;
+    if (q && [BASE_LAYOUT.rwy, BASE_LAYOUT.rwy2].some(L => Math.abs(q.z - L.z) < L.w / 2 + 1 && q.x > L.x0 - 2 && q.x < L.x1 + 2)) __tugOn = __tugOn || [q.x, q.z];
+    return __a.state === 'parked' && !GROUND_OPS.scenes.length;
+  }, 600);
   expect(home.violations).toEqual([]);
   expect(home.done, (await wp.run(() => __t.log.get(__a.callsign))).join(' > ')).toBe(true);
+  expect(await wp.run(() => __tugOn), 'the tug on a runway on its way back').toBe(null);
+  expect(await wp.run(() => [__tugBack, AIRFIELD.sheltered(__a.spot)])).toEqual([runways === 1, runways !== 1]);
   const r = await wp.run(() => ({ log: __t.log.get(__a.callsign), emerg: !!GROUND_OPS.emerg || __a.emerg, rwy: AIRFIELD.rwy.size + AIRFIELD.rwy2.size, home: __a.mesh.position.distanceTo(new THREE.Vector3(__a.spot.x, 0, __a.spot.z)) }));
   expect(r.log.join('>')).toMatch(/approach>final>rollout>emergency>towed>parked/);
   expect(r.emerg).toBe(false);

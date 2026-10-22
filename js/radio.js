@@ -374,7 +374,7 @@ function opsLine(key, a) {
 }
 /* {R}: the runway's name for the radio — zero-niner, or with two runways zero-niner left (north) / right (south) */
 function rwyName(L) {
-  const two = CFG.runways > 1 || L === BASE_LAYOUT.rwy2;
+  const two = (AIRFIELD.shown || CFG.runways) > 1 || L === BASE_LAYOUT.rwy2;   // as painted (the south one stays while in use)
   return !two ? 'zero-niner' : L === BASE_LAYOUT.rwy2 ? 'zero-niner right' : 'zero-niner left';
 }
 

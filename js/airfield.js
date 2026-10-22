@@ -27,6 +27,7 @@ function densify(pts, step = 3) {
 const AIRFIELD = {
   rwy: new Set(),            // aircraft on the north runway (lining up, rolling, landing roll until clear, crossing it)
   rwy2: new Set(),           // on the south one (landing roll until clear) — used with CFG.runways = 2
+  shown: 0,                  // runways drawn (BASE.setRunways): 2 while the south one is in use, even in one-runway mode
   arrivals: new Set(),       // on approach or final (to a.rwyL)
   reset() {
     this.rwy.clear(); this.rwy2.clear(); this.arrivals.clear();

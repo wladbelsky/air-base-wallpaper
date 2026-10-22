@@ -23,7 +23,7 @@ const BASE_LAYOUT = {
   fuel: [[-47, -40], [-40, -44], [-35, -40]], FUEL_R: 1.85,  // fuel farm tanks (the spur road runs in between)
   // with one runway the south strip is a storage yard and scrub: these footprints [x, z, r] (and the fire station's way
   // up to the runway, x −9…1) are kept free of the trees there (TERRAIN.fill)
-  fillYard: [[-38, 19, 6.5], [-22, 18, 6.5], [22, 18.5, 3.5], [30, 20, 3.5], [48, 18.5, 3]]
+  fillYard: [[-38, 19, 6.5], [-22, 18, 6.5], [22, 18.5, 3.5], [30, 20, 3.5], [48, 18.5, 3], [59, 15, 3]]   // … and the AA gun
 };
 const BL = BASE_LAYOUT;
 BL.crossZ = BL.rwy.z + BL.rwy.w / 2 + 1.6;   // holding line on the runway connectors in front of the north runway (crossing it)

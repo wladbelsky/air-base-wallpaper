@@ -127,8 +127,8 @@ const TERRAIN = {
     return t;
   },
   buildVeg(season) {
-    for (const v of this.veg) { scene.remove(v); v.geometry.dispose(); }
-    for (const f of this.fill) scene.remove(f);                                          // shares the geometry of its kind
+    for (const v of this.veg) { scene.remove(v); v.geometry.dispose(); v.dispose(); }   // the mesh too: its instance buffers
+    for (const f of this.fill) { scene.remove(f); f.dispose(); }                         // shares the geometry of its kind
     this.veg = []; this.fill = [];
     let seed = { spring: 11, summer: 23, autumn: 37, winter: 41 }[season];
     const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };   // same layout every rebuild

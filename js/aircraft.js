@@ -222,7 +222,7 @@ class FixedWing extends Aircraft {
     if (this.state === 'approach') return this.ps > this.finalS - 30;
     return true;
   }
-  beginLaunch() { this.state = 'ready'; this.t = 0; this.pb = AIRFIELD.pushback(this.spot); this.needsService = false; }
+  beginLaunch() { this.state = 'ready'; this.t = 0; this.pb = AIRFIELD.pushback(this.spot); this.needsService = false; this.rwyL = null; }   // its landing runway: chosen again when it comes back
   /* on the runway L (the north one by default) at x, rolling east */
   rwyPose(x, dz, L = RW) { this.deckPose(x, L.z + (dz || 0), 0, 0); this.fwd.set(1, 0, 0); }
   get rdz() { return this._rdz || 0; }
