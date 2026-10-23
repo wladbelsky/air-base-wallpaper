@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=12`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=14`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -110,7 +110,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   would keep it shut for the queue in front of it, for good).
 - **Out channels** (`BASE_LAYOUT.chIn` / `chOut`, `channels` = both): lane homes leave by the first out channel east
   of where their pushback ends (`AIRFIELD.outFor`: 19.5 by the big hangar, 66.5 at the east end).
-- **Takeoff**: `spec.toRoll` = lift-off distance (the roll accelerates to `vR` over it: fighters ~half the runway,
+- **Takeoff**: `spec.toRoll` = lift-off distance (the roll accelerates to `vR` over it: fighters ~0.4 of the runway at vR ~11 (they accelerate ~2.5× as hard as a heavy),
   heavies ~two thirds); the climb-out runs straight past the runway end before the Dubins turn to the orbit and keeps
   accelerating at 1.5× the roll's rate (`fly(path, v0, v1, acc)`). Without `acc`, `followPath` lerps the speed from
   `v0` to `v1` over the *whole* path — on a long path (takeoff → orbit is 100+ units) that is almost no change over
@@ -214,7 +214,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   dropped inside). `garageDepot` gives the depot point in front of the door (`x`, `z`) and `in`; `FIRE_DOORS` the fire
   station's (trucks out of the outer two, the emergency tug out of the middle one). Doors (`GARAGE_DOORS`, `rollDoors`:
   one dynamic mesh each, scaled up to roll it open) open in `GROUND_OPS.update` while a visible vehicle whose `Drive`
-  starts or ends inside is within 3.6. The west shed is on the grass west of the west remote apron (door east), the
+  starts or ends inside is within 3.6. Inside a shed (`GROUND_OPS.inShed`: behind the door, out of sight) vehicles don't block one
+  driving in from outside (it drives in and is dropped; those inside wait for it by the start rule), and the harness
+  ignores two overlapping there (a single door once deadlocked an arrival against two departures). The west shed is on the grass west of the west remote apron (door east), the
   east one (`CARGO_YARD`) on the concrete north of the strip at x 41 (door south; the row-`c` corridor x 44.6 east of it
   and the x 35 heavy stand's wingtip west of it are why it is narrow), the heliport's beside the fire station (door
   east onto the road at x 5.5).

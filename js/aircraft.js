@@ -501,30 +501,30 @@ class Helicopter extends Aircraft {
    len / span: ground footprint (units, scaled) for taxi spacing; park: home kind ('f' fighter, 'h' heavy, 'd' drone);
    refuel: 'boom' (KC-46) / 'probe' (KC-130); tankKind on the tankers; gunship: circles over the fight (cbt_orbit) */
 const FW = FixedWing.spec, HELI = Helicopter.spec;
-const fighter = o => Object.assign({}, FW, { speed: 17, turnR: 22, orbitR: [30, 70], alt: [12, 17], armed: true, refuel: 'boom', len: 2.4, span: 1.7, vR: 8, toRoll: 62 }, o);
+const fighter = o => Object.assign({}, FW, { speed: 17, turnR: 22, orbitR: [36, 84], alt: [12, 17], armed: true, refuel: 'boom', len: 2.4, span: 1.7, vR: 11.5, toRoll: 52 }, o);   // a fighter accelerates hard: ~2.5× a heavy's
 const heavy = o => Object.assign({}, FW, { scale: 1.05, park: 'h', taxiV: 1.6, toRoll: 80, vR: 6.5, decel: 0.9, rollTo: 0.55, approachV: 7.5, climbOut: 34, bankMax: 0.55, callsignGroup: 1, turnR: 24 }, o);
 class F15 extends FixedWing { static spec = fighter({ key: 'f15', tag: 'F-15E', speed: 17.5, alt: [13, 18] }); buildModel() { return buildF15(); } }
-class F16 extends FixedWing { static spec = fighter({ key: 'f16', tag: 'F-16C', turnR: 20, alt: [12, 16], len: 1.9, span: 1.2, vR: 7.5 }); buildModel() { return buildF16(); } }
+class F16 extends FixedWing { static spec = fighter({ key: 'f16', tag: 'F-16C', turnR: 20, alt: [12, 16], len: 1.9, span: 1.2, vR: 11 }); buildModel() { return buildF16(); } }
 class F22 extends FixedWing { static spec = fighter({ key: 'f22', tag: 'F-22A', speed: 18.5, turnR: 22, alt: [15, 20] }); buildModel() { return buildF22(); } }
 class F35 extends FixedWing { static spec = fighter({ key: 'f35', tag: 'F-35A', alt: [13, 18], len: 2.0, span: 1.4 }); buildModel() { return buildF35(); } }
-class A10 extends FixedWing { static spec = fighter({ key: 'a10', tag: 'A-10C', speed: 12, turnR: 15, orbitR: [24, 56], alt: [8, 12], cas: true, len: 2.1, span: 2.2, vR: 6, toRoll: 55, approachV: 7 }); buildModel() { return buildA10(); } }
-class E3 extends FixedWing { static spec = heavy({ key: 'e3', tag: 'E-3', speed: 12, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [21, 24], awacs: true, voice: 'awacs', len: 4.9, span: 4.6, toRoll: 88, rollTo: 0.6 }); buildModel() { return buildE3(); } }
+class A10 extends FixedWing { static spec = fighter({ key: 'a10', tag: 'A-10C', speed: 12, turnR: 15, orbitR: [28, 66], alt: [8, 12], cas: true, len: 2.1, span: 2.2, vR: 8, toRoll: 50, approachV: 7 }); buildModel() { return buildA10(); } }
+class E3 extends FixedWing { static spec = heavy({ key: 'e3', tag: 'E-3', speed: 12, turnR: 30, orbitR: [80, 120], farOrbit: [108, 128], alt: [21, 24], awacs: true, voice: 'awacs', len: 4.9, span: 4.6, toRoll: 88, rollTo: 0.6 }); buildModel() { return buildE3(); } }
 /* tankers fly refuelling passes with a flight in tow (js/tanker.js), no missions; the KC-46 has a boom, the KC-130 two hoses */
 class KC46 extends FixedWing {
-  static spec = heavy({ key: 'kc46', tag: 'KC-46', speed: 13, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [18, 21], tanker: true, tankKind: 'boom', voice: 'tanker', missions: [], len: 5.3, span: 5.0, big: true, toRoll: 88, rollTo: 0.6 });
+  static spec = heavy({ key: 'kc46', tag: 'KC-46', speed: 13, turnR: 30, orbitR: [80, 120], farOrbit: [108, 128], alt: [18, 21], tanker: true, tankKind: 'boom', voice: 'tanker', missions: [], len: 5.3, span: 5.0, big: true, toRoll: 88, rollTo: 0.6 });
   get hoseOut() { return this.tank && this.state === 'tank_pass' ? 1 : 0; }
   buildModel() { return buildKC46(); }
 }
 class KC130 extends FixedWing {
-  static spec = heavy({ key: 'kc130', tag: 'KC-130J', speed: 10, orbitR: [52, 86], farOrbit: [80, 96], alt: [11, 14], tanker: true, tankKind: 'drogue', voice: 'tanker', missions: [], len: 3.2, span: 4.2, vR: 5.5 });
+  static spec = heavy({ key: 'kc130', tag: 'KC-130J', speed: 10, orbitR: [64, 104], farOrbit: [96, 116], alt: [11, 14], tanker: true, tankKind: 'drogue', voice: 'tanker', missions: [], len: 3.2, span: 4.2, vR: 5.5 });
   get hoseOut() { return this.tank && this.state === 'tank_pass' ? 1 : 0; }
   buildModel() { return buildC130('kc130'); }
 }
-class C130 extends FixedWing { static spec = heavy({ key: 'c130', tag: 'C-130J', speed: 10, orbitR: [52, 86], farOrbit: [80, 96], alt: [14, 18], transport: true, missions: ['airlift', 'paradrop'], len: 3.2, span: 4.2, vR: 5.5 }); buildModel() { return buildC130('c130'); } }
-class AC130 extends FixedWing { static spec = heavy({ key: 'ac130', tag: 'AC-130J', speed: 9.5, orbitR: [46, 76], alt: [16, 20], armed: true, gunship: true, len: 3.2, span: 4.2, vR: 5.5 }); buildModel() { return buildC130('ac130'); } }
-class C17 extends FixedWing { static spec = heavy({ key: 'c17', tag: 'C-17', speed: 12, turnR: 30, orbitR: [64, 96], farOrbit: [88, 102], alt: [16, 20], transport: true, missions: ['airlift', 'paradrop'], len: 5.6, span: 5.4, big: true, vR: 6, toRoll: 88, rollTo: 0.5 }); buildModel() { return buildC17(); } }
+class C130 extends FixedWing { static spec = heavy({ key: 'c130', tag: 'C-130J', speed: 10, orbitR: [64, 104], farOrbit: [96, 116], alt: [14, 18], transport: true, missions: ['airlift', 'paradrop'], len: 3.2, span: 4.2, vR: 5.5 }); buildModel() { return buildC130('c130'); } }
+class AC130 extends FixedWing { static spec = heavy({ key: 'ac130', tag: 'AC-130J', speed: 9.5, orbitR: [52, 88], alt: [16, 20], armed: true, gunship: true, len: 3.2, span: 4.2, vR: 5.5 }); buildModel() { return buildC130('ac130'); } }
+class C17 extends FixedWing { static spec = heavy({ key: 'c17', tag: 'C-17', speed: 12, turnR: 30, orbitR: [80, 120], farOrbit: [108, 128], alt: [16, 20], transport: true, missions: ['airlift', 'paradrop'], len: 5.6, span: 5.4, big: true, vR: 6, toRoll: 88, rollTo: 0.5 }); buildModel() { return buildC17(); } }
 /* unmanned: no radio of its own on the ground (its operator talks for it), circles over the fight with Hellfires */
-class MQ9 extends FixedWing { static spec = Object.assign({}, FW, { key: 'mq9', tag: 'MQ-9', scale: 1.15, park: 'd', speed: 8, turnR: 14, orbitR: [40, 70], alt: [18, 22], armed: true, gunship: true, drone: true, callsignGroup: 1, len: 1.3, span: 2.3, taxiV: 1.5, vR: 4.5, toRoll: 45, approachV: 5.5, decel: 1.2, bankMax: 0.5 }); buildModel() { return buildMQ9(); } }
+class MQ9 extends FixedWing { static spec = Object.assign({}, FW, { key: 'mq9', tag: 'MQ-9', scale: 1.15, park: 'd', speed: 8, turnR: 14, orbitR: [48, 86], alt: [18, 22], armed: true, gunship: true, drone: true, callsignGroup: 1, len: 1.3, span: 2.3, taxiV: 1.5, vR: 4.5, toRoll: 45, approachV: 5.5, decel: 1.2, bankMax: 0.5 }); buildModel() { return buildMQ9(); } }
 class UH60 extends Helicopter { static spec = Object.assign({}, HELI, { key: 'uh60', tag: 'UH-60', speed: 7.5, orbitR: [18, 46], farOrbit: [50, 62], alt: [8.5, 10.5], transport: true, refuel: 'probe' }); buildModel() { return buildUH60(); } }
 class AH64 extends Helicopter { static spec = Object.assign({}, HELI, { key: 'ah64', tag: 'AH-64D', speed: 8.5, orbitR: [15, 40], alt: [7, 9], armed: true }); buildModel() { return buildAH64(); } }
 class UH1 extends Helicopter { static spec = Object.assign({}, HELI, { key: 'uh1', tag: 'UH-1Y', speed: 7, orbitR: [16, 42], alt: [7.5, 9.5], armed: true, blades: 2, doorGuns: true }); buildModel() { return buildUH1(); } }

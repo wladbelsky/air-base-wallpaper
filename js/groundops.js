@@ -216,6 +216,7 @@ function vehHold(d, own) {
   if (!h && !clearing) for (const o of GROUND_OPS.vehicles()) {
     if (o === d.m || !o.visible) continue;
     const op = o.position; if (Math.hypot(op.x - m.x, op.z - m.z) > 4) continue;
+    if (GROUND_OPS.inShed(op) && !GROUND_OPS.inShed(m)) continue;                            // one coming in doesn't wait for those inside a shed (out of sight; they wait for it: the start rule)
     if (o.scale.x < 0.5 && o.userData.drive && o.userData.drive.s < 0.05) continue;         // still waiting in its depot (the start rule queues those)
     d.ahead(_vh3, 0.8);
     if (Math.hypot(op.x - _vh.x, op.z - _vh.z) < 0.9 || Math.hypot(op.x - _vh3.x, op.z - _vh3.z) < 0.9 || Math.hypot(op.x - m.x, op.z - m.z) < 0.75) {
@@ -352,6 +353,11 @@ const GROUND_OPS = registerMissionWorld({
       if (sc.tug && sc.tug.isObject3D) out.push(sc.tug);
     }
     return out;
+  },
+  /* is p inside a vehicle shed / the fire station, behind its door (out of sight)? */
+  inShed(p) {
+    for (const o of GARAGE_DOORS) { const dx = p.x - o.fx, dz = p.z - o.fz, al = dx * o.nx + dz * o.nz; if (al < -0.3 && al > -3.2 && Math.abs(dx * o.nz - dz * o.nx) < 1.3) return true; }
+    return false;
   },
   /* is a ground vehicle (other than those working on `a`) within r of (x, z)? */
   vehicleNear(x, z, r, a) {

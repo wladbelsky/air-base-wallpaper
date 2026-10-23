@@ -127,7 +127,7 @@
     }
     for (let i = 0; i < vehs.length; i++) for (let j = i + 1; j < vehs.length; j++) {
       const a = vehs[i].m, b = vehs[j].m;
-      if (!moved.has(a) || !moved.has(b)) continue;
+      if (!moved.has(a) || !moved.has(b) || (GROUND_OPS.inShed(a.position) && GROUND_OPS.inShed(b.position))) continue;   // (both out of sight in a shed: fine)
       const d = Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z);
       if (d < 0.65) v.push(`vehicles overlap (${vehs[i].sc.constructor.name} ${vehs[i].tag} / ${vehs[j].sc.constructor.name} ${vehs[j].tag}, ${d.toFixed(2)} apart at ${a.position.x.toFixed(1)},${a.position.z.toFixed(1)})`);
     }
