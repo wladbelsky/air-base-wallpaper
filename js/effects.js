@@ -126,7 +126,7 @@ class SpriteFX {
 /* craters where shells and bombs hit the ground: a low lathe (dark bowl, a raised rim of turned-up earth that catches
    the light, soot-dark ejecta thinning out to the ground) in vertex colours; one instanced mesh, a ring buffer; old
    ones flatten and shrink away */
-const CRATER_PROFILE = [[0, -0.01, 0x17130f, 1], [0.35, 0.0, 0x1f1a15, 1], [0.62, 0.05, 0x2e271f, 1], [0.8, 0.13, 0x5a4b3a, 1], [0.92, 0.1, 0x4a3e30, 1], [1.15, 0.035, 0x2a241d, 0.8], [1.5, 0.0, 0x3a332a, 0]];   // [r, y, colour, alpha]: the ejecta fades into the ground
+const CRATER_PROFILE = [[0, 0.004, 0x17130f, 1], [0.35, 0.006, 0x1f1a15, 1], [0.62, 0.05, 0x2e271f, 1], [0.8, 0.13, 0x5a4b3a, 1], [0.92, 0.1, 0x4a3e30, 1], [1.15, 0.035, 0x2a241d, 0.8], [1.5, 0.0, 0x3a332a, 0]];   // [r, y, colour, alpha]: the ejecta fades into the ground
 function craterGeometry() {
   const geo = new THREE.LatheGeometry(CRATER_PROFILE.map(([r, y]) => new THREE.Vector2(r, y)).reverse(), 11), pos = geo.attributes.position, col = new Float32Array(pos.count * 4), c = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
@@ -140,9 +140,10 @@ function craterGeometry() {
 class Scorch {
   constructor(scene, n) {
     const geo = craterGeometry();
-    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, transparent: true, flatShading: true, shininess: 0, specular: 0x000000, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    // no depth write: its faded ejecta would cut holes in ground decals drawn after it (runway lettering); nearly flat, so it doesn't need it
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, transparent: true, depthWrite: false, flatShading: true, shininess: 0, specular: 0x000000, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     this.mesh = new THREE.InstancedMesh(geo, mat, n); this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.mesh.receiveShadow = true;
-    this.mesh.frustumCulled = false; this.mesh.count = n;
+    this.mesh.frustumCulled = false; this.mesh.renderOrder = 1; this.mesh.count = n;
     this.items = []; const zero = new THREE.Matrix4().makeScale(0, 0, 0);
     for (let i = 0; i < n; i++) { this.mesh.setMatrixAt(i, zero); this.items.push({ on: false, p: new V3(), r: 1, t: 0, max: 1, rot: 0 }); }
     this.next = 0; this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new V3(); this._y = new V3(0, 1, 0);

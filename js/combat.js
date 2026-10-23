@@ -379,7 +379,8 @@ function updateArmor(e, dt, armed) {
     const b = e.burnT += dt, fire = 1 - smoothstep(WRECK_FIRE - 6, WRECK_FIRE, b), sink = clamp((b - WRECK_SINK) / WRECK_SINK_T, 0, 1);
     const y = e.p.y + 0.7 - sink * 1.4;
     // a column of black smoke (thinning as it smoulders out), flames licking over the hull while it burns
-    if (Math.random() < dt * (5 + 9 * fire)) FX.smoke.spawn(new V3(e.p.x + rand(-0.3, 0.3), y + 0.2, e.p.z + rand(-0.3, 0.3)), { s0: 0.6 + 0.4 * fire, s1: 2.6 + 1.6 * fire, life: rand(2.6, 4), a0: 0.35 + 0.35 * fire, color: fire > 0.3 ? 0x161616 : 0x3a3a38, v: drift(1, 0.7 + 0.6 * fire) });
+    // (≤ 9 a second, ~3 s each: a column of knocked-out vehicles must not use up the shared smoke pool)
+    if (Math.random() < dt * (3.5 + 5.5 * fire)) FX.smoke.spawn(new V3(e.p.x + rand(-0.3, 0.3), y + 0.2, e.p.z + rand(-0.3, 0.3)), { s0: 0.7 + 0.5 * fire, s1: 2.8 + 1.8 * fire, life: rand(2.6, 3.4), a0: 0.35 + 0.35 * fire, color: fire > 0.3 ? 0x161616 : 0x3a3a38, v: drift(1, 0.7 + 0.6 * fire) });
     if (fire > 0 && Math.random() < dt * 16 * fire) FX.flash.spawn(new V3(e.p.x + rand(-0.6, 0.6), y + rand(-0.1, 0.3), e.p.z + rand(-0.4, 0.4)), { s0: rand(0.4, 0.7), s1: rand(0.9, 1.4), life: rand(0.14, 0.3), a0: 0.9 * fire, color: pick([0xff6a18, 0xff8a28, 0xffb040]) });
     if (b < 4 && Math.random() < dt * 3) FX.flash.spawn(new V3(e.p.x, y + 0.3, e.p.z), { s0: 0.9, s1: 1.8, life: 0.12, a0: 1, color: 0xffc060 });   // ammunition cooking off
     if (sink > 0) {

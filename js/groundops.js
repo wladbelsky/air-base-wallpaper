@@ -227,8 +227,11 @@ function vehHold(d, own) {
   }
   // 8 s behind the same one standing gives up on it (a deadlock; in a queue the one ahead keeps changing, and one that is
   // moving — however slowly — is waited for)
-  if (byVeh) { const bp = byVeh.position; if (byVeh !== d.vehBy || Math.hypot(bp.x - d.vehX, bp.z - d.vehZ) > 0.3) { d.vehBy = byVeh; d.vehSince = T; d.vehX = bp.x; d.vehZ = bp.z; } if (T - d.vehSince < 8) { d.heldBy = byVeh; d.heldAt = T; d.holdSince = d.holdSince ?? T; return true; } }
-  else d.vehBy = null;
+  if (byVeh) {
+    const bp = byVeh.position; if (byVeh !== d.vehBy) d.vehFirst = T;
+    if (byVeh !== d.vehBy || Math.hypot(bp.x - d.vehX, bp.z - d.vehZ) > 0.3) { d.vehBy = byVeh; d.vehSince = T; d.vehX = bp.x; d.vehZ = bp.z; }
+    if (T - d.vehSince < 8 && T - d.vehFirst < 25) { d.heldBy = byVeh; d.heldAt = T; d.holdSince = d.holdSince ?? T; return true; }   // (25 s behind one that shuffles about: go anyway)
+  } else d.vehBy = null;
   d.holdSince = h ? d.holdSince ?? T : null;                                              // how long it has been held (giving way above)
   return h;
 }
