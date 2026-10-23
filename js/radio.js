@@ -176,11 +176,11 @@ function makeMission(kind, extra) {
   return { order: fillLine(order, vars), done: fillLine(done, vars) };
 }
 
-/* ===== Stress: builds up over ~10 minutes of continuous combat music, eases off in silence ===== */
+/* ===== Stress: builds up over 10 minutes of continuous combat music, eases off in 3 in silence — by time only (hits on the
+   base don't push it: bombers come more often as it builds, so that fed itself) ===== */
 const STRESS = {
   level: 0,
   update(dt) { this.level = clamp(this.level + (AUD.fighting ? dt / 600 : -dt / 180), 0, 1); },
-  bump(v) { this.level = clamp(this.level + v, 0, 1); },
   get tierIndex() { const i = THREAT_TIERS.findIndex(t => this.level < t.upTo); return i < 0 ? THREAT_TIERS.length - 1 : i; },
   get tier() { return THREAT_TIERS[this.tierIndex].key; },
   get label() { return ['LOW', 'ELEVATED', 'HIGH', 'CRITICAL'][Math.min(3, Math.floor(this.level * 4))]; }
@@ -439,6 +439,24 @@ const COMBAT = {
     tense: ['Direct hit on the flight line! Fire crews, go!', "Impact! We're still in the fight!", 'Took a hit by the shelters! Fire teams responding!'],
     panic: ["We're hit again! Fires spreading!", 'Massive damage on the ramp!', "Another hit! We can't take much more!", 'The fuel farm is burning!',
       "Direct hit! We're still operational, keep firing!"]
+  },
+  // the damage a hit does (DAMAGE): {R} runway, {M} the unit knocked out, {C} the aircraft hit on the ground
+  runwayHit: {
+    calm: ['Runway {R} is cratered! Runway closed, repair crew rolling.', 'Crater on {R}! Closing the runway. Repair team, go!'],
+    tense: ['{R} is hit! Runway closed! Get the repair truck out there!', 'Bomb on the runway! {R} closed until it is matted!'],
+    panic: ['They hit the runway! {R} closed! Repair crew, move!', '{R} cratered! Nobody lands on it! Repair team, now!']
+  },
+  runwayOpen: ['Crater repaired. Runway {R} is open.', 'Repair complete, {R} back in use.', 'Mats are down. {R} open for traffic.'],
+  unitDown: {
+    calm: ['{M} is down! Took a hit, crew is working on it.', 'Lost the {M}. Damage on the position, repairs under way.'],
+    tense: ['{M} knocked out! We have a gap in the cover!', '{M} hit! Crew is out, it is off line!'],
+    panic: ['They got the {M}! It is out!', '{M} down! Somebody cover that sector!']
+  },
+  unitUp: ['{M} back on line.', '{M} repaired, back in the fight.', 'The {M} is up again.'],
+  aircraftHit: {
+    calm: ['{C} took a hit on the ground! Crash crew to the ramp!', 'Damage on the ramp: {C} is hit. Fire crew responding.'],
+    tense: ['{C} is hit on its stand! Fire crew, go!', 'Bomb on the ramp! {C} is burning!'],
+    panic: ['They hit {C} on the ground! Fire crew!', '{C} is burning on the ramp! Get the foam on it!']
   },
   newBandits: {
     calm: ['New contacts, bearing {B}, {N}! Identified as {T}.', 'Bogeys inbound from the {D}, {N}! Type: {T}.', '{T}, bearing {B}, closing fast!', '{T}s inbound from the {D}, {N}!'],

@@ -11,7 +11,7 @@
    Vehicles, pallets and parachutes are clones of one template each, kept in pools (never disposed, never rebuilt).
    GROUND_OPS is a mission-world object: updated every step, reset when the air wing is rebuilt.                    */
 Object.assign(STATUS, { emergency: ['EMERGENCY', 'wait'], towed: ['UNDER TOW', 'busy'] });
-const VEH_TEMPLATES = {}, VEH_POOL = { kloader: [], firetruck: [], tug: [], fueler: [], ammo: [], pallet: [], chute: [], cargochute: [] };
+const VEH_TEMPLATES = {}, VEH_POOL = { kloader: [], firetruck: [], tug: [], fueler: [], ammo: [], pallet: [], chute: [], cargochute: [], repair: [] };
 /* ---- vehicle templates: +X forward, wheels on y = 0 ---- */
 function wheels(g, xs, z, r) { for (const x of xs) for (const s of [-1, 1]) { const w = cyl(g, r, r, 0.12, 8, 0x1e1e1e, x, r, s * z); w.rotation.x = Math.PI / 2; cyl(g, r * 0.45, r * 0.45, 0.13, 6, 0x9a9e9a, x, r, s * z).rotation.x = Math.PI / 2; } }
 /* cab glass: a windscreen on the cab's front face (x = fx) and a side window each side; w = cab width, len = side window */
@@ -27,6 +27,7 @@ function vehLights(g, fx, bx, y, z, beacon) {
   box(g, 0.07, 0.05, 0.07, 0xc87818, beacon[0], beacon[1] - 0.025, beacon[2]);
   navLights(g, [[beacon[0], beacon[1] + 0.02, beacon[2], 0xffa020]], { period: 0.8, duty: 0.22 }, 0.85).material.userData.day = true;
 }
+const OD_GREEN = 0x56603e;   // the base's vehicles in olive drab (tugs, the repair truck)
 const bumper = (g, x, y, w) => box(g, 0.05, 0.07, w, 0x2a2d2a, x, y, 0);
 /* the munitions loader's loads: one kind shown per job, its items (separate nodes) vanish one by one as they go onto the
    aircraft (ServiceScene); a kind per aircraft type, a mix among them (LOADS) */
@@ -84,7 +85,7 @@ const VEH_BUILD = {
     mergeStatic(g, [tur]); return g;
   },
   tug() {              // aircraft tug: low and wide, an open seat under a roll bar, the tow hitch in front
-    const g = new THREE.Group(), Y = 0xd8b030, S = 0x9a9e9a, D = 0x3a3e40;
+    const g = new THREE.Group(), Y = OD_GREEN, S = 0x9a9e9a, D = 0x3a3e40;
     box(g, 1.1, 0.3, 0.7, Y, 0, 0.25, 0); box(g, 1.12, 0.04, 0.72, 0x2a2d2a, 0, 0.12, 0);
     box(g, 0.28, 0.06, 0.42, D, -0.3, 0.43, 0); box(g, 0.06, 0.24, 0.42, D, -0.44, 0.56, 0);   // seat
     for (const s of [-1, 1]) box(g, 0.03, 0.46, 0.03, S, -0.5, 0.63, s * 0.27); box(g, 0.03, 0.03, 0.57, S, -0.5, 0.86, 0);   // roll bar
@@ -123,6 +124,27 @@ const VEH_BUILD = {
     wheels(g, [-0.45, 0.5], 0.3, 0.1);
     vehLights(g, 0.78, -0.72, 0.3, 0.22, [0.54, 0.91, 0]);
     mergeStatic(g, [table, ...items]); return g;
+  },
+  repair() {           // runway repair truck (a MAN HX 10x10 style): cab-over cab, five axles, a flatbed of repair mats, a loader crane behind the cab
+    const g = new THREE.Group(), G = OD_GREEN, D = 0x2a2d2a;
+    box(g, 2.5, 0.12, 0.62, D, -0.05, 0.3, 0);                                                   // chassis
+    box(g, 0.55, 0.5, 0.9, G, 1.0, 0.64, 0); box(g, 0.57, 0.04, 0.92, 0x4a5236, 1.0, 0.91, 0);     // cab
+    cabGlass(g, 1.275, 0.74, 0.88, 0.26, 0.2); box(g, 0.02, 0.16, 0.6, 0x23261f, 1.28, 0.47, 0); bumper(g, 1.3, 0.24, 0.9);   // glass, grille
+    for (const s of [-1, 1]) { box(g, 0.02, 0.1, 0.06, D, 1.1, 0.76, s * 0.5); box(g, 0.4, 0.04, 0.16, G, 1.05, 0.32, s * 0.38); }   // mirrors, steps
+    cyl(g, 0.03, 0.03, 0.5, 6, D, 0.66, 0.78, 0.38);                                             // exhaust stack
+    box(g, 1.75, 0.06, 0.9, G, -0.38, 0.45, 0); for (const s of [-1, 1]) box(g, 1.75, 0.1, 0.03, 0x4a5236, -0.38, 0.52, s * 0.44); box(g, 0.03, 0.12, 0.9, 0x4a5236, -1.25, 0.53, 0);   // flatbed and its boards
+    const mats = []; for (let i = 0; i < 3; i++) { const t = box(g, 1.2, 0.06, 0.72, 0xb8a878, -0.5, 0.51 + i * 0.065, 0); t.name = 'mat'; mats.push(t); }   // repair mats (AM-2 style panels)
+    const crane = new THREE.Group(); crane.name = 'crane'; crane.position.set(0.55, 0.48, 0); g.add(crane);
+    cyl(crane, 0.13, 0.15, 0.1, 8, G, 0, 0.05, 0); box(crane, 0.14, 0.42, 0.14, G, 0, 0.3, 0);   // slewing ring, column
+    const boom = new THREE.Group(); boom.name = 'boom'; boom.position.y = 0.48; crane.add(boom);
+    const arm = box(boom, 1, 0.08, 0.08, 0xc8a020, 0.5, 0, 0); arm.name = 'arm';                // (unit length, scaled to the reach)
+    const hook = new THREE.Group(); hook.name = 'hook'; hook.position.x = 1; boom.add(hook);
+    const cable = box(hook, 0.012, 1, 0.012, D, 0, -0.5, 0); cable.name = 'cable';
+    const blk = new THREE.Group(); blk.name = 'block'; hook.add(blk); box(blk, 0.06, 0.06, 0.06, 0xc8a020, 0, 0, 0);
+    const carry = box(blk, 0.9, 0.05, 0.6, 0xb8a878, 0, -0.07, 0); carry.name = 'carry'; carry.visible = false;
+    wheels(g, [1.05, 0.72, -0.4, -0.73, -1.06], 0.38, 0.16);
+    vehLights(g, 1.29, -1.27, 0.34, 0.36, [1.0, 0.96, 0]);
+    mergeStatic(g, [crane, boom, arm, hook, cable, blk, carry, ...mats]); return g;
   },
   pallet() {           // an air-cargo pallet with one of a few loads (setPallet)
     const g = new THREE.Group(); box(g, 0.42, 0.04, 0.42, 0x8a8a84, 0, 0.02, 0);
@@ -325,19 +347,19 @@ const GROUND_OPS = registerMissionWorld({
     for (let i = this.scenes.length - 1; i >= 0; i--) if (this.scenes[i].done) { this.endScene(this.scenes[i]); this.scenes.splice(i, 1); }
     this.updateChutes(dt);
     // unloading: a transport home with cargo, on a stand where it can be seen
-    for (const a of AIRCRAFT) if (a.cargo && a.state === 'parked' && a.t > 2 && !a.groundBusy) {
+    for (const a of AIRCRAFT) if (a.cargo && a.state === 'parked' && a.t > 2 && !a.groundBusy && !(a.dmgT > 0)) {
       if (AIRFIELD.sheltered(a.spot)) a.cargo = false; else this.scenes.push(new UnloadScene(a));
     }
     // tugs for the departures; the ground crew for those back on an open stand or pad (a few at a time)
     let crews = 0; for (const s of this.scenes) if (s instanceof ServiceScene) crews++;
     for (const a of AIRCRAFT) {
       if (a.state === 'ready' && !a.tug && !a.groundBusy && a instanceof FixedWing) this.scenes.push(new PushbackScene(a));   // once the crew / loader has pulled away
-      else if (a.needsService && a.state === 'parked' && a.t > 1.5 && crews < 3 && !a.groundBusy && !a.cargo) {
+      else if (a.needsService && a.state === 'parked' && a.t > 1.5 && crews < 3 && !a.groundBusy && !a.cargo && !(a.dmgT > 0)) {
         a.needsService = false; if (crewSpot(a)) { this.scenes.push(new ServiceScene(a)); crews++; }
       }
     }
     // emergencies: peace only, now and then one jet in orbit
-    if (this.emerg || combatOn()) return;
+    if (this.emerg || combatOn() || DAMAGE.rwy) return;   // (not while a crater has a runway closed: one closed at a time)
     if ((this.emTimer -= dt) > 0) return;
     const c = AIRCRAFT.filter(a => a instanceof FixedWing && a.spec.armed && a.state === 'orbit' && !a.landReq && !a.retiring && !a.tank && a.airT > 30);
     this.emTimer = c.length ? rand(480, 900) : 20;                  // nobody suitable up: look again soon
@@ -523,6 +545,136 @@ class EmergencyScene {
   }
 }
 
+/* a damaged aircraft on an open stand / pad (DAMAGE): a crash tender drives up beside it the crew's way (from the nearest
+   shed, once any crew still at it has gone), foams it until the fire is out, and drives back */
+class FireScene {
+  constructor(a) { this.a = a; this.t = 0; this.phase = 'wait'; this.veh = []; }
+  start() {
+    const a = this.a, s = a.spot; a.groundBusy = true; let inPts, back, out;
+    if (a instanceof Helicopter) {
+      const D = HELI_DEPOT, x = s.x + 3, zc = s.z + 3, sg = Math.sign(D.z - zc) || 1;
+      inPts = [D.in, [D.x, D.z], [D.x, zc + sg * 1.2], [D.x + 1.4, zc], [x - 1.4, zc], [x, zc - 1.2], [x, s.z + 1.1]];
+      back = [[x, zc - 0.5], [x + 1.4, zc]]; out = [[D.x + 1.4, zc], [D.x, zc + sg * 1.2], [D.x, D.z], D.in];
+    } else {
+      const D = nearestDepot(s.x), sx = s.x + a.spec.span / 2 + 0.6, dir = Math.sign(D.x - sx) || 1;
+      inPts = [D.in, [D.x, D.z], [sx + dir * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, s.z + a.spec.len * 0.12]];
+      back = [[sx, SERVICE_Z - 1.0], [sx - dir * 1.4, SERVICE_Z]]; out = [[D.x, D.z], D.in];
+    }
+    this.car = new CrewCar('firetruck', inPts, back, out, 0); this.veh = [this.car]; this.tur = this.car.m.getObjectByName('turret'); this.phase = 'in';
+  }
+  update(dt) {
+    const a = this.a; this.t += dt;
+    if (!AIRCRAFT.includes(a)) { this.done = true; return; }
+    if (this.phase === 'wait') { if (!a.groundBusy) this.start(); else if (this.t > 40) this.done = true; return; }
+    const c = this.car;
+    if (this.phase === 'in' && c.stage === 'park') { this.phase = 'foam'; this.t = 0; }
+    if (this.phase === 'foam') {                     // the roof turret on it: foam over the fire, which goes out
+      const tp = this.tur.getWorldPosition(_fp), to = a.mesh.position.clone().setY(0.5).sub(tp);
+      this.tur.rotation.y = Math.atan2(-to.z, to.x) - c.m.rotation.y;
+      if (Math.random() < dt * 30) FX.smoke.spawn(tp, { s0: 0.25, s1: 1.3, life: 0.9, a0: 0.75, color: 0xf4f6f8, v: to.normalize().multiplyScalar(rand(4, 5)).add(new V3(0, 2.2, 0)), drag: 0.6, rise: -6 });
+      if (this.t > 2.5) a.burnT = 0;
+      if (this.t > 9) { this.phase = 'out'; this.tur.rotation.y = 0; }
+    }
+    c.update(dt, a, this.phase === 'out');
+    if (this.phase === 'out' && a.groundBusy && ((c.stage === 'go' && c.d.s > 2) || c.stage === 'fade' || c.stage === 'gone')) a.groundBusy = false;
+    if (c.stage === 'gone') this.done = true;
+  }
+  end() { if (this.car) { this.tur.rotation.y = 0; this.car.drop(); this.a.groundBusy = false; } }
+}
+const _fp = new V3();
+
+/* runway repair (DAMAGE.rwy): the repair truck from the nearest shed onto the closed runway (over a link from the service
+   strip for the north one, from the road south of the south one), up to the crater; its crane lifts the mats off the bed
+   into the crater one by one, the crater is filled in, it U-turns on the runway and drives back — the runway opens once
+   it is off it. Its work is cut short to keep the closure within RWY_MAX. */
+const RWY_ENTRY = { n: [-30, 0, 32], s: [-14, 5.5, 36] }, ROAD_S = 27.2, CRANE_X = 0.55, CRANE_H = 0.96;
+const wayPts = pts => pts.filter((p, i) => !i || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 0.3);
+class RepairScene {
+  constructor(c) {
+    this.c = c; this.t = 0; this.phase = 'in';
+    const L = c.L, south = L === BASE_LAYOUT.rwy2, R = 2.2, xs = RWY_ENTRY[south ? 's' : 'n'];
+    const ok = xs.filter(x => Math.abs(c.x - x) > R + 6), ex = (ok.length ? ok : xs).reduce((b, x) => Math.abs(x - c.x) < Math.abs(b - c.x) ? x : b);
+    const dir = Math.sign(c.x - ex) || 1, sz = south ? 1 : -1, D = south ? HELI_DEPOT : nearestDepot(ex);
+    const lead = south ? [D.in, [D.x, D.z], [D.x, ROAD_S], [ex, ROAD_S]] : [D.in, [D.x, D.z], [ex, SERVICE_Z], [ex, BASE_LAYOUT.twy.z]];
+    this.entry = wayPts([...lead, [ex, L.z + sz * (L.w / 2 + 0.6)], [ex + dir * 2.6, L.z]]);
+    this.park = [c.x - dir * (R + 1.6), L.z]; this.dir = dir; this.sz = sz; this.offT = this.offTime();
+    this.m = takeVehicle('repair'); this.k = 0; vehScale(this.m, 0.01); this.veh = [this.m];
+    const g = n => this.m.getObjectByName(n);
+    this.crane = { g: g('crane'), boom: g('boom'), arm: g('arm'), hook: g('hook'), cable: g('cable'), blk: g('block'), carry: g('carry'), yaw: Math.PI, reach: 1.2, p: 0.05, hy: 0.75 };
+    this.mats = []; this.m.traverse(o => { if (o.name === 'mat') this.mats.push(o); }); this.mats.sort((a, b) => b.position.y - a.position.y);   // top one first
+    for (const t of this.mats) t.visible = true; this.craneTo(0);
+    this.d = new Drive(this.m, AIRFIELD.round([...this.entry, this.park], 1.6), 2.6, false, 0.5); this.d.step(0, true);
+  }
+  update(dt) {
+    const c = this.c, m = this.m; this.t += dt;
+    switch (this.phase) {
+      case 'in': {
+        // it waits on the service strip (on the road) until those on the runway when it closed (lining up, rolling,
+        // landing) are off it and off the links (a taxi_in once met it head-on on one), then goes through
+        const q = this.d.ahead(_cl, 1.6), past = this.sz > 0 ? q.z < ROAD_S - 1.2 : q.z > SERVICE_Z + 1.2;
+        if (past && !this.through) this.through = !AIRFIELD.setOf(c.L).size && (this.sz > 0 || !AIRCRAFT.some(a => (a.state === 'rollout' || a.state === 'taxi_in') && a.mesh.position.z > BASE_LAYOUT.twy.z - 1.5));
+        // too late to go in and be done within RWY_MAX (the rest of the way in, the shortest work, the way off; held up on
+        // the way): called off — the crater is patched, the runway opens, the truck fades where it stands
+        if (!this.through && (DAMAGE.rwy !== c || c.t + (this.d.len - this.d.s) * 1.2 / 2.6 + 3 + this.offT > RWY_MAX)) { DAMAGE.reopen(c); this.phase = 'fade'; this.k = 1; this.off = true; break; }
+        const h = (past && !this.through) || vehHold(this.d, null); if (!h || this.d.s > 0) vehScale(m, this.k += dt * 2.5);
+        if (this.d.step(dt, h)) { this.phase = 'work'; this.t = 0; this.W = clamp(RWY_MAX - c.t - this.offT, 3, 24); this.n = 0; }
+        break;
+      }
+      case 'work': this.work(dt); if (this.t > this.W) { this.phase = 'stow'; this.t = 0; this.crane.carry.visible = false; DAMAGE.filled(c); } break;
+      case 'stow': this.craneTo(dt); if (this.t > 2.5) { this.phase = 'out'; this.d = new Drive(m, AIRFIELD.round(this.exit(), 1.4), 2.6, false, 0.5); } break;
+      case 'out': {
+        const end = this.d.step(dt, vehHold(this.d, null));
+        if (DAMAGE.rwy === c && Math.abs(m.position.z - c.L.z) > c.L.w / 2 + 1.2) DAMAGE.reopen(c);   // off the runway: it opens
+        if (end || this.d.len - this.d.s < 1.1) { this.phase = 'fade'; this.k = 1; }
+        break;
+      }
+      case 'fade': this.d.step(dt, this.off); vehScale(m, this.k -= dt * 2.5); if (this.k <= 0) this.done = true; break;
+    }
+  }
+  /* how long (s) after the work it takes to stow the crane and get off the runway (the way out up to its edge, with a
+     margin for the curves and the start): the work is cut to fit RWY_MAX */
+  offTime() {
+    const L = this.c.L, P = this.exit(this.park); let d = 0;
+    for (let i = 1; i < P.length && Math.abs(P[i - 1][1] - L.z) < L.w / 2 + 1.2; i++) d += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
+    return 2.5 + d * 1.3 / 2.6 + 2;
+  }
+  /* the way back: a U-turn on the runway past the (filled) crater, then the way in backwards */
+  exit(from) {
+    const [px, z] = this.park, d = this.dir, s = this.sz, p = from || [this.m.position.x, this.m.position.z];
+    return wayPts([p, [px + d * 1.4, z - s * 1.3], [px + d * 2.6, z - s * 0.2], [px + d * 2.2, z + s * 1.0], [px + d * 1.0, z + s * 1.5], [px - d * 1.2, z + s * 1.4], ...this.entry.slice().reverse()]);
+  }
+  /* the mats one by one (a cycle each, W / 3): the boom over the bed, the hook down, the mat up, over to the crater, down
+     into it, released, the hook up again */
+  work(dt) {
+    const C = this.crane, cy = this.W / 3, i = Math.min(2, Math.floor(this.t / cy)), u = this.t / cy - i;
+    if (u > 0.22 && this.n === i) { this.n++; if (this.mats[i]) this.mats[i].visible = false; C.carry.visible = true; }   // hooked: off the stack
+    if (u > 0.78 && C.carry.visible && this.n === i + 1) {                                                               // set down in the crater
+      C.carry.visible = false;
+      for (let k = 0; k < 3; k++) FX.smoke.spawn(new V3(this.c.x + rand(-0.8, 0.8), 0.2, this.c.z + rand(-0.8, 0.8)), { s0: 0.6, s1: 1.8, life: 1.6, a0: 0.4, color: ENV.dustTint, v: drift(0.6, 0.5), drag: 0.8 });
+    }
+    const lp = this.m.worldToLocal(_cl.set(this.c.x, 0, this.c.z));
+    if (u < 0.22) this.craneTo(dt, -0.5, 0, u < 0.12 ? 1.1 : 0.62 + (2 - i) * 0.065);   // over the stack, down to its top mat
+    else this.craneTo(dt, lp.x, lp.z, u > 0.55 && u < 0.78 ? 0.12 : 1.0);              // over the crater, down into it, up again
+  }
+  /* slew / reach / hook toward a point in the truck's frame (lx, lz, hook height hy); no point: stowed along the bed */
+  craneTo(dt, lx, lz, hy) {
+    const C = this.crane, st = lx == null, k = dt || 1e3;
+    const yaw = st ? Math.PI : Math.atan2(-lz, lx - CRANE_X), reach = st ? 1.2 : clamp(Math.hypot(lx - CRANE_X, lz), 0.6, 4.2), p = st ? 0.05 : 0.4, h = st ? 0.75 : hy;
+    C.yaw = approachAngle(C.yaw, yaw, 1.1 * k); C.reach += clamp(reach - C.reach, -1.3 * k, 1.3 * k); C.p += clamp(p - C.p, -0.35 * k, 0.35 * k);
+    const Lb = C.reach / Math.cos(C.p), tip = CRANE_H + Lb * Math.sin(C.p);
+    C.hy += clamp(Math.min(h, tip - 0.08) - C.hy, -0.9 * k, 0.9 * k);
+    const cl = Math.max(0.05, tip - C.hy);
+    C.g.rotation.y = C.yaw; C.boom.rotation.z = C.p; C.arm.scale.x = Lb; C.arm.position.x = Lb / 2;
+    C.hook.position.x = Lb; C.hook.rotation.z = -C.p; C.cable.scale.y = cl; C.cable.position.y = -cl / 2; C.blk.position.y = -cl;
+  }
+  end() {
+    DAMAGE.reopen(this.c);
+    this.crane.carry.visible = false; for (const t of this.mats) t.visible = true; this.craneTo(0);
+    vehScale(this.m, 1); dropVehicle('repair', this.m);
+  }
+}
+const _cl = new V3();
+
 /* ---- ground crew ---- */
 // where the crew can be seen working: an open front-row / remote stand, or a helicopter pad (not in a shelter / hangar)
 const crewSpot = a => a instanceof Helicopter || (!AIRFIELD.sheltered(a.spot) && a.spot.row === 'a');
@@ -587,7 +739,7 @@ class ServiceScene {
   update(dt) {
     const a = this.a; this.t += dt;
     if (!AIRCRAFT.includes(a)) { this.done = true; return; }
-    const hurry = a.state !== 'parked';                       // a launch is waiting: wrap up
+    const hurry = a.state !== 'parked' || a.dmgT > 0;         // a launch is waiting (or it was hit: DAMAGE): wrap up
     if (this.phase === 'in' && hurry) {                         // not there yet: no work; those still at the depot stay there,
       this.phase = 'out';                                       // the others back off as soon as they are in
       for (const c of this.crew) { c.delay = c.outDelay; if (c.stage === 'in' && c.d.s < 1) c.stage = 'fade'; }

@@ -177,3 +177,41 @@ test('air-defence radars: AA search antennas spin in a fight, the Patriot radar 
   const calm = await wp.until(() => !AUD.armed && BASE.mounts.aa.every(m => m.sv === 0) && Math.abs(BASE.patriotRadar.head.rotation.y) < 0.01, 90);
   expect(calm.done, 'after the fight: antennas stopped, the radar back to its sector').toBe(true);
 });
+
+test('the threat level builds by time only — 10 min to the top — hits on the base do not push it', async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => { __t.forceFight(); STRESS.level = 0.5; });
+  for (let i = 0; i < 6; i++) { await wp.run(() => { for (const t of BASE.targets.slice(0, 4)) enemyBomb(t.p.clone().setY(0)); }); await wp.sim(10, { audio: true }); }
+  const lv = await wp.run(() => STRESS.level);
+  expect(lv).toBeGreaterThan(0.5 + 60 / 600 - 0.01);
+  expect(lv).toBeLessThan(0.5 + 60 / 600 + 0.01);
+});
+
+test("fixed guns fire along the nose: a jet's rounds leave within a few degrees of it (a strafing run a little below)", async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => {
+    window.__g = { a: null, n: 0, bad: [], b: 0 };
+    const gt = Aircraft.prototype.gunTick; Aircraft.prototype.gunTick = function (dt) { __g.a = this; try { return gt.call(this, dt); } finally { __g.a = null; } };
+    const eg = AIRWAR.enemyGuns; AIRWAR.enemyGuns = function (e, tgt, dt) { __g.a = e.kind === 'bandit' ? e : null; try { return eg.call(this, e, tgt, dt); } finally { __g.a = null; } };
+    const sp = FX.tracers.spawn.bind(FX.tracers);
+    FX.tracers.spawn = (p, v, o) => {
+      const a = __g.a;
+      if (a && !(a instanceof Helicopter) && !(a.gunO && a.gunO.side)) {
+        const f = a instanceof Aircraft ? a.fwd.clone() : a.v.clone().normalize(), d = a instanceof Aircraft ? v.clone() : v.clone().sub(a.v);
+        const r = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0)).normalize(), u = new THREE.Vector3().crossVectors(r, f);
+        const yaw = Math.atan2(d.dot(r), d.dot(f)), pit = Math.atan2(d.dot(u), Math.hypot(d.dot(r), d.dot(f)));
+        const down = a.gunO && a.gunO.down || GUN_CONE;
+        if (a instanceof Aircraft) __g.n++; else __g.b++;
+        if (Math.abs(yaw) > GUN_CONE + 0.03 || pit > GUN_CONE + 0.03 || pit < -down - 0.03) __g.bad.push([a.callsign || a.cs, yaw.toFixed(3), pit.toFixed(3)]);
+      }
+      return sp(p, v, o);
+    };
+    __t.forceFight(); STRESS.level = 0.6;
+  });
+  const r = await wp.until(() => __g.n > 60 && __g.b > 20, 600, { audio: true });
+  expect(r.violations).toEqual([]);
+  const g = await wp.run(() => __g);
+  expect(g.n, 'our jets fired their guns').toBeGreaterThan(60);
+  expect(g.b, 'bandits fired theirs').toBeGreaterThan(20);
+  expect(g.bad.slice(0, 5)).toEqual([]);
+});

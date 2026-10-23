@@ -99,8 +99,7 @@ function init() {
   FX.lights = new FlashLights(scene, 4);
   // shells, rockets and bombs that reach the ground: dust, or a bomb hitting a structure
   FX.tracers.onSplash = (p, big) => {
-    if (big >= 2.3) { const t = BASE.targets.find(t => Math.hypot(t.p.x - p.x, t.p.z - p.z) < 5); if (t) { baseImpact(t.p, 1.1, t.name); return; } }
-    groundHit(p, big);
+    if (big >= 2.3) enemyBomb(p); else groundHit(p, big);
   };
 
   ready = true;
@@ -322,6 +321,7 @@ function fireAA(m, strength) {
 }
 /* tank gun: at a column in range (a flat, fast round, the hit rolled on arrival); otherwise a round far out past the wire */
 function fireTank(m, strength) {
+  if (m.downT > 0) return;
   mountMuzzle(m, _p, _d);
   const tgt = m.track && enemyAlive(m.track) ? m.track : null;
   let v;
@@ -338,7 +338,7 @@ function fireTank(m, strength) {
 const FLAK = [];
 let camShake = 0;
 function fireFlak() {
-  const g = pick(ALL_AA); if (!g || g.flakCd > 0) return;
+  const g = pick(ALL_AA.filter(m => !(m.downT > 0))); if (!g || g.flakCd > 0) return;   // (a gun knocked out doesn't fire: DAMAGE)
   g.flakCd = 0.35;
   g.tYaw = g.center + rand(-g.half, g.half); g.tPitch = rand(0.8, 1.2);       // high into the sky over a random bearing, burst at altitude
   g.mi = (g.mi + 1) % 2; g.muzzle = g.muzzles[g.mi];
@@ -366,7 +366,8 @@ function spawnGuidedMissile(p, v, turnAt, dir, speed, life, big, target, chance,
 }
 /* Patriot (ballistic missiles first, then bombers / bandits) or NASAMS (cruise missiles, helicopters, bandits): out of a canister */
 function launchSAM(kind) {
-  const cands = ALL_SAMS.filter(m => m.sam === kind && (m.cd || 0) <= 0); if (!cands.length) return;
+  if (kind === 'patriot' && DAMAGE.patriotDown()) return;                                   // its radar knocked out
+  const cands = ALL_SAMS.filter(m => m.sam === kind && (m.cd || 0) <= 0 && !(m.downT > 0)); if (!cands.length) return;
   const m = pick(cands); m.cd = kind === 'patriot' ? 3.2 : 2.2;
   m.muzzle = pick(m.cells); mountMuzzle(m, _p, _d);
   const p = _p.clone(), out = _d.clone();
@@ -380,7 +381,7 @@ function launchSAM(kind) {
 }
 /* Avenger: a Stinger at the nearest helicopter / cruise missile / low bandit */
 function launchStinger() {
-  const m = ALL_SHORAD.filter(s => (s.cd || 0) <= 0).sort((a, b) => !!b.track - !!a.track)[0]; if (!m) return;
+  const m = ALL_SHORAD.filter(s => (s.cd || 0) <= 0 && !(s.downT > 0)).sort((a, b) => !!b.track - !!a.track)[0]; if (!m) return;
   m.cd = 1.4; m.mi = (m.mi + 1) % 2; m.muzzle = m.muzzles[m.mi];
   mountMuzzle(m, _p, _d);
   const p = _p.clone(), dir = _d.clone(), tgt = CFG.enemies ? m.track || nearestEnemy(p, ['heli', 'cruise', 'bandit'], 80) : null;
@@ -391,7 +392,7 @@ let ciwsGap = 0;
 function startCIWS(dur) {
   if (RT() < ciwsGap) return;                                           // short pause between new bursts
   if (ALL_CIWS.filter(m => m.burst > 0).length >= 2) return;          // never more than 2 mounts at once
-  const idle = ALL_CIWS.filter(m => m.burst <= 0 && (m.cd || 0) <= 0);   // mounts rest between bursts
+  const idle = ALL_CIWS.filter(m => m.burst <= 0 && (m.cd || 0) <= 0 && !(m.downT > 0));   // mounts rest between bursts
   if (!idle.length) return;
   const tracked = idle.filter(k => enemyAlive(k.track));            // mounts with a target in range go first
   const m = tracked.length ? pick(tracked) : pick(idle);
@@ -426,27 +427,31 @@ function onBeat(band, strength) {
   }
   AIRWAR.onBeat(band, f);               // fighters, gunships and attack helicopters on their passes (js/airwar.js)
 }
+/* a unit knocked out (DAMAGE) tracks nothing; a gun's barrel droops */
+const knockedOut = m => { if (!(m.downT > 0)) return false; m.track = null; if (m.pmin != null && !m.sam) m.tPitch = m.pmin; return true; };
 function updateMounts(dt) {
   const hunting = CFG.enemies && ENEMIES.length;
   for (const m of ALL_AA) {
-    if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['bandit', 'heli'], 85); if (m.track) aimMountAt(m, leadPoint(m.track, _p, 80)); } else m.track = null;
+    if (!knockedOut(m) && hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['bandit', 'heli'], 85); if (m.track) aimMountAt(m, leadPoint(m.track, _p, 80)); } else m.track = null;
     mountUpdate(m, dt);
   }
   for (const m of ALL_TANKS) {
+    if (knockedOut(m)) { mountUpdate(m, dt); continue; }
     if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['armor'], 110); if (m.track) aimMountAt(m, m.track.p); } else m.track = null;
     if (!m.track && (m.scanT = (m.scanT ?? rand(2, 8)) - dt) <= 0) { m.scanT = rand(5, 12); mountRetarget(m); m.tPitch = rand(m.pmin, m.pmin + 0.1); }   // nothing to shoot: the crew looks around
     mountUpdate(m, dt);
   }
   for (const m of ALL_SHORAD) {
-    if (hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['heli', 'cruise'], 70) || nearestEnemy(_p, ['bandit'], 60); if (m.track) aimMountAt(m, m.track.p); } else m.track = null;
+    if (!knockedOut(m) && hunting) { mountMuzzle(m, _p, _d); m.track = nearestEnemy(_p, ['heli', 'cruise'], 70) || nearestEnemy(_p, ['bandit'], 60); if (m.track) aimMountAt(m, m.track.p); } else m.track = null;
     mountUpdate(m, dt); m.cd = Math.max(0, (m.cd || 0) - dt);
   }
   for (const m of ALL_SAMS) {             // the launchers slew toward the threat sector, at their fixed elevation
-    const t = hunting && (nearestEnemy(m.yawG.position, m.sam === 'patriot' ? ['ballistic', 'bandit'] : ['cruise', 'heli', 'bandit'], 150));
+    const t = hunting && !knockedOut(m) && !(m.sam === 'patriot' && DAMAGE.patriotDown()) && (nearestEnemy(m.yawG.position, m.sam === 'patriot' ? ['ballistic', 'bandit'] : ['cruise', 'heli', 'bandit'], 150));
     if (t) { _al.copy(t.p); m.yawG.parent.worldToLocal(_al); const a = Math.atan2(-(_al.z - m.yawG.position.z), _al.x - m.yawG.position.x); m.tYaw = m.center + clamp(angleWrap(a - m.center), -m.half, m.half); }
     mountUpdate(m, dt); m.cd = Math.max(0, (m.cd || 0) - dt);
   }
   if (hunting) for (const m of ALL_CIWS) {
+    if (knockedOut(m)) continue;
     mountMuzzle(m, _p, _d);
     m.track = nearestEnemy(_p, ['cruise'], 60) || nearestEnemy(_p, ['heli'], 50) || nearestEnemy(_p, ['bandit'], 45);
     if (m.track) aimMountAt(m, leadPoint(m.track, _p, 95));
@@ -500,12 +505,12 @@ function autoLaunch(joinOnly) {
   const cands = [], armed = AUD.armed;
   for (const all of flightGroups().values()) {
     if (!all.every(settled) || all[0].spec.tanker) continue;   // tankers go up for refuelling passes only (TANKER / scrambleSupport)
-    const down = all.filter(isDown); if (!down.length) continue;
+    const down = all.filter(isDown), ready = down.filter(a => a.canLaunch()); if (!ready.length) continue;   // (not the damaged ones)
     const split = down.length < all.length;     // part of the flight is already up: send the rest to join it
     if (joinOnly && !split) continue;
-    const n = split ? down.length : flightSize(down.length);
-    const w = (split ? 4 : 1) + down.length * 0.5;
-    cands.push({ list: down.slice(0, n), w: armed && down[0].spec.armed ? w * 3 : w });   // in combat fighters go first
+    const n = split ? ready.length : flightSize(ready.length);
+    const w = (split ? 4 : 1) + ready.length * 0.5;
+    cands.push({ list: ready.slice(0, n), w: armed && ready[0].spec.armed ? w * 3 : w });   // in combat fighters go first
   }
   if (!cands.length) return false;
   for (const a of wpick(cands).list) a.requestLaunch();
@@ -519,7 +524,8 @@ function scrambleSupport() {
     if (kind.some(a => !isDown(a))) continue;
     const all = flightGroups().get(flightOf(kind[0]));
     if (!all.every(settled)) continue;
-    for (const a of all.filter(isDown)) a.requestLaunch();
+    if (!all.some(a => a.canLaunch())) continue;
+    for (const a of all) a.requestLaunch();
     return true;
   }
   return false;
@@ -603,15 +609,16 @@ function updateSite(dt) {
   // slews toward the nearest air threat (looked for again every 3 s) and back to its sector in peace — a phased array, it
   // doesn't spin
   const armed = AUD.armed;
-  for (const m of BASE.mounts.aa) if (m.search) { m.sv = (m.sv || 0) + clamp((armed ? 4 : 0) - (m.sv || 0), -1.5 * dt, 1.5 * dt); if (m.sv) m.search.rotation.y = (m.search.rotation.y + m.sv * dt) % TAU; }
+  for (const m of BASE.mounts.aa) if (m.search) { m.sv = (m.sv || 0) + clamp((armed && !(m.downT > 0) ? 4 : 0) - (m.sv || 0), -1.5 * dt, 1.5 * dt); if (m.sv) m.search.rotation.y = (m.search.rotation.y + m.sv * dt) % TAU; }
   const pr = BASE.patriotRadar;
   if (pr && pr.head) {
-    if (pr.tgt && !(armed && enemyAlive(pr.tgt))) pr.tgt = null;
-    if (armed && (!pr.tgt || (pr.pickT = (pr.pickT || 0) - dt) <= 0)) {
+    const up = !(pr.downT > 0);                                                             // knocked out: it stops where it points
+    if (pr.tgt && !(armed && up && enemyAlive(pr.tgt))) pr.tgt = null;
+    if (armed && up && (!pr.tgt || (pr.pickT = (pr.pickT || 0) - dt) <= 0)) {
       pr.pickT = 3; let best = 1e9;
       for (const e of ENEMIES) if (e.kind !== 'armor' && enemyAlive(e)) { const d = Math.hypot(e.p.x - pr.position.x, e.p.z - pr.position.z); if (d < best) { best = d; pr.tgt = e; } }
     }
-    const want = pr.tgt ? angleWrap(Math.atan2(-(pr.tgt.p.z - pr.position.z), pr.tgt.p.x - pr.position.x) - pr.rotation.y) : armed ? pr.head.rotation.y : 0;
+    const want = pr.tgt ? angleWrap(Math.atan2(-(pr.tgt.p.z - pr.position.z), pr.tgt.p.x - pr.position.x) - pr.rotation.y) : armed || !up ? pr.head.rotation.y : 0;
     pr.head.rotation.y = angleWrap(approachAngle(pr.head.rotation.y, want, dt * 0.35));
   }
   for (const sl of BASE.guards) {
@@ -778,12 +785,14 @@ function buildList() {
   showPage();
   updateUI();
 }
-/* the base's sites on the panel: tower, air defence battery, tank platoon, point defence */
+/* the base's sites on the panel: tower, air defence battery, tank platoon, point defence; DAMAGED while a fire burns on
+   one of theirs or a unit of theirs is knocked out (DAMAGE), the tower's RUNWAY CLOSED while a crater is repaired */
+const anyDown = l => l.some(m => m.downT > 0);
 const SITES = [
-  { tp: 'TWR', name: () => 'TOWER', desc: 'ATC · runway', fires: ['TOWER', 'OPS', 'RUNWAY', 'HANGAR', 'HAS', 'FUEL'], busy: () => AIRFIELD.rwy.size || AIRFIELD.arrivals.size },
-  { tp: 'SAM', name: () => RADIO_NAMES.patriot, desc: 'Patriot · NASAMS', fires: ['PATRIOT'], busy: () => ENEMIES.some(e => (e.kind === 'ballistic' || e.kind === 'bandit') && enemyAlive(e)) },
-  { tp: 'ARM', name: () => RADIO_NAMES.armor, desc: 'tank platoon', fires: [], busy: () => ENEMIES.some(e => e.kind === 'armor' && enemyAlive(e)) },
-  { tp: 'C-RAM', name: () => RADIO_NAMES.cram, desc: 'point defence', fires: ['FIRE STN'], busy: () => ENEMIES.some(e => (e.kind === 'cruise' || e.kind === 'heli') && enemyAlive(e)) }
+  { tp: 'TWR', name: () => 'TOWER', desc: 'ATC · runway', fires: ['TOWER', 'OPS', 'RUNWAY', 'HANGAR', 'HAS', 'FUEL'], down: () => false, busy: () => AIRFIELD.rwy.size || AIRFIELD.arrivals.size },
+  { tp: 'SAM', name: () => RADIO_NAMES.patriot, desc: 'Patriot · NASAMS', fires: ['PATRIOT'], down: () => DAMAGE.patriotDown() || anyDown(ALL_SAMS), busy: () => ENEMIES.some(e => (e.kind === 'ballistic' || e.kind === 'bandit') && enemyAlive(e)) },
+  { tp: 'ARM', name: () => RADIO_NAMES.armor, desc: 'tank platoon', fires: [], down: () => anyDown(ALL_TANKS), busy: () => ENEMIES.some(e => e.kind === 'armor' && enemyAlive(e)) },
+  { tp: 'C-RAM', name: () => RADIO_NAMES.cram, desc: 'point defence', fires: ['FIRE STN'], down: () => anyDown(ALL_CIWS) || anyDown(ALL_AA) || anyDown(ALL_SHORAD), busy: () => ENEMIES.some(e => (e.kind === 'cruise' || e.kind === 'heli') && enemyAlive(e)) }
 ];
 function buildUI() {
   document.getElementById('allUp').onclick = () => { AIRCRAFT.forEach(a => a.canLaunch() && a.requestLaunch()); updateUI(); };
@@ -837,8 +846,8 @@ function updateUI() {
   setTxt(uiEl('count'), `${airN}/${AIRCRAFT.length}`);
   const engaged = AUD.armed && CFG.fire > 0;
   for (const s of SITES) {
-    const hit = BASE_FIRES.some(f => s.fires.includes(f.name));
-    const [txt, cls] = hit ? ['DAMAGED', 'wait'] : engaged && s.busy() ? ['ENGAGING', 'busy'] : s.tp === 'TWR' && s.busy() ? ['RUNWAY IN USE', 'air'] : ['ON ALERT', 'deck'];
+    const hit = BASE_FIRES.some(f => s.fires.includes(f.name)) || s.down();
+    const [txt, cls] = s.tp === 'TWR' && DAMAGE.rwy ? ['RUNWAY CLOSED', 'wait'] : hit ? ['DAMAGED', 'wait'] : engaged && s.busy() ? ['ENGAGING', 'busy'] : s.tp === 'TWR' && s.busy() ? ['RUNWAY IN USE', 'air'] : ['ON ALERT', 'deck'];
     setTxt(s.ui.st, txt); setCls(s.ui.st, 'st ' + cls);
   }
   const chk = uiEl('autoChk'); if (chk.checked !== CFG.auto) chk.checked = CFG.auto;

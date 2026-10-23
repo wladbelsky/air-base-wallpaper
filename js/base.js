@@ -73,6 +73,12 @@ function roadDist(x, z) {
   }
   return best;
 }
+/* the runway (in use) at (x, z), within margin m — null off it; and paved ground (a runway, the taxiway, the apron) */
+function runwayAt(x, z, m = 0) {
+  for (const R of CFG.runways > 1 ? [BL.rwy, BL.rwy2] : [BL.rwy]) if (x > R.x0 - m && x < R.x1 + m && Math.abs(z - R.z) < R.w / 2 + m) return R;
+  return null;
+}
+function pavedAt(x, z) { const T = BL.twy, A = BL.apron; return !!runwayAt(x, z) || (x > T.x0 && x < T.x1 && Math.abs(z - T.z) < T.w / 2) || (x > A.x0 && x < A.x1 && z < A.z0 && z > A.z1); }
 /* parking: fighter / heavy stands in the front row, shelters (HAS) and hangars behind the lane, remote stands at the
    ends; everything is entered nose first (yaw: nose north) and left by pushback. kind: 'f' fighter, 'h' heavy, 'd' drone */
 function layoutParking() {

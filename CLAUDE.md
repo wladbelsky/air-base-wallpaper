@@ -22,13 +22,13 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); the fence is a rectangle with chamfered corners and a west annex around both runways' approach lights (`fence`, `gate` = the gate segment, `towers` = guard-tower corners; the perimeter road is its 5-unit inward offset, `insetPoly`); `masts` (floodlight masts; units.spec keeps them clear of every taxiing aircraft's fuselage / wings and of the vehicles' ways); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
 | `js/terrain.js` | `TERRAIN`: the ground (tiled canvas texture + vertex-colour patches) and the vegetation per season (InstancedMesh per kind: firs and snow drifts / cacti, rocks, shrubs / leafy trees in spring or autumn colours), weather particles (snowfall, falling leaves) |
 | `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; smooth fuselages are `lathe` bodies (profile `[x, r, axis lift]`, `transportBody` for the transports with the cockpit `windscreen` band on the nose); `gear(g, legs, h)` legs `[x, z, kind]` — `n` / `s` / `t` / `tan` / `b4` / `b6` — folding up over ~1 s with `st.gearDown` (`tickGear`); KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
-| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — instanced ring buffer; they flatten and shrink away at the end of their life), `FlashLights` |
+| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — instanced ring buffer; they flatten and shrink away at the end of their life; a hit within `MERGE`·(r1 + r2) of a live one widens it (≤ 1.4×; `absorb` takes in neighbours it then overlaps — the harness flags stacked craters); `repair(p, r)` fades them in 3 s; on paved ground (`pavedAt`, base.js) ≤ 40 s), `FlashLights` |
 | `js/radio.js` | callsigns (+ `ENEMY_NAMES`, `RADIO_NAMES` — the tower is `<base name> TOWER`), `RADIO` subtitle queue, mission orders, `STRESS` + `THREAT_TIERS`, `radioLine()`, line pools `OPS` / `OPS_VOICE` / `OPS_UNARMED` / `COMBAT` / `AIRWAR_LINES` / `ENEMY_LINES` / `TANKER_LINES` / `LINES` (see "Radio lines & threat tiers") |
 | `js/airfield.js` | `AIRFIELD`: homes (`assignHome` / `release`), taxi routes (`pushback`, `toHold`, `lineUp`, `exitFor`, `homeRoute`), runway use (`rwy`, `arrivals`, `canLineUp`, `canApproach`, `clearToLand`), ground traffic (`blocked`), shelter / hangar doors, stand markings and helicopter pads (`updateMarks`) — see "Airfield" |
 | `js/aircraft.js` | `Aircraft` → `FixedWing` / `Helicopter` state machines, types, `Flyby` |
 | `js/persist.js` | `PERSIST`: remembers who is in the air / on a mission (`localStorage`, `CFG.saveState`), restores it after a fresh `buildAirWing()` (orbit / `Mission.resume`), radio `LINES.restore` |
 | `js/missions.js` | missions: `Leg` steps, `Mission` types (`patrol`, `airlift`), `pickMission` — see "Missions" |
-| `js/combat.js` | enemies: `ENEMY_TYPES` (fighters, attack jets, bombers), `HELI_TYPES`, `ARMOR_TYPES`; kinds `bandit`, `cruise`, `ballistic`, `heli`, `armor`; columns (`spawnColumn`), beat-synced hit resolution, `groundHit`, `baseImpact` + `BASE_FIRES` |
+| `js/combat.js` | enemies: `ENEMY_TYPES` (fighters, attack jets, bombers), `HELI_TYPES`, `ARMOR_TYPES`; kinds `bandit`, `cruise`, `ballistic`, `heli`, `armor`; columns (`spawnColumn`), beat-synced hit resolution, `groundHit`, `baseImpact` + `BASE_FIRES`, `enemyBomb`, `DAMAGE` (what a hit knocks out, see "Combat") |
 | `js/airwar.js` | `AIRWAR`: combat passes — armed aircraft wait off-screen (`cbt_wait`) and cross the screen chasing / chased by a dogfight bandit, on close air support runs (`cas`) or hunting armour (helicopters); gunships circle over the fight (`cbt_orbit`); screen helpers (`ndc`, `onScreen`, `groundAt`), pass weapons on the beat (`AIRWAR.onBeat`), pass radio |
 | `js/tanker.js` | `TANKER` (a mission-world object): refuelling passes — KC-46 boom with a fighter flight, KC-130 hoses with a helicopter pair (see "Refuelling passes") |
 | `js/groundops.js` | `GROUND_OPS` (a mission-world object): scenes on the ground — emergency landings (crash tenders, tug), unloading a transport (K-loader, pallets), parachutes of the paradrops, the ground crew (`ServiceScene`: fuel truck, ammo loader) and the pushback tug (`PushbackScene`); `Drive` (a vehicle on a smooth path, `vehHold`: gives way to aircraft); pooled vehicle templates `VEH_TEMPLATES` / `VEH_POOL` (see "Ground scenes") |
@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=20`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=21`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -234,7 +234,11 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   taxiing aircraft's fuselage / inner wing, a vehicle jump (> 0.8 in a step), two moving vehicles < 0.65 apart, and a
   vehicle through a shut shelter / hangar door. Scenes list their vehicles in `veh` (objects with a `position`).
 - **Vehicle models** (`VEH_BUILD`): cab glass (`cabGlass`), bumpers, head / tail lights and an amber beacon (`vehLights`;
-  the beacon's material has `userData.day`: `updateLights` flashes it by day too).
+  the beacon's material has `userData.day`: `updateLights` flashes it by day too). Tugs and the repair truck are olive
+  drab (`OD_GREEN`), the K-loader and the munitions loader yellow, the crash tenders red.
+- **Damage scenes**: `FireScene` (a damaged aircraft on a `crewSpot`: one crash tender — a `CrewCar` on the fuel
+  truck's way, east side — waits while a crew still holds `groundBusy`, then foams it) and `RepairScene` (runway
+  repair: see "Combat").
 - **Parachutes** (`dropChute`, `updateChutes`): open, drift with `WIND`, land, the canopy collapses, gone after ~16 s.
 
 ## Combat (`js/combat.js`, `js/airwar.js`, `js/main.js`)
@@ -253,7 +257,50 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   fly a pass path and are left to the fighters.
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
   site rows show DAMAGED). Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
-  tracers with gravity (`dropBombStick`, `FixedWing.dropBombs`), resolved in `FX.tracers.onSplash`.
+  tracers with gravity (`dropBomb`, `FixedWing.dropBombs`), resolved in `FX.tracers.onSplash` (splash ≥ 2.3 = an enemy
+  bomb → `enemyBomb`: a structure within 3 of where it fell takes the hit, else a crater; then `DAMAGE.hit`).
+  **Threat (`STRESS`) goes by time only** (10 min up while `AUD.fighting`, 3 min down): hits used to bump it +0.03 per
+  bomb, and as bombers come more often with stress that fed itself (a Tu-22 stick was +0.3).
+- **Bombing accuracy**: each bomber gets an aim error at spawn (`miss`: ~35 % within 2.5 of its structure, the rest 5–14
+  wide) and flies at that point; one hit on the run in widens it by half. The stick is released one bomb every
+  `STICK_DT` (0.15 s), its middle on the aim point (a row of craters, not a pile). Ballistic missiles spread ±3.
+- **Damage** (`DAMAGE`, `combat.js`; `update` from `updateCombat`): `hit(p, R)` for every enemy bomb (2.6), cruise (3),
+  ballistic (3.5) and a bandit / helicopter crashing (2). Air-defence units (`units()`: AA, Avengers, C-RAM, tanks,
+  SAM launchers, `BASE.patriotRadar`) within R + 0.8 get `downT` 60–120 s: no tracking (`knockedOut` in
+  `updateMounts`: gun barrels droop), no fire (guards in `fireAA` / `fireFlak` / `fireTank` / `startCIWS` /
+  `launchSAM` — the Patriot radar down stops the Patriots — / `launchStinger`, the CIWS last-ditch loop), search
+  antennas / the radar head still; fire then smoke (`DAMAGE.smoke`), back with its crater repaired. Aircraft `parked`
+  within R + span·0.35 (in a shelter / hangar: 30 %) get `dmgT` 150–300 s: `canLaunch()` false (autoLaunch /
+  scrambleSupport / `requestLaunch` go by it), status DAMAGED, no service / unloading meanwhile, a `FireScene` (one
+  crash tender the crew's way, foams it: `burnT` 0), `needsService` after. A bomb on a runway (`runwayAt`) closes it
+  (`DAMAGE.rwy`, `AIRFIELD.closed` → `canLineUp` / `canApproach` / `clearToLand` (go around) / `landR` / `canCross`;
+  a pair's wingman still joins a lead already lined up) and sends a `RepairScene`. Caps: ≤ `DMG_UNITS` (40 %) units
+  down, never the Patriot radar and both NASAMS launchers; one runway closed (none while an emergency has one, and no
+  emergency starts while one is closed; none for `RWY_GAP` (120 s) after a reopening — at threat 1.0 one runway was
+  closed 70 % of the time) — a runway hit over the cap is a crater patched after 8 s (`patches`); more
+  craters on the closed runway are filled with the first; ≤ a quarter of the air wing damaged. `RWY_MAX` (75 s) is a hard
+  limit: a truck not on its way in by `RWY_MAX` − 45 is called off (crater patched, runway open), one that is fits
+  its work in (`W`); a runway crater keeps its life until then (other paved ones ≤ 40 s). The harness checks the caps, knocked-out units neither tracking nor
+  firing, no new line-up / final onto a closed runway, and the closure's length.
+- **Runway repair** (`RepairScene`, `groundops.js`): the `repair` truck (MAN HX 10x10 style, olive drab: five axles, a
+  flatbed with three `mat` nodes, a crane `crane` → `boom` → `arm` / `hook` → `cable` / `block` → `carry`, all dynamic)
+  from the nearest crew depot over a link (−30 / 0 / 32) for the north runway, from `HELI_DEPOT` along the road z 27.2
+  and up at x −14 / 5.5 / 36 for the south one (an entry ≥ 8.2 from the crater); it waits on the service strip / the
+  road until the aircraft on the runway when it closed are off it (`AIRFIELD.setOf(L)` empty: a lined-up E-3 once
+  rolled into it) and, for the north one, none landed is still on a link (`rollout` / `taxi_in` south of the taxiway:
+  one met it head-on), then goes through (`through`); it stops
+  short of the crater, lifts the mats over into it (`work`, `craneTo`: slew / reach / hook height in the truck's frame,
+  eased), `DAMAGE.filled` fades the craters, it U-turns on the runway and drives back the way it came; the runway
+  opens when it is off it (`reopen`). Its routes are `AIRFIELD.round`ed (a long truck: wide turns).
+- **Fixed guns** (`gunAim` in `aircraft.js`): a jet's rounds (`gunTick`; not helicopters, nor side guns `o.side`) leave
+  along `fwd`, bent toward the lead point by ≤ `GUN_CONE` (3°) sideways / up and ≤ `o.down` downward (`CAS_DIVE`, 15°,
+  for the A-10's strafing); the hit only counts with the target inside that cone. Bursts start only with the target on
+  the nose (`AIRWAR.onNose`; dogfight bandits `banditOnNose`, their rounds along their `v`). Before, the lead point was
+  aimed at directly and tracers went out sideways at up to 45°. CAS runs (`casRun`) are lined up on the column: a
+  straight run across the base and out over a point 10 outside the fence (or the armour already there), checked that
+  the jet is on screen 30 short of it; the column (`meetColumn(…, at)`) stops right on that line. At the default zoom
+  the ground outside the fence is off screen, so the gun fires on the way out (the old offset meeting point, 25 short
+  of the pass, left the column beside the A-10, 15–90° off its nose).
 - Air-defence radars (`updateSite`): the AA guns' search antennas (`m.search`, a dynamic child of `yawG`) spin up to 4
   rad/s while `AUD.armed` and run down after; the tracking dish is on `pitchG` (follows the aim). The Patriot radar
   (`BASE.patriotRadar`) has a turntable head (`.head`, dynamic) that slews at 0.35 rad/s toward the nearest live air
@@ -305,8 +352,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - **Placeholders** `{name}` are filled from `vars` (`radioLine(pool, { C: callsign, T: type })`); unknown ones stay as
   they are. In use: `{c}` tower-call callsign, `{C}` callsign, `{T}` enemy type, `{B}` bearing words, `{D}` compass
   direction, `{N}` bandit count, `{Q}` enemy squadron, `{K}` enemy callsign just lost; missions also use `{S}` sector,
-  `{G}` grid, `{P}` passengers, `{W}` pounds; refuelling passes `{F}` the flight, `{A}` the tanker; tower calls and
-  emergencies `{R}` the runway (`rwyName`: zero-niner, or zero-niner left / right with two).
+  `{G}` grid, `{P}` passengers, `{W}` pounds; refuelling passes `{F}` the flight, `{A}` the tanker; tower calls,
+  emergencies and runway damage `{R}` the runway (`rwyName`: zero-niner, or zero-niner left / right with two); `{M}`
+  an air-defence unit knocked out (`DMG_NAMES`).
 - **Roles** (`ROLE_COLOR`): `pilot`, `awacs`, `tower`, `ground` (air defence, tanks, C-RAM: `RADIO_NAMES.patriot` /
   `armor` / `cram`), `heli`, `ace`, `enemy`.
 - **Enemy lines** go through `enemySay(who, pool, vars, o)` (`combat.js`): role `enemy` (red), one at most every

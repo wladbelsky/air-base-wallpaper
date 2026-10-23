@@ -108,7 +108,7 @@
       if (sc.veh) for (const vh of sc.veh) { const m = vh.isObject3D ? vh : vh.m; if (m) ms.set(m, (vh.kind || 'veh') + ':' + (vh.stage || sc.phase)); }
       if (sc.trucks) for (const k of sc.trucks) ms.set(k.m, 'firetruck:' + sc.phase);
       if (sc.tug && sc.tug.isObject3D) ms.set(sc.tug, 'tug:' + sc.phase);
-      if (sc.m && sc.m.isObject3D) ms.set(sc.m, 'tug:' + sc.phase);
+      if (sc.m && sc.m.isObject3D && !ms.has(sc.m)) ms.set(sc.m, 'tug:' + sc.phase);
       for (const [m, tag] of ms) if (m.visible && m.scale.x > 0.99) vehs.push({ m, sc, tag });
     }
     const VP = H.vehPrev || (H.vehPrev = new WeakMap()), moved = new Set();
@@ -130,6 +130,28 @@
       if (!moved.has(a) || !moved.has(b) || (GROUND_OPS.inShed(a.position) && GROUND_OPS.inShed(b.position))) continue;   // (both out of sight in a shed: fine)
       const d = Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z);
       if (d < 0.65) v.push(`vehicles overlap (${vehs[i].sc.constructor.name} ${vehs[i].tag} / ${vehs[j].sc.constructor.name} ${vehs[j].tag}, ${d.toFixed(2)} apart at ${a.position.x.toFixed(1)},${a.position.z.toFixed(1)})`);
+    }
+    // craters never stack: two live ones are merged (Scorch.MERGE)
+    const cr = FX.scorch.items.filter(i => i.on);
+    for (let i = 0; i < cr.length; i++) for (let j = i + 1; j < cr.length; j++) { const a = cr[i], b = cr[j]; if (Math.hypot(a.p.x - b.p.x, a.p.z - b.p.z) < Scorch.MERGE * (a.r + b.r) - 1e-6) v.push(`craters stacked at ${a.p.x.toFixed(1)},${a.p.z.toFixed(1)}`); }
+    // damage (combat.js DAMAGE): within the caps, a knocked-out unit doesn't track or fire, a closed runway takes no new
+    // line-ups / landings and opens within RWY_MAX
+    const units = DAMAGE.units(), down = units.filter(u => u.downT > 0);
+    if (down.length > DMG_UNITS * units.length) v.push(`${down.length} air-defence units down`);
+    if (DAMAGE.patriotDown() && DAMAGE.nasamsDown()) v.push('the Patriot and the NASAMS both down');
+    for (const u of down) if (u.track || u.burst > 0) v.push(`a knocked-out unit at ${DAMAGE.at(u).x.toFixed(0)},${DAMAGE.at(u).z.toFixed(0)} tracking / firing`);
+    const dmg = AIRCRAFT.filter(a => a.dmgT > 0);
+    if (dmg.length > Math.max(1, Math.floor(AIRCRAFT.length * 0.25))) v.push(`${dmg.length} aircraft damaged`);
+    for (const a of dmg) if (a.state !== 'parked') v.push(`damaged ${who(a)} on the move`);
+    const C = DAMAGE.rwy;
+    if (C) {
+      if (C.t > RWY_MAX + 0.1) v.push(`runway closed ${C.t.toFixed(0)} s`);
+      const t0 = T - C.t + 0.2;
+      for (const a of AIRCRAFT) {
+        const s = H.stateT.get(keyOf(a)); if (!s || s.since < t0) continue;
+        if (a.state === 'lineup' && C.L === BASE_LAYOUT.rwy && !a.pairL) v.push(`${who(a)} lined up on the closed runway`);   // (a pair's wingman joins its lead)
+        if (a.state === 'final' && a.rwyL === C.L) v.push(`${who(a)} on final to the closed runway`);
+      }
     }
     // enemy armour stays outside the fence
     for (const e of ENEMIES) if (e.kind === 'armor' && !e.dead && insideFence(e.p.x, e.p.z)) v.push(`enemy ${e.type} inside the fence at ${e.p.x.toFixed(0)},${e.p.z.toFixed(0)}`);

@@ -130,7 +130,7 @@ controls how often this happens (0 = off).
 - **Ground crew:** an aircraft back on an open stand, or a helicopter on its pad, gets a fuel truck (hose out) and,
   if it is armed, a munitions loader with its type's load (bombs, missiles, gun ammunition for the A-10, rockets for
   the attack helicopters, crates) that it lifts onto the aircraft; it can't leave until they pull away (a launch cuts
-  the work short). The vehicles have cab glass, headlights and amber beacons, keep to their side of the road, queue
+  the work short). The vehicles (the tugs in olive drab) have cab glass, headlights and amber beacons, keep to their side of the road, queue
   behind each other and back out of an aircraft's way. Unloaded pallets carry crates, drums, covered loads or spares.
 - In peacetime the tanks on the perimeter turn their turrets now and then, looking around.
 
@@ -139,18 +139,29 @@ controls how often this happens (0 = off).
 When the music has been playing for 5 seconds, the base goes to an air raid:
 
 - **Enemy aircraft:** Su-25 Frogfoot (bombs), Su-35 Flanker, Su-47 Berkut, Su-57 Felon, Su-34 Fullback bombers and,
-  as stress builds, Tu-22M3 Backfire bombers. Bombers drop their stick on the hangars, shelters, the tower or the
-  runway; the others may loose a cruise missile on the run in.
+  as stress builds, Tu-22M3 Backfire bombers. Bombers aim their stick at the hangars, shelters, the tower or the
+  runway, but only about a third of them put it on target: the rest land wide, a line of craters across the grass or
+  the concrete. The others may loose a cruise missile on the run in.
 - **Missiles:** cruise missiles skim in low toward the base's structures (C-RAM, NASAMS, Stingers and helicopter guns
   shoot at them), ballistic missiles come down steeply out of the sky (the Patriots always fire at them).
 - **Armour:** columns of T-90s, BMP-3s and BTR-82s drive up the road and across country to the fence and fire at the
   perimeter, now and then with Ka-52 or Mi-24 attack helicopters. The tanks in their revetments fire at them (and
-  far out past the wire), the A-10s make gun runs, the Apaches and Hueys rocket them, the AC-130 and the MQ-9 circle
+  far out past the wire), the A-10s make gun runs (lined up on the column: a jet's gun is fixed and fires along its
+  nose, as do the fighters' and the bandits'), the Apaches and Hueys rocket them, the AC-130 and the MQ-9 circle
   overhead and fire at them.
 - **Our fighters** fly passes across the screen: chasing a bandit, chased by one (flares, the wingman saves them), or
   sweeping; the A-10 (and now and then an F-15E with bombs) on close air support runs.
 - **Hits:** a projectile that reaches its target scores on the **next beat** of the music. What gets through hits the
-  base: explosions, fires and craters in the ground. Knocked-out armour burns black, smokes, then settles into the ground.
+  base: explosions, fires and craters in the ground (a second hit on a crater widens it rather than piling on).
+  Knocked-out armour burns black, smokes, then settles into the ground.
+- **Damage:** whatever a bomb or missile lands on is out for a while. An AA gun, C-RAM, Avenger, tank, launcher or the
+  Patriot radar stops tracking and firing for one to two minutes, burning and then smoking, until it is back on line.
+  An aircraft hit on its stand is DAMAGED for a few minutes: a crash tender foams it and the ground crew services it
+  afterwards. A crater on a runway closes it: a green 10x10 repair truck drives out, its crane lowers repair mats into
+  the crater, and the runway opens again (within 75 s, and stays open at least two minutes); with two runways the arrivals use the other one meanwhile. The
+  base never goes down completely: at most 40 % of the air defence, one runway and a quarter of the aircraft are out at
+  once (the Patriot and the NASAMS never both); a hit beyond that only burns and craters. The panel shows DAMAGED /
+  RUNWAY CLOSED.
 - When the music stops, the fighters and gunships return to their orbits, the missiles in the air are shot down or
   self-destruct and the armour turns back.
 - The **Enemy aircraft, missiles & armour in combat** property turns all of this off.
@@ -163,7 +174,8 @@ barrages from the AA guns, the C-RAM's bursts, and subtle camera shake (**Camera
 
 ## Stress / threat
 
-Stress builds over ~10 minutes of continuous music and falls off in silence. The panel shows it as **THREAT**. It
+Stress builds over 10 minutes of continuous music (by time only: hits on the base don't push it) and falls off over 3
+minutes in silence. The panel shows it as **THREAT**. It
 changes the radio tone (calm → tense → panic), enemy wave size and spawn rate, and which enemies come.
 
 ## Properties

@@ -125,7 +125,8 @@ class SpriteFX {
 
 /* craters where shells and bombs hit the ground: a low lathe (dark bowl, a raised rim of turned-up earth that catches
    the light, soot-dark ejecta thinning out to the ground) in vertex colours; one instanced mesh, a ring buffer; old
-   ones flatten and shrink away */
+   ones flatten and shrink away. A hit on a live crater widens it instead of stacking a second one on it (merge); on paved
+   ground they are cleared sooner, a repair (runway crew, a mount back on line) fills them in over 3 s */
 const CRATER_PROFILE = [[0, 0.004, 0x17130f, 1], [0.35, 0.006, 0x1f1a15, 1], [0.62, 0.05, 0x2e271f, 1], [0.8, 0.13, 0x5a4b3a, 1], [0.92, 0.1, 0x4a3e30, 1], [1.15, 0.035, 0x2a241d, 0.8], [1.5, 0.0, 0x3a332a, 0]];   // [r, y, colour, alpha]: the ejecta fades into the ground
 function craterGeometry() {
   const geo = new THREE.LatheGeometry(CRATER_PROFILE.map(([r, y]) => new THREE.Vector2(r, y)).reverse(), 11), pos = geo.attributes.position, col = new Float32Array(pos.count * 4), c = new THREE.Color();
@@ -138,6 +139,7 @@ function craterGeometry() {
   return geo;
 }
 class Scorch {
+  static MERGE = 0.6;                                // two craters closer than MERGE × (r1 + r2) become one
   constructor(scene, n) {
     const geo = craterGeometry();
     // no depth write: its faded ejecta would cut holes in ground decals drawn after it (runway lettering); nearly flat, so it doesn't need it
@@ -145,11 +147,36 @@ class Scorch {
     this.mesh = new THREE.InstancedMesh(geo, mat, n); this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false; this.mesh.renderOrder = 1; this.mesh.count = n;
     this.items = []; const zero = new THREE.Matrix4().makeScale(0, 0, 0);
-    for (let i = 0; i < n; i++) { this.mesh.setMatrixAt(i, zero); this.items.push({ on: false, p: new V3(), r: 1, t: 0, max: 1, rot: 0 }); }
+    for (let i = 0; i < n; i++) { this.mesh.setMatrixAt(i, zero); this.items.push({ on: false, p: new V3(), r: 1, base: 1, t: 0, max: 1, rot: 0 }); }
     this.next = 0; this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new V3(); this._y = new V3(0, 1, 0);
     scene.add(this.mesh);
   }
-  spawn(p, r, life) { const it = this.items[this.next]; this.next = (this.next + 1) % this.items.length; it.on = true; it.p.set(p.x, groundH(p.x, p.z) + 0.01, p.z); it.r = r * 0.8; it.t = it.max = life || 45; it.rot = rand(0, TAU); }
+  spawn(p, r, life) {
+    r *= 0.8; life = life || 45;
+    if (pavedAt(p.x, p.z) && !runwayAt(p.x, p.z, 0.3)) life = Math.min(life, 40);   // (a runway's stays until it is repaired / patched)
+    let it = this.items.find(o => o.on && Math.hypot(o.p.x - p.x, o.p.z - p.z) < Scorch.MERGE * (o.r + r));
+    if (it) {                                        // on a live one: it grows (up to 1.4× the bigger of the two), its centre a little toward the hit
+      const b = Math.max(it.base, r), w = 0.25 * r / (it.r + r);
+      it.r = Math.min(Math.max(it.r, r) * 1.12, 1.4 * b); it.base = b; it.p.x += (p.x - it.p.x) * w; it.p.z += (p.z - it.p.z) * w;
+      it.t = it.max = Math.max(it.t, life);
+      this.absorb(it);
+      return it;
+    }
+    it = this.items[this.next]; this.next = (this.next + 1) % this.items.length;
+    it.on = true; it.p.set(p.x, groundH(p.x, p.z) + 0.01, p.z); it.r = it.base = r; it.t = it.max = life; it.rot = rand(0, TAU);
+    return it;
+  }
+  absorb(it) {                                       // a grown crater takes in neighbours it now overlaps (they're mostly under it)
+    for (let more = true; more;) {
+      more = false;
+      for (const o of this.items) if (o !== it && o.on && Math.hypot(o.p.x - it.p.x, o.p.z - it.p.z) < Scorch.MERGE * (o.r + it.r)) {
+        o.on = false; this.mesh.setMatrixAt(this.items.indexOf(o), this._m.makeScale(0, 0, 0)); this.mesh.instanceMatrix.needsUpdate = true;
+        it.t = it.max = Math.max(it.t, o.t); more = true;
+      }
+    }
+  }
+  /* fill in the craters around p (within r of their rim) */
+  repair(p, r) { for (const it of this.items) if (it.on && Math.hypot(it.p.x - p.x, it.p.z - p.z) < r + it.r * 0.5 && it.t > 3) { it.max = 12; it.t = 3; } }
   update(dt) {
     let changed = false;
     for (let i = 0; i < this.items.length; i++) {

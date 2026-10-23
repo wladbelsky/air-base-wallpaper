@@ -15,6 +15,16 @@ function orientFrom(obj, f, bank) {
   _m4.makeBasis(f, _u2, _r2); obj.quaternion.setFromRotationMatrix(_m4);
 }
 const headingOf = d => Math.atan2(d.z, d.x);
+/* fixed guns (jets): a round leaves along the nose f, bent toward the wanted direction d (unit, changed in place) by at most
+   GUN_CONE sideways / up and `down` downward (a strafing run has its nose on the ground); true when d was inside that cone */
+const GUN_CONE = 0.05, _gr = new V3(), _gu = new V3();
+function gunAim(f, d, down = GUN_CONE) {
+  _gr.crossVectors(f, WUP).normalize(); _gu.crossVectors(_gr, f);
+  const a = d.dot(f), b = d.dot(_gr), c = d.dot(_gu), yaw = Math.atan2(b, a), pit = Math.atan2(c, Math.hypot(a, b));
+  const y = clamp(yaw, -GUN_CONE, GUN_CONE), p = clamp(pit, -down, GUN_CONE), cp = Math.cos(p);
+  d.copy(f).multiplyScalar(cp * Math.cos(y)).addScaledVector(_gr, cp * Math.sin(y)).addScaledVector(_gu, Math.sin(p));
+  return y === yaw && p === pit;
+}
 const flightOf = a => a.callsign.replace(/\s+\d+$/, '');   // flight = aircraft sharing a callsign (WARDOG 1…4)
 
 const STATUS = {
@@ -51,17 +61,17 @@ class Aircraft {
     for (const s of this.searchlights) { const i = SEARCHLIGHTS.indexOf(s); if (i >= 0) SEARCHLIGHTS.splice(i, 1); }
     disposeTree(this.mesh);
   }
-  get status() { return STATUS[this.state] || ['—', 'busy']; }
+  get status() { return this.dmgT > 0 && this.state === 'parked' ? ['DAMAGED', 'wait'] : STATUS[this.state] || ['—', 'busy']; }
   get airborne() { return this.state === 'orbit' || this.state === 'climb' || this.state === 'depart'; }
   get isAwacs() { return !!this.spec.awacs; }
   get isSupport() { return !!(this.spec.awacs || this.spec.tanker); }   // AWACS / tanker: stay up in combat, scrambled first
   get onGround() { return GROUND_STATES.has(this.state); }
-  canLaunch() { return this.state === 'parked'; }
+  canLaunch() { return this.state === 'parked' && !(this.dmgT > 0); }   // (hit on the ground: DAMAGE)
   get onMission() { return !!this.mission; }
   get inCombat() { return this.state.startsWith('cbt_'); }
   get aloft() { return this.airborne || this.onMission || this.inCombat || !!this.tank; }   // up: orbit / mission / combat / refuelling pass
   canLand() { return this.aloft && !this.landReq; }
-  requestLaunch() { if (this.state === 'parked') this.beginLaunch(); }
+  requestLaunch() { if (this.canLaunch()) this.beginLaunch(); }
   requestLand() { if (this.aloft) this.landReq = true; }
   beginLaunch() {}
   say(text, o) { RADIO.say(this.callsign, text, Object.assign({ role: this.isAwacs ? 'awacs' : (this instanceof Helicopter ? 'heli' : 'pilot') }, o || {})); }
@@ -203,12 +213,14 @@ class Aircraft {
       this.gunAcc -= 1 / rate;
       const mp = this.mesh.position.clone();
       if (o.side) mp.addScaledVector(_po.set(this.fwd.z, 0, -this.fwd.x), o.side).y -= 0.3; else { mp.addScaledVector(this.fwd, heli ? 0.7 : 1.1); if (heli) mp.y -= 0.15; }
-      const v = (tg ? leadPoint(tg, mp, sp).sub(mp).normalize() : this.fwd.clone()).multiplyScalar(sp);
+      const v = tg ? leadPoint(tg, mp, sp).sub(mp).normalize() : this.fwd.clone();
+      if (!heli && !o.side) this.gunOn = gunAim(this.fwd, v, o.down);   // a jet's gun is fixed: along the nose (a turret, door gun or gunship's side gun aims)
+      v.multiplyScalar(sp);
       v.x += rand(-1.2, 1.2); v.y += rand(-1.2, 1.2); v.z += rand(-1.2, 1.2);
       FX.tracers.spawn(mp, v, { life: o.life || 0.7, len: o.len || 1.8, w: o.w || 0.12, color: o.color || 0xffc070, splash: o.splash || 0.2 });
       if (Math.random() < 0.4) FX.flash.spawn(mp, { s0: 0.8, s1: 1.1, life: 0.05, a0: 0.9 });
     }
-    if (this.gunT <= 0 && tg && tg.p.distanceTo(this.mesh.position) < (o.range || 45)) queueHit(tg, { chance: this.gunChance, dmg: o.dmg || 1, src: this, delay: 0.15 });
+    if (this.gunT <= 0 && tg && (heli || o.side || this.gunOn) && tg.p.distanceTo(this.mesh.position) < (o.range || 45)) queueHit(tg, { chance: this.gunChance, dmg: o.dmg || 1, src: this, delay: 0.15 });
   }
 
   update(dt) {

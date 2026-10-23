@@ -78,9 +78,12 @@ function spawnBandits(n) {
     const p = new V3(Math.cos(h) * 135, alt + rand(-1.5, 1.5), Math.sin(h) * 135).addScaledVector(perp, (i - (n - 1) / 2) * 6);
     p.addScaledVector(new V3(Math.cos(h), 0, Math.sin(h)), i * 5);
     const target = pass.clone().addScaledVector(perp, (i - (n - 1) / 2) * (ty.bombs ? 3 : 6)); target.y = p.y;
+    // a bomber's aim error: about a third put their stick on the target, the rest wide (grass, open concrete) — it flies at that point
+    const md = !ty.bombs ? 0 : Math.random() < 0.35 ? rand(0, 2.5) : rand(5, 14), ma = rand(0, TAU), miss = new V3(Math.cos(ma) * md, 0, Math.sin(ma) * md);
+    target.add(miss);
     const v = target.clone().sub(p).normalize().multiplyScalar(speed);
     const mesh = enemyMesh(type); mesh.scale.setScalar(1.25 * (ty.scale || 1)); scene.add(mesh);
-    ENEMIES.push({ kind: 'bandit', type, mesh, p, v, hp: ty.hp, age: 0, fired: false, smokeT: 0, sq, cs: `${sq} ${i + 1}`, bombAt: ty.bombs ? target.setY(0) : null, bombs: ty.bombs || 0 });
+    ENEMIES.push({ kind: 'bandit', type, mesh, p, v, hp: ty.hp, age: 0, fired: false, smokeT: 0, sq, cs: `${sq} ${i + 1}`, bombAt: ty.bombs ? target.clone().setY(0) : null, bombs: ty.bombs || 0, miss });
   }
   const [who, role] = hq(), vars = { B: bearingWords(h), D: compassWord(h), T: ty.name, N: n === 1 ? 'a single bandit' : n === 2 ? 'two bandits' : n === 3 ? 'three bandits' : 'multiple bandits' };
   RADIO.say(who, radioLine(ty.bomber ? COMBAT.bombers : COMBAT.newBandits, vars), { role, cat: 'combat', prio: 2 });
@@ -162,7 +165,8 @@ function spawnBallistic(n) {
   for (let i = 0; i < n; i++) {
     const t = baseTarget(), mesh = enemyMesh('ballistic'); mesh.scale.setScalar(1.3); scene.add(mesh);
     const from = t.p.clone().add(new V3(Math.cos(h) * 70 + rand(-8, 8), 110 + i * 12, Math.sin(h) * 70 + rand(-8, 8)));
-    ENEMIES.push({ kind: 'ballistic', mesh, p: from, v: t.p.clone().sub(from).normalize().multiplyScalar(40), hp: 1, age: 0, tgt: t, speed: 40, smokeT: 0 });
+    const tgt = { p: t.p.clone().add(new V3(rand(-3, 3), 0, rand(-3, 3))), name: t.name };   // a ballistic missile's spread
+    ENEMIES.push({ kind: 'ballistic', mesh, p: from, v: tgt.p.clone().sub(from).normalize().multiplyScalar(40), hp: 1, age: 0, tgt, speed: 40, smokeT: 0 });
   }
   sayOnce('ballistic', 10, () => RADIO.say(RADIO_NAMES.patriot, radioLine(COMBAT.ballistic, { B: bearingWords(h), D: compassWord(h) }), { role: 'ground', cat: 'combat', prio: 3 }));
 }
@@ -231,7 +235,11 @@ function sayKill(src, line) {
 function damageEnemy(e, dmg, src) {
   FX.flash.spawn(e.p, { s0: 1.5, s1: 2.2, life: 0.1, a0: 1 });
   e.hp -= dmg;
-  if (e.hp > 0) { if ((e.kind === 'bandit' || e.kind === 'heli') && !e.smoking && Math.random() < 0.35) enemySay(e.cs, ENEMY_LINES.damaged); e.smoking = true; return; }
+  if (e.hp > 0) {
+    if ((e.kind === 'bandit' || e.kind === 'heli') && !e.smoking && Math.random() < 0.35) enemySay(e.cs, ENEMY_LINES.damaged);
+    if (!e.smoking && e.bombAt && !e.dropT) e.bombAt.addScaledVector(e.miss, 0.5);   // hit on the run in: it bombs wider still
+    e.smoking = true; return;
+  }
   // the enemy side: a wingman reports the loss, or the pilot himself goes out
   const mate = (e.kind === 'bandit' || e.kind === 'armor') && Math.random() < 0.5 && ENEMIES.find(o => o !== e && o.kind === e.kind && enemyAlive(o) && o.cs !== e.cs && e.sq && o.sq === e.sq);
   if (e.kind === 'bandit' || e.kind === 'heli') {
@@ -254,16 +262,116 @@ function baseImpact(p, s, name) {
   BASE_FIRES.push({ p: p.clone(), t: 14 + s * 6, name: name || 'BASE' });
   sayOnce('hit', 5, () => RADIO.say(RADIO_NAMES.tower, radioLine(COMBAT.baseHit), { role: 'tower', cat: 'combat', prio: 4 }));
   if (Math.random() < 0.6) { const b = ENEMIES.find(o => o.kind === 'bandit' && !o.duel && enemyAlive(o)); enemySay(b ? b.cs : ENEMY_NAMES.hq, ENEMY_LINES.baseHit, null, { delay: 1.4 }); }
-  STRESS.bump(0.03);
   if (CFG.shake) camShake = 1;
 }
-/* bombs (ours on armour, theirs on the base) are tracers with gravity; the impact comes through Tracers.onSplash */
-function dropBombStick(e, n) {
-  for (let i = 0; i < n; i++) {
-    const p = e.p.clone(); p.y -= 0.4;
-    const v = e.v.clone().multiplyScalar(0.92); v.x += rand(-0.6, 0.6); v.z += rand(-0.6, 0.6);
-    FX.tracers.spawn(p.addScaledVector(e.v, -i * 0.11), v, { life: 6, len: 0.5, w: 0.16, color: 0x3a3c38, grav: 9.8, splash: 2.4 });
+/* an enemy bomb on the ground (Tracers.onSplash): a structure within its footprint takes the hit (fire, the panel), else a
+   crater; whatever it lands on is knocked out for a while (DAMAGE) */
+function enemyBomb(p) {
+  const t = BASE.targets.find(t => t.name !== 'RUNWAY' && Math.hypot(t.p.x - p.x, t.p.z - p.z) < 3);
+  if (t) baseImpact(new V3(p.x, t.p.y, p.z), 1.1, t.name); else groundHit(p, 2.4);
+  DAMAGE.hit(p, 2.6);
+}
+
+/* ===== Damage on the base: what an enemy bomb / missile (or a bandit shot down onto the base) lands on is out for a while
+   - an air-defence unit (a mount, a launcher, the Patriot radar): down 60–120 s (no tracking, no fire, the barrel
+     drooping, the antenna still), burning, then smoking, back on line with its crater filled;
+   - an aircraft standing at its home (`parked`; in a shelter / hangar only now and then): DAMAGED for 150–300 s (no
+     launch), burning until the crash tender has foamed it (FireScene), then serviced (needsService);
+   - a runway: closed (AIRFIELD.closed) until the repair truck has matted the crater and driven off it (RepairScene),
+     RWY_MAX at most.
+   Caps keep the base working: ≤ DMG_UNITS of the air defence down at once (never the Patriot and the NASAMS both), one
+   runway closed at a time (none while an emergency has one, none within RWY_GAP of the last reopening), ≤ a quarter of
+   the air wing damaged. A hit beyond a cap only
+   burns and craters; a runway crater is patched in a few seconds then. ===== */
+const DMG_UNITS = 0.4, RWY_MAX = 75, RWY_GAP = 120, DMG_NAMES = { aa: 'AA gun', ciws: 'C-RAM', tank: 'tank', patriot: 'Patriot launcher', nasams: 'NASAMS launcher', shorad: 'Avenger', radar: 'Patriot radar' };
+const DAMAGE = {
+  rwy: null,            // the closed runway: { L, x, z (the crater), t (s closed), scene }
+  patches: [],          // runway craters to fill in shortly (hit while the runway couldn't be closed)
+  openAt: -1e9,         // when the last closure ended
+  units() { return this.list || (this.list = [...ALL_AA, ...ALL_SHORAD, ...ALL_CIWS, ...ALL_TANKS, ...ALL_SAMS, BASE.patriotRadar]); },
+  kindOf: u => u === BASE.patriotRadar ? 'radar' : u.sam || (ALL_AA.includes(u) ? 'aa' : ALL_CIWS.includes(u) ? 'ciws' : ALL_TANKS.includes(u) ? 'tank' : 'shorad'),
+  at(u) { return u.at || (u.at = (u.yawG || u).getWorldPosition(new V3()).setY(0)); },
+  closed(L) { return !!this.rwy && this.rwy.L === L; },
+  patriotDown() { return BASE.patriotRadar.downT > 0; },
+  nasamsDown(but) { return ALL_SAMS.filter(m => m.sam === 'nasams' && m !== but).every(m => m.downT > 0); },
+  canDown(u) {
+    const all = this.units(); if (all.filter(o => o.downT > 0).length + 1 > DMG_UNITS * all.length) return false;
+    if (u === BASE.patriotRadar) return !this.nasamsDown();
+    return !(u.sam === 'nasams' && this.patriotDown() && this.nasamsDown(u));
+  },
+  /* an enemy hit at p (blast radius R) */
+  hit(p, R) {
+    if (!BASE) return;
+    for (const u of this.units()) { if (u.downT > 0) continue; const q = this.at(u); if (Math.hypot(q.x - p.x, q.z - p.z) < R + 0.8 && this.canDown(u)) this.knockOut(u); }
+    const cap = Math.max(1, Math.floor(AIRCRAFT.length * 0.25)); let n = AIRCRAFT.filter(a => a.dmgT > 0).length;
+    for (const a of AIRCRAFT) {
+      if (n >= cap || a.dmgT > 0 || a.state !== 'parked') continue;
+      const q = a.mesh.position, d = Math.hypot(q.x - p.x, q.z - p.z), inside = AIRFIELD.sheltered(a.spot);
+      if (inside ? d < a.spot.w / 2 + 0.5 && Math.random() < 0.3 : d < R + a.spec.span * 0.35) { this.damage(a, inside); n++; }
+    }
+    const L = runwayAt(p.x, p.z, 0.3); if (!L) return;
+    if (this.rwy && this.rwy.L === L) return;                                              // closed already: filled with the rest
+    if (!this.rwy && !GROUND_OPS.emerg && T - this.openAt > RWY_GAP) this.close(L, p);   // (open at least RWY_GAP between closures)
+    else this.patches.push({ p: p.clone(), t: 8 });
+  },
+  knockOut(u) {
+    u.downT = rand(60, 120); u.burnT = 25; u.track = null; u.burst = 0;
+    const name = DMG_NAMES[this.kindOf(u)];
+    sayOnce('unitDown', 6, () => RADIO.say(u.radio || RADIO_NAMES.patriot, radioLine(COMBAT.unitDown, { M: name }), { role: 'ground', cat: 'combat', prio: 3 }));
+  },
+  damage(a, inside) {
+    a.dmgT = rand(150, 300); a.burnT = inside ? 0 : 40; a.dmgIn = inside; a.needsService = false;
+    sayOnce('acHit', 6, () => RADIO.say(RADIO_NAMES.tower, radioLine(COMBAT.aircraftHit, { C: a.callsign }), { role: 'tower', cat: 'combat', prio: 3 }));
+    if (!inside && crewSpot(a)) GROUND_OPS.scenes.push(new FireScene(a));
+  },
+  close(L, p) {
+    this.rwy = { L, x: p.x, z: p.z, t: 0 };
+    GROUND_OPS.scenes.push(this.rwy.scene = new RepairScene(this.rwy));
+    RADIO.say(RADIO_NAMES.tower, radioLine(COMBAT.runwayHit, { R: rwyName(L) }), { role: 'tower', cat: 'combat', prio: 4 });
+  },
+  /* the crater(s) on the closed runway filled in (the truck's work done) */
+  filled(c) { for (const it of FX.scorch.items) if (it.on && runwayAt(it.p.x, it.p.z, 0.3) === c.L) FX.scorch.repair(it.p, 0.5); },
+  reopen(c) {
+    if (this.rwy !== c) return;
+    this.filled(c); this.rwy = null; this.openAt = T;
+    RADIO.say(RADIO_NAMES.tower, radioLine(COMBAT.runwayOpen, { R: rwyName(c.L) }), { role: 'tower', cat: AUD.armed ? 'combat' : 'ops', prio: 2 });
+  },
+  update(dt) {
+    if (!BASE) return;
+    for (const u of this.units()) {
+      if (!(u.downT > 0)) continue;
+      u.downT -= dt; u.burnT -= dt;
+      const q = this.at(u); this.smoke(q, u.burnT, dt, 0.6);
+      if (u.downT <= 0) {
+        u.downT = 0; FX.scorch.repair(q, 1.5);
+        if (AUD.armed) sayOnce('unitUp', 6, () => RADIO.say(u.radio || RADIO_NAMES.patriot, radioLine(COMBAT.unitUp, { M: DMG_NAMES[this.kindOf(u)] }), { role: 'ground', cat: 'combat', prio: 1 }));
+      }
+    }
+    for (const a of AIRCRAFT) {
+      if (!(a.dmgT > 0)) continue;
+      a.dmgT -= dt; a.burnT -= dt;
+      if (!a.dmgIn) this.smoke(a.mesh.position, a.burnT, dt, 0.4);
+      if (a.dmgT <= 0) { a.dmgT = 0; a.needsService = true; FX.scorch.repair(a.mesh.position, 1.5); }
+    }
+    if (this.rwy && (this.rwy.t += dt) > RWY_MAX && !(this.rwy.scene && this.rwy.scene.through)) this.reopen(this.rwy);   // never longer (a truck already on its way in fits its work in: RepairScene)
+    for (let i = this.patches.length - 1; i >= 0; i--) if ((this.patches[i].t -= dt) <= 0) { FX.scorch.repair(this.patches[i].p, 0.5); this.patches.splice(i, 1); }
+  },
+  /* a fire on it (burning: flames, black smoke), then a thin smoke while it is out */
+  smoke(p, burn, dt, y) {
+    if (burn > 0) {
+      if (Math.random() < dt * 12) FX.smoke.spawn(new V3(p.x, y, p.z), { s0: 0.7, s1: 3.2, life: 3, a0: 0.6 * Math.min(1, burn / 4), color: 0x262626, v: drift(1.2, rand(0.8, 1.6)) });
+      if (Math.random() < dt * 9) FX.flash.spawn(new V3(p.x + rand(-0.3, 0.3), y + 0.1, p.z + rand(-0.3, 0.3)), { s0: 0.8, s1: 1.2, life: 0.12, a0: 0.9 * Math.min(1, burn / 4), color: 0xff7a20 });
+    } else if (Math.random() < dt * 2.5) FX.smoke.spawn(new V3(p.x, y, p.z), { s0: 0.4, s1: 2.0, life: 2.6, a0: 0.3, color: 0x4a4a48, v: drift(1, rand(0.5, 1)) });
   }
+};
+
+/* bombs (ours on armour, theirs on the base) are tracers with gravity; the impact comes through Tracers.onSplash. An enemy
+   stick is released one bomb every STICK_DT, so it lays a line of craters along the track (splash 2.4 = an enemy bomb) */
+const STICK_DT = 0.15;
+function dropBomb(e) {
+  const p = e.p.clone(); p.y -= 0.4;
+  const v = e.v.clone().multiplyScalar(0.92); v.x += rand(-0.4, 0.4); v.z += rand(-0.4, 0.4);
+  FX.tracers.spawn(p, v, { life: 6, len: 0.5, w: 0.16, color: 0x3a3c38, grav: 9.8, splash: 2.4 });
 }
 
 /* ---- per-frame update ---- */
@@ -283,7 +391,7 @@ function updateCombat(dt) {
     for (const e of ENEMIES) if ((e.kind === 'armor' || e.kind === 'heli') && !e.retreat) { e.retreat = true; e.dir = new V3(e.p.x, 0, e.p.z).normalize(); }
   }
   if (armed) for (const m of ALL_CIWS) {
-    if (m.burst > 0 || (m.cd || 0) > 0 || !m.track || m.track.kind !== 'cruise' || !enemyAlive(m.track)) continue;
+    if (m.burst > 0 || (m.cd || 0) > 0 || m.downT > 0 || !m.track || m.track.kind !== 'cruise' || !enemyAlive(m.track)) continue;
     if (m.track.p.distanceTo(m.yawG.getWorldPosition(_al)) < 40) { m.burst = rand(0.35, 0.6); m.acc = 0; m.burstTarget = m.track; m.lastDitch = true; }
   }
   for (const e of ENEMIES) {
@@ -303,11 +411,12 @@ function updateCombat(dt) {
       e.mesh.position.copy(e.p); orientFrom(e.mesh, _al.copy(e.v).normalize(), 0);
       const iv = e.kind === 'ballistic' ? 0.025 : 0.04;
       e.smokeT += dt; while (e.smokeT > iv) { e.smokeT -= iv; FX.smoke.spawn(e.p.clone(), e.kind === 'ballistic' ? { s0: 0.6, s1: 2.6, life: 2.4, a0: 0.55, smoke: true, v: drift(0.4, 0.1) } : { s0: 0.3, s1: 1.4, life: 1.4, a0: 0.45, smoke: true, v: drift(1, 0.2) }); }
-      if (d < 1.6 || e.p.y < groundH(e.p.x, e.p.z)) { baseImpact(tw, e.kind === 'ballistic' ? 1.8 : 1.3, e.tgt.name); e.dead = true; scene.remove(e.mesh); }
+      if (d < 1.6 || e.p.y < groundH(e.p.x, e.p.z)) { baseImpact(tw, e.kind === 'ballistic' ? 1.8 : 1.3, e.tgt.name); DAMAGE.hit(tw, e.kind === 'ballistic' ? 3.5 : 3); e.dead = true; scene.remove(e.mesh); }
     }
   }
   for (let i = ENEMIES.length - 1; i >= 0; i--) if (ENEMIES[i].dead) ENEMIES.splice(i, 1);
   resolveHits(false);
+  DAMAGE.update(dt);
   for (let i = BASE_FIRES.length - 1; i >= 0; i--) {
     const f = BASE_FIRES[i]; f.t -= dt;
     if (f.t <= 0) { BASE_FIRES.splice(i, 1); continue; }
@@ -319,7 +428,7 @@ function fallStep(e, dt) {          // shot-down aircraft: spinning down in smok
   e.v.y -= 9 * dt; e.v.multiplyScalar(1 - 0.15 * dt); e.p.addScaledVector(e.v, dt);
   e.mesh.position.copy(e.p); e.mesh.rotateX(e.spin * dt);
   e.smokeT += dt; while (e.smokeT > 0.03) { e.smokeT -= 0.03; FX.smoke.spawn(e.p.clone(), { s0: 0.8, s1: 3, life: 2.5, a0: 0.7, color: 0x1e1e1e, v: drift(1, 0.4) }); if (Math.random() < 0.5) FX.flash.spawn(e.p, { s0: 1, s1: 1.4, life: 0.08, a0: 0.9, color: 0xff7a20 }); }
-  if (e.p.y < groundH(e.p.x, e.p.z)) { groundHit(e.p, 2.2); e.dead = true; scene.remove(e.mesh); }
+  if (e.p.y < groundH(e.p.x, e.p.z)) { groundHit(e.p, 2.2); if (e.kind === 'bandit' || e.kind === 'heli') DAMAGE.hit(e.p, 2); e.dead = true; scene.remove(e.mesh); }
 }
 function updateBandit(e, dt, armed, st) {
   if (e.falling) { fallStep(e, dt); return; }
@@ -333,8 +442,11 @@ function updateBandit(e, dt, armed, st) {
   const dc = Math.hypot(e.p.x, e.p.z), ty = ENEMY_TYPES[e.type];
   // bombers (and attack jets) drop their stick when they get over the target; the others may loose a cruise missile on the run in
   if (armed && e.bombAt && e.bombs > 0) {
-    const t = Math.sqrt(2 * e.p.y / 9.8), ahead = e.bombAt.clone().sub(e.p).setY(0), along = ahead.dot(_al.copy(e.v).setY(0).normalize());
-    if (along < e.v.length() * t && along > -4) { dropBombStick(e, e.bombs); e.bombs = 0; if (Math.random() < 0.5) enemySay(e.cs, ENEMY_LINES.bombRun); }
+    if (!e.dropT) {                                  // the stick's middle on the aim point: the release starts half a stick early
+      const t = Math.sqrt(2 * e.p.y / 9.8), ahead = e.bombAt.clone().sub(e.p).setY(0), along = ahead.dot(_al.copy(e.v).setY(0).normalize());
+      if (along < e.v.length() * (t + STICK_DT * (e.bombs - 1) / 2) && along > -4) { e.dropT = 1e-6; if (Math.random() < 0.5) enemySay(e.cs, ENEMY_LINES.bombRun); }
+    }
+    if (e.dropT && (e.dropT -= dt) <= 0) { dropBomb(e); e.bombs--; e.dropT = STICK_DT; }
   }
   if (armed && !e.fired && dc < 85 && dc > 50) { e.fired = true; if (Math.random() < ty.missile + st * 0.25) {
     spawnCruise(e.p.clone()); if (Math.random() < 0.5) enemySay(e.cs, ENEMY_LINES.missile);
