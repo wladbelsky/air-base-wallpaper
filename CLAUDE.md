@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=18`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=20`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -84,6 +84,10 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   (every 2 s) rebuilds when `seasonNow()` changes. Weather (`CFG.weather`): snowfall in winter, leaves in autumn.
 
 ## Airfield (`js/airfield.js`, `js/aircraft.js`)
+- **A count lowered** (`syncAirWing` → `retiring`, `retireAircraft` in `main.js`): one still in `ready` (not pushed back)
+  goes back to `parked`, a helicopter in `spinup` to `spindown` — then it leaves at once; one taxiing out takes off and
+  one up is sent to land (`requestLand`); each leaves the air wing once parked. In the air that takes a few minutes
+  (the approach queue, the taxi home).
 - **Homes**: every aircraft gets a `PARKING` slot when it is built (`AIRFIELD.assignHome`) and keeps it while it flies;
   `release` on dispose. Fighters: a shelter (HAS), else a front-row stand, else a remote stand; heavies: a hangar (the
   big one for `big` types), else a heavy stand; the MQ-9 a small hangar; helicopters a pad. Stand markings are
@@ -172,7 +176,7 @@ Missions fly beyond the screen edge while there is no music. `dispatchFlight` (`
 clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / returned to `VEH_POOL` (`takeVehicle` /
 `dropVehicle`, never disposed); `Drive` moves one along a smooth path. Scenes are objects with `update(dt)`, `done`, `end()`.
 - **Emergency landing**: every 8–15 min in peace (`emTimer`) a jet in orbit declares one (`a.emerg`, smoke `trail`);
-  `canApproach` gives it priority, its runway (`a.rwyL`: the south one with two) is closed while `GROUND_OPS.emerg`; it stops on the runway
+  `canApproach` gives it priority, its runway (`a.rwyL`: the south one with two) is closed while `GROUND_OPS.emerg` — meanwhile `AIRFIELD.landR()` sends the other arrivals to the north one (shared with departures, as with one runway); it stops on the runway
   (`emergency`), `EmergencyScene`: two crash tenders from the fire station foam it, a tug tows it home (`towed`, via
   `AIRFIELD.homeRoute`), the runway opens as soon as it is towed off it (`GROUND_OPS.emerg` cleared: the tow may
   queue behind departures). The tenders and the tug fade in at the station; the tenders keep to their own lanes; the
@@ -319,8 +323,13 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - `disposeTree` skips materials with `userData.shared` (everything from `M()`, `sharedMat()` and `DECK_MARK_MATS`)
   and sprite geometry (three.js shares one geometry across all Sprites). New cached materials must set
   `userData.shared = true`.
-- **Static meshes are merged per material** via `mergeStatic(root, dynamicNodes)` at the end of each
-  builder (the base, airframes, enemies). Every node that moves, rotates or toggles `visible` at runtime
+- **Static meshes are merged** via `mergeStatic(root, dynamicNodes)` at the end of each builder (the base, airframes,
+  enemies): per material, and **all plain colours together** — a material from `M(colour)` with no options is
+  `userData.plain`; their meshes become one mesh in `PLAIN_MAT` (vertex colours, the same Phong look; legacy colour
+  management makes the baked colour identical). Anything else (options, maps, transparency, `sharedMat` seasonal
+  materials, windows) keeps its own merged mesh. So don't find a part by its material colour after the build (name the
+  group: e.g. the gear is `'gear'`), and don't recolour an `M()` material expecting merged parts to follow; swapping the
+  material on a merged mesh works (a material without `vertexColors` ignores the baked colours: `wreckArmor`). Every node that moves, rotates or toggles `visible` at runtime
   (mount yaw/pitch/barrel groups, radars, door leaves / panels, gear, rotors, blades, props, boom / hoses, searchlight
   holders, enemy rotors / turrets) **must be listed as dynamic**, or it gets baked into the static mesh. Code must not keep
   references to static meshes after the builder returns.
@@ -340,6 +349,15 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   guard-tower and sky searchlights are beams (`noLight`).
 - Main loop (`frame`): FPS limit keeps cadence via `frameDue`; simulation runs in ≤50 ms sub-steps
   (stalls capped at 0.25 s). `onBeat` does nothing while `paused`.
+- **Shader warm-up** (`warmShaders`, end of `init`, under the splash): `renderer.compile` with every enemy template in
+  the scene (the idle FX pools are in it too, compile covers invisible objects) — a first fight otherwise compiled ~a
+  dozen programs mid-action (tens to hundreds of ms each in WE's ANGLE / D3D). A new kind of object that first appears
+  in a fight should be added there. Turning a light's `visible` (or adding a light) recompiles every program.
+- **The panel's DOM** is written only where a value changed (`setTxt` / `setCls`, the clock once a minute, nothing
+  while `showPanel` is off; the meter in whole percent): it was ~28% of the simulation's time.
+- Measured 2026-10 (peace, 27 aircraft): ~370 main-pass draw calls (~500 with the shadow pass; ~450 / ~660 before the
+  plain-colour merge), ~0.25 ms per simulation step in the test container. `vehHoldAir` skips aircraft too far for
+  their next 8 units to matter (the route sampling is the costly part).
 
 ## Running & testing
 - WE: "Open from File" → `project.json` (audio listener + properties come from WE).

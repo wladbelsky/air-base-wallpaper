@@ -6,9 +6,12 @@ function M(color, o) {
   if (!MAT_CACHE[k]) {
     MAT_CACHE[k] = new THREE.MeshPhongMaterial(Object.assign({ color: color, flatShading: true, shininess: 8, specular: 0x151515 }, o || {}));
     MAT_CACHE[k].userData.shared = true;   // cached: never disposed with a model
+    if (!o) MAT_CACHE[k].userData.plain = true;   // just a colour: mergeStatic may bake it into vertex colours (PLAIN_MAT)
   }
   return MAT_CACHE[k];
 }
+/* every plain M(colour) at once: the colour comes from the vertices (mergeStatic) */
+const PLAIN_MAT = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 8, specular: 0x151515 }); PLAIN_MAT.userData.shared = true;
 /* Free a removed model's GPU resources (cached materials and the sprite geometry all sprites share are kept) */
 function disposeTree(root) {
   root.traverse(o => {
@@ -16,9 +19,10 @@ function disposeTree(root) {
     if (o.material && !o.material.userData.shared) o.material.dispose();
   });
 }
-/* Static meshes that share a material are merged into one mesh per material: far fewer draw calls
-   in both the shadow and the main pass. `dynamic` nodes (moving or toggled parts) stay separate;
-   the static meshes inside each of them are merged the same way.                                  */
+/* Static meshes that share a material are merged into one mesh per material — and all those with a plain M(colour) into
+   one mesh in PLAIN_MAT, their colours baked into the vertices: far fewer draw calls in both the shadow and the main
+   pass. `dynamic` nodes (moving or toggled parts) stay separate; the static meshes inside each of them are merged the
+   same way. (A material may be swapped on a merged mesh later: one without vertexColors ignores the baked colours.) */
 const _mInv = new THREE.Matrix4(), _mRel = new THREE.Matrix4();
 function concatF32(arrs) { let n = 0; for (const a of arrs) n += a.length; const out = new Float32Array(n); let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; } return out; }
 function mergeStatic(root, dynamic) {
@@ -29,7 +33,7 @@ function mergeStatic(root, dynamic) {
       if (skip.has(c)) { nested.push(c); continue; }
       const mt = c.material;
       if (c.isMesh && !c.children.length && mt && !Array.isArray(mt) && !mt.transparent && !mt.map && c.geometry.attributes.normal) {
-        const key = mt.uuid + '|' + c.castShadow + '|' + c.receiveShadow;
+        const key = (mt.userData.plain ? 'plain' : mt.uuid) + '|' + c.castShadow + '|' + c.receiveShadow;
         (groups.get(key) || groups.set(key, []).get(key)).push(c);
       }
       walk(c);
@@ -37,17 +41,19 @@ function mergeStatic(root, dynamic) {
   })(root);
   for (const list of groups.values()) {
     if (list.length < 2) continue;
-    const pos = [], nor = [];
+    const vc = list.some(m => m.material !== list[0].material), pos = [], nor = [], col = [];   // several colours: baked into the vertices
     for (const m of list) {
       const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
       g.applyMatrix4(_mRel.multiplyMatrices(_mInv, m.matrixWorld));
       pos.push(g.attributes.position.array); nor.push(g.attributes.normal.array);
+      if (vc) { const c = m.material.color, n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } col.push(a); }
       g.dispose(); m.geometry.dispose(); m.removeFromParent();
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(concatF32(pos), 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(concatF32(nor), 3));
-    const mesh = new THREE.Mesh(geo, list[0].material);
+    if (vc) geo.setAttribute('color', new THREE.BufferAttribute(concatF32(col), 3));
+    const mesh = new THREE.Mesh(geo, vc ? PLAIN_MAT : list[0].material);
     mesh.castShadow = list[0].castShadow; mesh.receiveShadow = list[0].receiveShadow;
     root.add(mesh);
   }
@@ -228,8 +234,8 @@ function buildAAGun(parent, x, z, center, half) {
   m.search = new THREE.Group(); m.search.position.set(-0.55, 0.86, 0); m.yawG.add(m.search);
   box(m.search, 0.07, 0.22, 0.72, 0x6a6f60, 0.02, 0.06, 0).rotation.z = 0.25; box(m.search, 0.12, 0.05, 0.1, DARK, -0.04, -0.04, 0);
   m.pitchG.position.set(0.15, 0.55, 0);
-  const dish = cyl(m.pitchG, 0.17, 0.17, 0.05, 10, 0x6a6f60, 0.05, 0.3, 0); dish.rotation.z = -Math.PI / 2;   // tracking radar, facing along the guns
   m.barrelG = new THREE.Group(); m.pitchG.add(m.barrelG);
+  const dish = cyl(m.barrelG, 0.17, 0.17, 0.05, 10, 0x6a6f60, 0.05, 0.3, 0); dish.rotation.z = -Math.PI / 2;   // tracking radar, facing along the guns (on the barrel group: merged with the guns)
   for (const s of [-1, 1]) { box(m.barrelG, 0.5, 0.18, 0.12, OLIVE, 0.25, 0, s * 0.18); const b = cyl(m.barrelG, 0.03, 0.04, 1.3, 5, DARK, 1.0, 0, s * 0.18); b.rotation.z = -Math.PI / 2; }
   m.muzzle = m.muzzles[0];
   return m;

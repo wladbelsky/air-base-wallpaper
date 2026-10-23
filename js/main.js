@@ -105,8 +105,18 @@ function init() {
 
   ready = true;
   window.addEventListener('resize', resize);
-  buildUI(); buildAirWing(); applySettings(); resize(); updateEnvironment();
+  buildUI(); buildAirWing(); applySettings(); resize(); updateEnvironment(); updateLights();
+  warmShaders();
   requestAnimationFrame(frame);
+}
+/* compile now, under the start-up splash, every shader a fight needs (enemy models, tracers, flashes, smoke…): the first
+   fight would otherwise stall on ~a dozen compiles (tens to hundreds of ms each in Wallpaper Engine's ANGLE / D3D) right
+   as the music starts. renderer.compile covers invisible objects too (the idle FX pools); the enemy templates are built
+   here (enemyMesh caches them) and their clones only borrowed for it — no GPU buffers are made, nothing to dispose. */
+function warmShaders() {
+  const g = new THREE.Group();
+  for (const k of ['cruise', 'ballistic', ...Object.keys(ENEMY_TYPES), ...Object.keys(HELI_TYPES), ...Object.keys(ARMOR_TYPES)]) g.add(enemyMesh(k));
+  scene.add(g); renderer.compile(scene, camera); scene.remove(g);
 }
 
 /* ---- air wing from the per-type counts (a fresh build: everything starts at its home) ---- */
@@ -150,6 +160,8 @@ function retireAircraft() {
   for (let i = AIRCRAFT.length - 1; i >= 0; i--) {
     const a = AIRCRAFT[i]; if (!a.retiring) continue;
     if (isDown(a) && a.t > 1) { a.dispose(); AIRCRAFT.splice(i, 1); gone = true; }
+    else if (a.state === 'ready') { a.state = 'parked'; a.t = 0; }                  // not pushed back yet: the launch is called off (the tug turns away)
+    else if (a.state === 'spinup') { a.state = 'spindown'; a.t = 0; }               // a helicopter not off its pad yet: shuts down
     else if (a.canLand()) a.requestLand();
   }
   if (gone) { AIRFIELD.updateMarks(); buildList(); }
@@ -586,15 +598,19 @@ function updateFlybys(dt) {
 /* ---- the base: radar, searchlights (guard towers sweep the ground outside, the sky lights the sky) ---- */
 const _w = new V3();
 function updateSite(dt) {
-  for (const r of BASE.radars) r.rotation.y += dt * 1.4;
+  for (const r of BASE.radars) r.rotation.y = (r.rotation.y + dt * 1.4) % TAU;
   // air-defence radars in a fight: the AA guns' search antennas spin up (and run down after); the Patriot radar's head
-  // slews toward the nearest air threat (kept while it lives) and back to its sector in peace — a phased array, it doesn't spin
+  // slews toward the nearest air threat (looked for again every 3 s) and back to its sector in peace — a phased array, it
+  // doesn't spin
   const armed = AUD.armed;
-  for (const m of BASE.mounts.aa) if (m.search) { m.sv = (m.sv || 0) + clamp((armed ? 4 : 0) - (m.sv || 0), -1.5 * dt, 1.5 * dt); if (m.sv) m.search.rotation.y += m.sv * dt; }
+  for (const m of BASE.mounts.aa) if (m.search) { m.sv = (m.sv || 0) + clamp((armed ? 4 : 0) - (m.sv || 0), -1.5 * dt, 1.5 * dt); if (m.sv) m.search.rotation.y = (m.search.rotation.y + m.sv * dt) % TAU; }
   const pr = BASE.patriotRadar;
   if (pr && pr.head) {
     if (pr.tgt && !(armed && enemyAlive(pr.tgt))) pr.tgt = null;
-    if (!pr.tgt && armed) { let best = 1e9; for (const e of ENEMIES) if (e.kind !== 'armor' && enemyAlive(e)) { const d = Math.hypot(e.p.x - pr.position.x, e.p.z - pr.position.z); if (d < best) { best = d; pr.tgt = e; } } }
+    if (armed && (!pr.tgt || (pr.pickT = (pr.pickT || 0) - dt) <= 0)) {
+      pr.pickT = 3; let best = 1e9;
+      for (const e of ENEMIES) if (e.kind !== 'armor' && enemyAlive(e)) { const d = Math.hypot(e.p.x - pr.position.x, e.p.z - pr.position.z); if (d < best) { best = d; pr.tgt = e; } }
+    }
     const want = pr.tgt ? angleWrap(Math.atan2(-(pr.tgt.p.z - pr.position.z), pr.tgt.p.x - pr.position.x) - pr.rotation.y) : armed ? pr.head.rotation.y : 0;
     pr.head.rotation.y = angleWrap(approachAngle(pr.head.rotation.y, want, dt * 0.35));
   }
@@ -791,45 +807,49 @@ function buildUI() {
     sites.appendChild(row);
   }
 }
+/* the panel's DOM is written only where a value changed (4×/s: a rewrite invalidates style and layout every time) */
+const setTxt = (el, t) => { if (el._t !== t) { el._t = t; el.textContent = t; } };
+const setCls = (el, c) => { if (el._c !== c) { el._c = c; el.className = c; } };
+const UI_EL = {}, uiEl = id => UI_EL[id] || (UI_EL[id] = document.getElementById(id));
+let uiMinute = -1;
 function updateUI() {
+  if (!CFG.showPanel) return;                                // hidden: nothing to show (it catches up when shown)
   // window / panel size or the row height changed: lay the pages out again (read before the writes below: no forced reflow)
   if (PAGER.rows.length && (pageSize() !== PAGER.size || PAGER.rowH !== PAGER.shownH)) showPage();
-  const now = getNow();
-  document.getElementById('clock').textContent = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const now = getNow(), mi = now.getHours() * 60 + now.getMinutes();
+  if (mi !== uiMinute) { uiMinute = mi; setTxt(uiEl('clock'), now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })); }
   const e = ENV.elev;
-  document.getElementById('daystate').textContent = (e > 6 ? 'DAY' : e > -6 ? 'TWILIGHT' : 'NIGHT') + ' · ' + TERRAIN.season.toUpperCase();
-  const as = document.getElementById('audiostate');
+  setTxt(uiEl('daystate'), (e > 6 ? 'DAY' : e > -6 ? 'TWILIGHT' : 'NIGHT') + ' · ' + TERRAIN.season.toUpperCase());
+  const as = uiEl('audiostate');
   const arming = AUD.active && !AUD.armed && AUD.soundStart >= 0;
   // base status: on alert in silence, unknown contacts while the sound arms, air raid once armed
-  as.textContent = (AUD.holding ? `◐ NO CONTACTS · ${Math.max(0, AUD.holdUntil - RT()).toFixed(0)}s` : AUD.armed ? '● AIR RAID' : arming ? `◌ UNKNOWN CONTACTS · ${Math.max(0, ARM_DELAY - (RT() - AUD.soundStart)).toFixed(0)}s` : '○ ON ALERT') + (FILE_AUDIO.playing ? ' (FILE)' : AUD.demo && DEMO.on ? ' (DEMO)' : '');
-  as.className = AUD.armed ? 'on' : '';
-  const th = document.getElementById('threat');
-  if (th) { const n = Math.round(STRESS.level * 10); th.textContent = '▮'.repeat(n) + '▯'.repeat(10 - n) + '  ' + STRESS.label; th.className = 'lv' + Math.min(3, Math.floor(STRESS.level * 4)); }
+  setTxt(as, (AUD.holding ? `◐ NO CONTACTS · ${Math.max(0, AUD.holdUntil - RT()).toFixed(0)}s` : AUD.armed ? '● AIR RAID' : arming ? `◌ UNKNOWN CONTACTS · ${Math.max(0, ARM_DELAY - (RT() - AUD.soundStart)).toFixed(0)}s` : '○ ON ALERT') + (FILE_AUDIO.playing ? ' (FILE)' : AUD.demo && DEMO.on ? ' (DEMO)' : ''));
+  setCls(as, AUD.armed ? 'on' : '');
+  const th = uiEl('threat');
+  if (th) { const n = Math.round(STRESS.level * 10); setTxt(th, '▮'.repeat(n) + '▯'.repeat(10 - n) + '  ' + STRESS.label); setCls(th, 'lv' + Math.min(3, Math.floor(STRESS.level * 4))); }
   let airN = 0;
   for (const a of AIRCRAFT) {
-    const [txt, cls] = a.retiring ? ['RETIRING', 'wait'] : a.status; a.ui.st.textContent = txt; a.ui.st.className = 'st ' + cls;
+    const [txt, cls] = a.retiring ? ['RETIRING', 'wait'] : a.status; setTxt(a.ui.st, txt); setCls(a.ui.st, 'st ' + cls);
     if (a.state !== 'parked') airN++;
-    const b = a.ui.btn;
-    if (a.canLaunch()) { b.textContent = 'LAUNCH'; b.disabled = false; b.className = 'act up'; }
-    else if (a.canLand()) { b.textContent = 'RECOVER'; b.disabled = false; b.className = 'act down'; }
-    else if (a.landReq) { b.textContent = 'QUEUED'; b.disabled = true; b.className = 'act'; }
-    else { b.textContent = '···'; b.disabled = true; b.className = 'act'; }
+    const b = a.ui.btn, [bt, bd, bc] = a.canLaunch() ? ['LAUNCH', false, 'act up'] : a.canLand() ? ['RECOVER', false, 'act down'] : a.landReq ? ['QUEUED', true, 'act'] : ['···', true, 'act'];
+    setTxt(b, bt); setCls(b, bc); if (b.disabled !== bd) b.disabled = bd;
   }
-  document.getElementById('count').textContent = `${airN}/${AIRCRAFT.length}`;
+  setTxt(uiEl('count'), `${airN}/${AIRCRAFT.length}`);
   const engaged = AUD.armed && CFG.fire > 0;
   for (const s of SITES) {
     const hit = BASE_FIRES.some(f => s.fires.includes(f.name));
     const [txt, cls] = hit ? ['DAMAGED', 'wait'] : engaged && s.busy() ? ['ENGAGING', 'busy'] : s.tp === 'TWR' && s.busy() ? ['RUNWAY IN USE', 'air'] : ['ON ALERT', 'deck'];
-    s.ui.st.textContent = txt; s.ui.st.className = 'st ' + cls;
+    setTxt(s.ui.st, txt); setCls(s.ui.st, 'st ' + cls);
   }
-  const chk = document.getElementById("autoChk"); if (chk.checked !== CFG.auto) chk.checked = CFG.auto;
+  const chk = uiEl('autoChk'); if (chk.checked !== CFG.auto) chk.checked = CFG.auto;
 }
 function updateMeter() {
-  const bars = document.getElementById('meter').children;
+  if (!CFG.showPanel) return;
+  const bars = uiEl('meter').children;
   for (let i = 0; i < bars.length; i++) {
     const bin = Math.floor(Math.pow(i / bars.length, 1.4) * 60);
-    const v = (AUD.raw[bin] + AUD.raw[64 + bin]) / 2;
-    bars[i].style.transform = `scaleY(${Math.max(0.06, Math.min(1, v * 1.4))})`;
+    const v = (AUD.raw[bin] + AUD.raw[64 + bin]) / 2, k = Math.round(Math.max(0.06, Math.min(1, v * 1.4)) * 100);   // (whole percent: unchanged bars aren't touched)
+    if (bars[i]._k !== k) { bars[i]._k = k; bars[i].style.transform = `scaleY(${k / 100})`; }
   }
 }
 

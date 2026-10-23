@@ -243,6 +243,7 @@ function vehHoldAir(d, own, p, m) {
     const q = a.mesh.position, moving = Math.abs(a.v || 0) > 0.05 || a.state === 'pushback';
     if (!moving) { if (Math.hypot(q.x - p.x, q.z - p.z) < 0.5 + a.spec.len * 0.35) return true; continue; }
     const r = 1.0 + a.spec.len * 0.5, rIn = 0.5 + a.spec.span * 0.35;                  // stop well short of its way; "in it" = under it
+    if (a.state !== 'pushback' && Math.hypot(q.x - m.x, q.z - m.z) > 12 + r) continue;   // its next 8 units can't reach us (the route sampling below is the costly part)
     if (Math.hypot(q.x - m.x, q.z - m.z) < rIn) continue;                                // in its way already: get out of it
     // its taxi route over the next stretch (it may be about to turn toward us), else straight on along its nose
     if (a.dcurve && a.ds < a.dlen) {

@@ -24,7 +24,7 @@ const canReceive = (a, kind) => a.spec.refuel === (kind === 'boom' ? 'boom' : 'p
 const TANKER = registerMissionWorld({
   // first pass 3-5 min after a start / rebuild: the tanker is launched ~90 s before it, not with the first flights
   ev: null, timer: rand(180, 300), miss: 0, next: null,
-  reset() { this.ev = null; this.timer = rand(180, 300); this.miss = 0; this.next = null; },
+  reset() { this.ev = null; this.timer = rand(180, 300); this.miss = 0; this.next = null; this.noKindT = 0; },
   update(dt) {
     if (this.ev) { this.tick(this.ev, dt); return; }
     if (combatOn()) return;                                      // peace only: the timer waits out the fight
@@ -35,8 +35,10 @@ const TANKER = registerMissionWorld({
   /* the tanker kind of the next pass: one that has a tanker and receivers in the air wing */
   nextKind() {
     if (this.next && AIRCRAFT.some(a => a.spec.tankKind === this.next && !a.retiring)) return this.next;
+    if (this.noKindT > T) return null;                            // none in the air wing: looked again every few seconds, not every step
     const kinds = ['boom', 'drogue'].filter(k => AIRCRAFT.some(a => a.spec.tankKind === k && !a.retiring) && AIRCRAFT.some(a => canReceive(a, k) && !a.retiring));
-    const up = kinds.filter(k => AIRCRAFT.some(a => canReceive(a, k) && a.aloft && !a.retiring));   // rather one whose receivers are up (a drogue pass waits for helicopters)
+    const up = kinds.length > 1 ? kinds.filter(k => AIRCRAFT.some(a => canReceive(a, k) && a.aloft && !a.retiring)) : kinds;   // rather one whose receivers are up (a drogue pass waits for helicopters)
+    if (!kinds.length) this.noKindT = T + 5;
     return this.next = up.length ? pick(up) : kinds.length ? pick(kinds) : null;
   },
   /* a pass is due and no tanker of that kind is up: send one (auto flight ops; runs every step, so no allocations) */

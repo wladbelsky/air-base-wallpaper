@@ -187,3 +187,18 @@ for (const [name, pick] of [['an open stand', "a.spec.key === 'f16' && PARKING.s
     expect((await wp.until(() => __a.state === 'orbit', 400)).done).toBe(true);
   });
 }
+
+test('with two runways, an emergency closing the south one sends the other arrivals to the north one (no holding for minutes)', async ({ wp }) => {
+  await airborne(wp, "a.spec.key === 'f15' && /\\s[12]$/.test(a.callsign)");
+  await wp.run(() => { CFG.runways = 2; window.__a = __f[0]; window.__b = __f[1]; GROUND_OPS.startEmergency(__a); });
+  expect((await wp.until(() => __a.state === 'emergency', 400)).done).toBe(true);
+  expect(await wp.run(() => __a.rwyL === BASE_LAYOUT.rwy2)).toBe(true);
+  await wp.run(() => __b.requestLand());
+  const r = await wp.until(() => __b.state === 'rollout' || __b.state === 'taxi_in', 300);
+  expect(r.violations).toEqual([]);
+  expect(r.done, 'it lands while the emergency is still on').toBe(true);
+  expect(await wp.run(() => [__b.rwyL === RW, !!GROUND_OPS.emerg])).toEqual([true, true]);
+  const home = await wp.until(() => __a.state === 'parked' && __b.state === 'parked' && !GROUND_OPS.scenes.some(s => s instanceof EmergencyScene), 600);
+  expect(home.violations).toEqual([]);
+  expect(home.done).toBe(true);
+});

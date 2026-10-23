@@ -95,7 +95,9 @@ const AIRFIELD = {
      the runway an aircraft actually uses (a.rwyL, fixed when its approach starts), so the mode may change any time ---- */
   setOf(L) { return L === RW2 ? this.rwy2 : this.rwy; },
   onRunway(a) { return this.rwy.has(a) || this.rwy2.has(a); },
-  landR: () => CFG.runways > 1 ? RW2 : RW,
+  // the landing runway: the south one with two — but the north one (shared with departures, as with one runway) while
+  // an emergency has the south one closed (they would all hold in orbit for minutes)
+  landR() { if (CFG.runways < 2) return RW; const e = GROUND_OPS.emerg; return e && e.rwyL === RW2 ? RW : RW2; },
   /* the south runway is drawn while in use, even after a switch to one runway (BASE.setRunways, from update) */
   r2InUse() { if (this.rwy2.size) return true; for (const a of AIRCRAFT) if (a.rwyL === RW2 && (this.arrivals.has(a) || a.cross)) return true; return false; },
   eta(a) { return a.path ? (a.path.length - a.ps) / Math.max(1, a.v) : 99; },

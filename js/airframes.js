@@ -12,7 +12,7 @@ function glowSprite(g, x, y, z, s, color) {
    'b4' 2x2 bogie, 'b6' 3x2 bogie; h = ground to the gear bay. Light struts and doors, dark tyres with light hubs. The
    group hangs from the bay (y = h) so tickGear folds it up into it. */
 function gear(g, legs, h) {
-  const gg = new THREE.Group(); gg.position.y = h; g.add(gg);
+  const gg = new THREE.Group(); gg.name = 'gear'; gg.position.y = h; g.add(gg);
   const S = M(0xb8bcc0), TY = M(0x1e1e1e), st = clamp(h * 0.2, 0.022, 0.04);
   legs.forEach(([x, z, kind], i) => {
     kind = kind || (i ? 's' : 'n');

@@ -358,7 +358,7 @@ test('landing gear: every airframe stands on its wheels, the gear folds away in 
     const out = [];
     for (const [n, f] of Object.entries({ buildF15, buildF16, buildF22, buildF35, buildA10, buildE3, buildKC46, c130: () => buildC130('c130'), buildC17, buildMQ9 })) {
       const m = f(), g = m.group; g.updateMatrixWorld(true);
-      let gr = null; g.traverse(o => { if (!gr && o.isGroup && o !== g && o.position.y > 0.05 && o.children.some(c => c.isMesh && c.material.color && c.material.color.getHex() === 0x1e1e1e)) gr = o; });
+      const gr = g.getObjectByName('gear');
       if (!gr) { out.push(`${n}: no gear`); disposeTree(g); continue; }
       const bb = new THREE.Box3().setFromObject(gr);
       if (Math.abs(bb.min.y) > 0.01) out.push(`${n}: wheels at y ${bb.min.y.toFixed(3)}`);
@@ -392,6 +392,9 @@ test("airfield: floodlight masts stand clear of every taxiing aircraft (fuselage
       ways.push(tugWay({ spec: S }, s, D, s.z - S.len / 2 - 0.75));
       if (s.row === 'a') for (const sg of [-1, 1]) { const C = nearestDepot(s.x), sx = s.x + sg * o, dir = Math.sign(C.x - sx) || 1; ways.push([C.in, [C.x, C.z], [sx + dir * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, tz]]); }
     }
+    // the pad crews up the corridors (ServiceScene), the crash tenders and the emergency tug out of the fire station
+    for (const s of PARKING.heli) { const D = HELI_DEPOT, x = s.x + 3, zc = s.z + 3, sg = Math.sign(D.z - zc) || 1; for (const z of [s.z - 1.2, s.z + 1.1]) ways.push([D.in, [D.x, D.z], [D.x, zc + sg * 1.2], [D.x + 1.4, zc], [x - 1.4, zc], [x, zc - 1.2], [x, z]]); }
+    for (const R of [RW, BASE_LAYOUT.rwy2]) for (let x = R.x0 + 6; x < R.x1 - 6; x += 8) for (const dr of FIRE_DOORS) { const to = [x + Math.sign(dr.fx - FIRE_DOORS[1].fx) * 2.4, R.z + R.w / 2 + 1.3]; ways.push([[dr.fx, dr.iz], [dr.fx, dr.z], [dr.fx, R.z + R.w / 2 + 2.6], [lerp(to[0], dr.fx, Math.min(1, 3 / (Math.abs(to[0] - dr.fx) || 1))), to[1] + 0.2], to]); }
     const out = [];
     for (const [mx, mz] of BASE_LAYOUT.masts) {
       for (const pts of ways) {

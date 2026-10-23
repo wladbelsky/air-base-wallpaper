@@ -235,3 +235,17 @@ for (const seed of [SEED, SEED + 100, SEED + 200]) {
     expect(seen).toContain('rollout');
   });
 }
+
+test('a count lowered: one still getting ready (not pushed back / not off its pad) calls the launch off and leaves at once; one up lands first', async ({ wp }) => {
+  await quietBase(wp);
+  await wp.run(() => {
+    window.__j = AIRCRAFT.filter(a => a.spec.key === 'f35'); window.__h = AIRCRAFT.filter(a => a.spec.key === 'uh60');
+    __j[0].requestLaunch(); __h[0].requestLaunch();
+  });
+  await wp.sim(1);
+  expect(await wp.run(() => [__j[0].state, __h[0].state])).toEqual(['ready', 'spinup']);
+  await wp.run(() => __t.props({ f35count: 0, uh60count: 0 }));
+  const r = await wp.until(() => !AIRCRAFT.some(a => a.spec.key === 'f35' || a.spec.key === 'uh60'), 10);
+  expect(r.violations).toEqual([]);
+  expect(r.done, 'all gone within 10 s').toBe(true);
+});
