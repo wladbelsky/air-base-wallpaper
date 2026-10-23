@@ -64,23 +64,25 @@ for (const c of CASES) {
   });
 }
 
-test('takeoff: the roll uses half the runway or more, the turn toward the orbit comes past its end', async ({ wp }) => {
+test('takeoff: the roll uses half the runway or more, it keeps accelerating after lift-off, the turn toward the orbit comes past its end', async ({ wp }) => {
   await quietBase(wp);
   for (const k of ['f16', 'c17']) {
-    await wp.run((k) => { window.__a = AIRCRAFT.find(a => a.spec.key === k); __a.requestLaunch(); window.__lift = null; window.__turn = null; }, k);
+    await wp.run((k) => { window.__a = AIRCRAFT.find(a => a.spec.key === k); __a.requestLaunch(); window.__lift = null; window.__turn = null; window.__vEnd = null; }, k);
     for (let i = 0; i < 1600; i++) {
       await wp.sim(0.25);
       const done = await wp.run(() => {
         if (__a.state === 'climb' && __lift === null) __lift = __a.mesh.position.x;
+        if (__lift !== null && __vEnd === null && __a.mesh.position.x > 64) __vEnd = __a.v / __a.spec.vR;
         if (__lift !== null && __turn === null && Math.abs(Math.atan2(__a.fwd.z, __a.fwd.x)) > 0.09) __turn = __a.mesh.position.x;
         return __turn !== null || __a.state === 'orbit';
       });
       if (done) break;
     }
-    const r = await wp.run(() => ({ lift: __lift, turn: __turn }));
+    const r = await wp.run(() => ({ lift: __lift, turn: __turn, vEnd: __vEnd }));
     const frac = (r.lift - (-64 + 4.5)) / (64 - (-64 + 4.5));
     expect(frac, `${k} lift-off point`).toBeGreaterThan(k === 'c17' ? 0.55 : 0.4);
     expect(r.turn, `${k} first turn`).toBeGreaterThan(64);
+    expect(r.vEnd, `${k} still speeding up after lift-off: speed over the runway end / vR`).toBeGreaterThan(k === 'c17' ? 1.2 : 1.4);
   }
 });
 

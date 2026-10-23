@@ -22,7 +22,12 @@ const BASE_LAYOUT = {
   fence: [[-80, -6], [-80, -56], [-72, -64], [72, -64], [80, -56], [80, 60], [72, 68], [-25, 68], [-61, 68], [-72, 68], [-80, 60], [-80, 32], [-108, 32], [-108, -6]],
   gate: 7,                                                  // fence segment with the main gate (index of its first point)
   towers: [2, 4, 6, 9, 12],                                 // fence corners with a guard tower
-  fuel: [[-47, -40], [-40, -44], [-35, -40]], FUEL_R: 1.85,  // fuel farm tanks (the spur road runs in between)
+  fuel: [[-47, -40], [-40, -44], [-35, -40]], FUEL_R: 1.85,
+  // vehicle sheds with a roll-up door [x, z, w, d, door face 'n' / 'e' / 's' / 'w', depot point this far in front of the
+  // door]: the crew depots west / east (the cargo yard) and the heliport's; ground vehicles set off from inside and drive
+  // back in (groundops: garageDepot)
+  garages: [[-70.6, -5.8, 3.6, 3.6, 'e', 2.6], [41.2, -9.2, 3.4, 3.6, 's', 1.6], [2.8, 30.4, 3.4, 3.4, 'e', 1.0]],
+  fireStation: [-4, 32, 6, 4.5],                            // x, z, w, d: three roll-up doors on its north side  // fuel farm tanks (the spur road runs in between)
   // with one runway the south strip is a storage yard and scrub: these footprints [x, z, r] (and the fire station's way
   // up to the runway, x −9…1) are kept free of the trees there (TERRAIN.fill)
   fillYard: [[-38, 19, 6.5], [-22, 18, 6.5], [22, 18.5, 3.5], [30, 20, 3.5], [48, 18.5, 3], [59, 15, 3]]   // … and the AA gun
@@ -81,6 +86,7 @@ function layoutParking() {
   return P;
 }
 const PARKING = layoutParking();
+const GARAGE_DOORS = [];   // roll-up doors of the fire station (the first three) and the vehicle sheds (rollDoors; opened in GROUND_OPS.update)
 
 /* ===== models ===== */
 const CONC = 0x8d8c86, ASPH = 0x3c3e40, ASPH2 = 0x4a4c4e, WALL = 0x8f8a7c, WALL2 = 0x7d796e;
@@ -169,6 +175,38 @@ function buildRadar(p, x, z) {
   box(ant, 0.5, 0.15, 0.15, DARK, 0.05, 0.3, 0);
   navLights(g, [[0, 4.3, 0.45, 0xff2020]], { period: 1.6, duty: 0.3 }, 1.0);
   return ant;
+}
+/* a door on the `face` side of a building centred (cx, cz), w × d, `o` along the side: its centre on the wall (fx, fz),
+   the point `out` in front of it (x, z) and one inside, 2.3 behind the wall (ix, iz: a vehicle there is hidden) */
+const FACE = { n: [0, -1], e: [1, 0], s: [0, 1], w: [-1, 0] };
+function doorAt(cx, cz, w, d, face, o, out) {
+  const [nx, nz] = FACE[face], half = nx ? w / 2 : d / 2, fx = cx + nx * half + (nx ? 0 : o), fz = cz + nz * half + (nz ? 0 : o);
+  return { fx, fz, nx, nz, x: fx + nx * out, z: fz + nz * out, ix: fx - nx * 2.3, iz: fz - nz * 2.3 };
+}
+/* roll-up doors (n, dw wide, dh high, spaced `gap`) on a building, a dark opening behind each (a vehicle driving through
+   is hidden by the solid building inside). Returns GARAGE_DOORS entries: doorAt's points plus g (dynamic: scaled up to
+   roll it open) and k (open 0..1) */
+function rollDoors(p, cx, cz, w, d, face, n, dw, dh, gap, c, out) {
+  const res = [];
+  for (let i = 0; i < n; i++) {
+    const q = doorAt(cx, cz, w, d, face, (i - (n - 1) / 2) * gap, out), { fx, fz, nx, nz } = q, ry = Math.atan2(nx, nz);
+    const op = box(p, dw, dh, 0.02, 0x1c1d1e, fx + nx * 0.02, dh / 2, fz + nz * 0.02); op.rotation.y = ry; op.castShadow = false;   // the opening
+    const hd = box(p, dw + 0.2, 0.22, 0.16, 0x6a6c6e, fx + nx * 0.08, dh + 0.11, fz + nz * 0.08); hd.rotation.y = ry;          // the roll drum
+    const g = new THREE.Group(); g.position.set(fx + nx * 0.05, dh, fz + nz * 0.05); g.rotation.y = ry; p.add(g);
+    box(g, dw, dh, 0.04, c, 0, -dh / 2, 0);                                                    // one mesh (it stays dynamic: a draw call each)
+    for (let k = 1; k < 5; k++) { const sl = box(p, dw, 0.025, 0.02, 0x4a4c4e, fx + nx * 0.005, dh * k / 5, fz + nz * 0.005); sl.rotation.y = ry; sl.castShadow = false; }   // the frame's rails, seen when it is up
+    res.push(Object.assign(q, { g, k: 0 }));
+  }
+  return res;
+}
+/* a vehicle shed: walls, flat roof, a concrete pad in front, one roll-up door (rollDoors) */
+function buildGarage(p, [x, z, w, d, face, out], win) {
+  const h = 1.8, [nx, nz] = FACE[face];
+  box(p, w, h, d, WALL2, x, h / 2, z); box(p, w + 0.15, 0.1, d + 0.15, ROOF_MAT, x, h + 0.05, z);
+  const pl = nx ? w / 2 : d / 2, ax = x + nx * pl, bx = x + nx * (pl + 1.4), az = z + nz * pl, bz = z + nz * (pl + 1.4), sx = Math.abs(nz) * 1.2, sz = Math.abs(nx) * 1.2;
+  slab(p, Math.min(ax, bx) - sx, Math.min(az, bz) - sz, Math.max(ax, bx) + sx, Math.max(az, bz) + sz, 0.035, CONC);   // the pad in front of the door
+  const sw = box(p, nx ? 0.02 : w * 0.3, 0.2, nz ? 0.02 : d * 0.3, win, x - nx * (w / 2 + 0.01) + (nz ? w * 0.25 : 0), 1.2, z - nz * (d / 2 + 0.01) + (nx ? d * 0.25 : 0)); sw.castShadow = false;   // a window at the back
+  return rollDoors(p, x, z, w, d, face, 1, 1.9, 1.3, 0, 0x8a8f86, out);
 }
 function buildBuilding(p, x, z, w, d, h, win, rotY, c) {
   const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rotY || 0; p.add(g);
@@ -304,8 +342,10 @@ function buildBase() {
   buildBuilding(g, -24, -32, 8, 3.6, 1.8, win); buildBuilding(g, -24, -38, 8, 3.6, 1.8, win);   // ops, squadron buildings
   buildBuilding(g, 4, -34, 6, 3.4, 2.6, win); buildBuilding(g, 30, -32.5, 5, 4, 1.8, win);
   buildBuilding(g, 52, 32, 10, 3.6, 2.2, win, 0.5, 0x8a8370); buildBuilding(g, 40, 42, 10, 3.6, 2.2, win, 0.5, 0x8a8370);   // barracks
-  buildBuilding(g, -4, 32, 6, 4.5, 2.0, win, 0, 0x9a6a5a);                                    // fire station
-  for (let i = 0; i < 3; i++) box(g, 1.6, 1.5, 0.05, 0x8a2a20, -6 + i * 2, 0.8, 29.73);       // its doors, onto the south runway
+  buildBuilding(g, BL.fireStation[0], BL.fireStation[1], BL.fireStation[2], BL.fireStation[3], 2.0, win, 0, 0x9a6a5a);   // fire station
+  GARAGE_DOORS.length = 0;
+  GARAGE_DOORS.push(...rollDoors(g, ...BL.fireStation, 'n', 3, 1.7, 1.5, 2, 0x8a2a20, 1));    // its doors, onto the south runway (FIRE_DOORS)
+  for (const G of BL.garages) GARAGE_DOORS.push(...buildGarage(g, G, win));
   for (const [x, z] of BL.fuel) { cyl(g, BL.FUEL_R - 0.05, BL.FUEL_R - 0.05, 2.0, 12, 0xd8d8d0, x, 1.0, z); cyl(g, BL.FUEL_R, BL.FUEL_R, 0.12, 12, ROOF_MAT, x, 2.06, z); }   // fuel farm
   // --- fence, guard towers, gate road
   dyn.push(buildFence(g));
@@ -329,7 +369,7 @@ function buildBase() {
   const floods = [];
   for (const [x, z, ax, az, real] of [[-30, -4.2, -30, -16, true], [16, -4.2, 18, -16, true], [-48, -12, -54, -14, false], [56, -12, 56, -14, false], [34.5, 31, 22, 38, false]]) floods.push(buildLightMast(g, x, z, ax, az, real));
   const skyLights = [[-30, 52], [60, -36], [-62, 30], [40, 52]].map(([x, z]) => buildSkyLight(g, x, z));
-  dyn.push(...floods.map(f => f.holder), ...guards.map(s => s.holder), ...skyLights.map(s => s.holder));
+  dyn.push(...floods.map(f => f.holder), ...guards.map(s => s.holder), ...skyLights.map(s => s.holder), ...GARAGE_DOORS.map(o => o.g));
   mergeStatic(g, dyn);
   g.add(g2);                                                 // after the merge: the south runway keeps its own meshes
   // structures the enemy aims at: a world point on each (cruise missiles, bombs) and the panel's site rows

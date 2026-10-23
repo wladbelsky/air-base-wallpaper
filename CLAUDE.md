@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=7`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=9`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -51,7 +51,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   `FIXED_ORDER`/`HELI_ORDER`, callsign pool in `radio.js`, `<key>count` slider in `project.json`, `CFG.counts` default.
   `spec` keys: ground — `park` (home kind: `'f'` fighter shelter / stand, `'h'` heavy hangar / stand, `'d'` drone
   hangar, `'heli'` pad), `big` (only the big hangar fits it), `len` / `span` (footprint for taxi spacing), `taxiV`,
-  `toRoll` (lift-off distance down the runway; the roll accelerates to `vR` over it), `vR` (rotation speed), `rollTo` (fraction of the landing runway past the touchdown point used to brake to a fast taxi: the landing roll's length), `decel` (an emergency's hard stop), `approachV`, `climbOut`; air — `speed`, `turnR`, `orbitR`, `alt`,
+  `toRoll` (lift-off distance down the runway; the roll accelerates to `vR` over it, the climb-out keeps accelerating at 1.5× that rate up to `speed`), `vR` (rotation speed), `rollTo` (fraction of the landing runway past the touchdown point used to brake to a fast taxi: the landing roll's length), `decel` (an emergency's hard stop), `approachV`, `climbOut`; air — `speed`, `turnR`, `orbitR`, `alt`,
   `farOrbit` (orbit range for unarmed types during combat; `armed` types fly combat passes instead), `bankMax`;
   roles — `armed`, `cas` (close air support passes), `gunship` (circles over the fight, `cbt_orbit`), `awacs`,
   `tanker` + `tankKind` (`'boom'` / `'drogue'`), `refuel` (`'boom'` / `'probe'`: which tanker it can take fuel from),
@@ -111,7 +111,10 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 - **Out channels** (`BASE_LAYOUT.chIn` / `chOut`, `channels` = both): lane homes leave by the first out channel east
   of where their pushback ends (`AIRFIELD.outFor`: 19.5 by the big hangar, 66.5 at the east end).
 - **Takeoff**: `spec.toRoll` = lift-off distance (the roll accelerates to `vR` over it: fighters ~half the runway,
-  heavies ~two thirds); the climb-out runs straight past the runway end before the Dubins turn to the orbit.
+  heavies ~two thirds); the climb-out runs straight past the runway end before the Dubins turn to the orbit and keeps
+  accelerating at 1.5× the roll's rate (`fly(path, v0, v1, acc)`). Without `acc`, `followPath` lerps the speed from
+  `v0` to `v1` over the *whole* path — on a long path (takeoff → orbit is 100+ units) that is almost no change over
+  the first stretch (it looked like the jet stopped accelerating and rolled on at lift-off speed).
   `canLineUp` lets the next departure line up behind one rolling fast; it rolls once that one is off the runway.
 - **Aircraft lights**: an airframe's nav lights / beacons (its `Points` nodes) are shown only while `lightsOn` (not
   `parked` or `towed`: engines running, or stopped on the runway in an emergency) — `Aircraft.update`.
@@ -186,7 +189,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   request cuts the work short. The loader brings the type's load (`LOADS`: bombs / missiles / gun ammo / rockets /
   crates, `LOAD_BUILD` items on its lift `table`, `setLoad`): the table rises, the items vanish one by one onto the
   aircraft (`loadTo`), it leaves empty. Out in order: the car nearer the depot first, the other once it is under way
-  (`CrewCar.after`). Vehicles (`CrewCar`) grow in over their first stretch / shrink out over their last (hidden while
+  (`CrewCar.after`). Vehicles (`CrewCar`) grow in over their first stretch / shrink out over their last, inside a shed (hidden while
   they wait out a start delay).
 - **Pushback tug** (`PushbackScene`, one per departure in `ready`): waits inside a shelter / hangar (fading in if the
   door is already open) or drives up to the nose on an open stand (`tugWay`); on its towbar during the pushback
@@ -201,8 +204,20 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - **Vehicles vs aircraft**: aircraft never wait for vehicles; vehicles give way (`vehHold` → `vehHoldAir`: two points
   ahead of the vehicle against the next 8 units of a taxiing aircraft's route — or straight on along its nose — one
   standing right in the way, a pushback's end; a vehicle already in an aircraft's way drives on to clear it). One held
-  > 1.5 s in the way of an aircraft that must come through (a pushback about to start for it, one taxiing at it) backs
-  off along its route (`giveWay`). `pushbackClear` waits for vehicles near its path (`GROUND_OPS.vehicleNear`).
+  > 1.5 s in the way of an aircraft that must come through (a pushback about to start for it, one taxiing at it) gets
+  out of it for 2.5 s (`giveWay`, `giveDir`): backs up (`'back'`) or drives on (`'go'`), whichever point (2 back / 2.5
+  on along its own route) is farther from the aircraft's way — backing up blindly once put a fuel truck right under a
+  C-17 taxiing the same way. `pushbackClear` waits for vehicles near its path (`GROUND_OPS.vehicleNear`).
+- **Depots = vehicle sheds** (`BASE_LAYOUT.garages` `[x, z, w, d, door face, depot distance]`, built by `buildGarage`;
+  the fire station's three doors from `BASE_LAYOUT.fireStation`): every vehicle sets off from inside one (`D.in`, 2.3
+  behind the door: the solid building hides it while it grows in) and its way home ends there (it shrinks out / is
+  dropped inside). `garageDepot` gives the depot point in front of the door (`x`, `z`) and `in`; `FIRE_DOORS` the fire
+  station's (trucks out of the outer two, the emergency tug out of the middle one). Doors (`GARAGE_DOORS`, `rollDoors`:
+  one dynamic mesh each, scaled up to roll it open) open in `GROUND_OPS.update` while a visible vehicle whose `Drive`
+  starts or ends inside is within 3.6. The west shed is on the grass west of the west remote apron (door east), the
+  east one (`CARGO_YARD`) on the concrete north of the strip at x 41 (door south; the row-`c` corridor x 44.6 east of it
+  and the x 35 heavy stand's wingtip west of it are why it is narrow), the heliport's beside the fire station (door
+  east onto the road at x 5.5).
 - **Vehicles vs vehicles** (`vehHold`, `GROUND_OPS.vehicles()`): one stops behind another close ahead (two holding for
   each other: the lower id goes; several setting off from one spot: in id order; 8 s behind the same one gives up); one
   sets off from a start point only once the last to leave it is 1.8 clear and none is arriving there
@@ -219,7 +234,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   others may loose a cruise missile), `cruise` (low, at a structure; C-RAM / NASAMS / Stingers), `ballistic` (from
   high above; Patriot), `heli` (Ka-52 / Mi-24: with the armour, hover off the fence, rockets), `armor` (columns from
   `spawnColumn`, `AIRWAR.meetColumn`: drive to a stop line outside the fence on their own side (`fenceRadius(u)` + 8),
-  fire at the perimeter — cosmetic; the harness flags armour inside the fence). Dogfight bandits (`duel`)
+  fire at the perimeter — cosmetic; the harness flags armour inside the fence). `spawnArmor` pushes the stop ≥ 7 off
+  the fence, cuts the straight way there short where it comes within 3 of it, and starts the vehicle heading along that
+  line (turning in from the column's direction it once cut the west annex's corner). Dogfight bandits (`duel`)
   fly a pass path and are left to the fighters.
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
   site rows show DAMAGED). Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
@@ -331,6 +348,16 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
     arrival state sets, `STATE_LIMITS`, the placeholder list in `radio-pools.spec.js` and `GEO_CACHES` are listed by hand.
   - `repo.spec.js` checks the cache-buster (all tags equal, matches "Current: `v=N`" here), the load order line above,
     and that `js/properties.js` is regenerated.
+- **Close-ups in the browser** (the Browser pane or any page on the dev server): `CFG.zoom = 350; CAM_TGT.set(x, 0, z);
+  updateCamera()` (the camera looks at `CAM_TGT`); hide the UI with `#panel, #subs, #cfgGear, #cfg` → `display: none`;
+  a world point on screen: `new THREE.Vector3(x, 0, z).project(camera)`. The Browser pane's screenshot can show the frame
+  from before the last JS call (or older): take it in a call of its own after the change, and wait ~1 s if it still shows the old view.
+- **Debugging an invariant failure**: re-run the failing test with the same seed (deterministic), then a throw-away
+  spec (`tests/zz-debug.spec.js`, deleted afterwards) whose `wp.until(pred)` predicate runs every step and pushes a log
+  line per step (positions, `drive.s`, phases, the aircraft's state) — print the last lines around the first violation.
+  A change that only shifts timing (e.g. faster takeoffs) reshuffles the soak / LAUNCH ALL timelines and can surface a
+  latent ground-traffic bug in an untouched file: treat it as real. `test.ps1 … | Select-Object -First N` may end with
+  exit code 255 (the pipe was cut), not a failure: read the "passed / failed" line.
 - Console checks by hand: all globals are reachable; set `paused = true` and drive the sim with `step(0.05)` +
   `renderer.render(scene, camera)`; check `renderer.info.render.calls` (main-pass draw calls, shadow pass excluded)
   and `renderer.info.memory.geometries`. To force a fight: `AUD.combat` alone gives `armed` but not `fighting` (no

@@ -103,7 +103,15 @@ test('random emergencies come by themselves in peace and never in a fight', asyn
 
 /* the crew on its stand / pad: vehicles drive up, the aircraft is held (groundBusy), then they leave and are pooled */
 async function crewVisit(wp, kinds) {
-  const on = await wp.until(() => GROUND_OPS.scenes.some(s => s instanceof ServiceScene && s.a === __a && s.phase === 'work'), 120);
+  // the vehicles come out of a shed and go back into one: small (growing / shrinking) only inside one, its door rolls up
+  await wp.run(() => { window.__shed = { open: 0, out: [] }; window.__trackShed = () => {
+    for (const o of GARAGE_DOORS) __shed.open = Math.max(__shed.open, o.k);
+    for (const s of GROUND_OPS.scenes) if (s instanceof ServiceScene && s.a === __a) for (const c of s.crew) if (c.m && c.m.visible && c.m.scale.x < 0.95) {
+      const d = Math.min(...GARAGE_DOORS.map(o => Math.hypot(c.m.position.x - o.ix, c.m.position.z - o.iz)));
+      if (d > 1.3) __shed.out.push(`${c.kind} ${c.stage} scale ${c.m.scale.x.toFixed(2)} ${d.toFixed(2)} from a shed`);
+    }
+    return false; }; });
+  const on = await wp.until(() => __trackShed() || GROUND_OPS.scenes.some(s => s instanceof ServiceScene && s.a === __a && s.phase === 'work'), 120);
   expect(on.violations).toEqual([]);
   expect(on.done, 'the crew reaches it').toBe(true);
   const r = await wp.run(() => { const s = GROUND_OPS.scenes.find(s => s instanceof ServiceScene && s.a === __a);
@@ -117,9 +125,13 @@ async function crewVisit(wp, kinds) {
     expect(out.done).toBe(true);
     expect(await wp.run(() => GROUND_OPS.scenes.find(s => s instanceof ServiceScene && s.a === __a).items.filter(i => i.visible).length), 'items left on the loader').toBe(0);
   }
-  const off = await wp.until(() => !GROUND_OPS.scenes.some(s => s instanceof ServiceScene), 200);
+  const off = await wp.until(() => __trackShed() || !GROUND_OPS.scenes.some(s => s instanceof ServiceScene), 200);
   expect(off.violations).toEqual([]);
   expect(off.done, 'the crew is done and gone').toBe(true);
+  const sh = await wp.run(() => __shed);
+  expect(sh.out.slice(0, 5), 'grown in / shrunk out only inside a shed').toEqual([]);
+  expect(sh.open, 'a shed door rolled up for them').toBeGreaterThan(0.9);
+  expect((await wp.until(() => GARAGE_DOORS.every(o => o.k === 0), 10)).done, 'and down again').toBe(true);
   expect(await wp.run(() => __a.groundBusy)).toBe(false);
   const p = await pools(wp);
   for (const k of kinds) expect(p[k], k).toBeGreaterThanOrEqual(1);

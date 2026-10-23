@@ -97,10 +97,10 @@ class Aircraft {
   }
 
   /* --- flight along a FlightPath (turn radius limited) --- */
-  fly(path, v0, v1) { this.path = path; this.ps = 0; this.pv0 = v0; this.pv1 = v1; this.pathOff = this.pathDy = 0; }
+  fly(path, v0, v1, acc = 0) { this.path = path; this.ps = 0; this.pv0 = v0; this.pv1 = v1; this.pacc = acc; this.pathOff = this.pathDy = 0; }   // acc: speeds up at that rate instead of over the whole path
   followPath(dt) {
     const P = this.path, u = this.ps / P.length;
-    this.v = lerp(this.pv0, this.pv1, u);
+    this.v = this.pacc ? Math.min(this.pv1, this.v + this.pacc * dt) : lerp(this.pv0, this.pv1, u);
     this.ps = Math.min(P.length, this.ps + this.v * dt);
     const s = P.sample(this.ps, this.smp);
     this.mesh.position.copy(s.pos);
@@ -292,7 +292,8 @@ class FixedWing extends Aircraft {
           if (go && this.t > 0.6) { this.rolling = true; this.t = 0; }
           break;
         }
-        glow = 1; this.v += S.vR * S.vR / (2 * S.toRoll) * dt; this.rx += this.v * dt;   // lifts off toRoll down the runway
+        const acc = S.vR * S.vR / (2 * S.toRoll);
+        glow = 1; this.v += acc * dt; this.rx += this.v * dt;   // lifts off toRoll down the runway
         const rot = smoothstep(S.vR * 0.85, S.vR, this.v);
         this.rwyPose(this.rx, this.rdz); this.mesh.rotateZ(rot * 0.12);
         if (Math.random() < dt * 8) FX.smoke.spawn(new V3(this.rx - 1.2, 0.2, RW.z + this.rdz), { s0: 0.5, s1: 1.8, life: 1.2, a0: 0.2, color: 0xd8d8d0, v: new V3(-1, 0.3, 0) });
@@ -302,7 +303,7 @@ class FixedWing extends Aircraft {
           const run = Math.max(S.climbOut, RW.x1 + 10 - p0.x), p1 = p0.clone().addScaledVector(f, run); p1.y += 5;   // straight out past the runway end, then the turn
           const P = new FlightPath().addLine(p0, p1);
           this.pickOrbit(true); this.pathToOrbit(P, p1, 0, 0.9, 5 / run); this.pitch = 0.12;   // the climb carries on into the turn; pitch from the rotation
-          this.fly(P, this.v, S.speed);
+          this.fly(P, this.v, S.speed, acc * 1.5);   // keeps accelerating after lift-off (not spread over the whole way to the orbit)
           this.fwd.copy(f); this.state = 'climb'; this.airT = 0;
           this.call('airborne', { delay: 0.6 });
         }

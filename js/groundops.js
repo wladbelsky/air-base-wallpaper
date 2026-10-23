@@ -162,10 +162,10 @@ class Drive {
     const fresh = !m.visible || m.scale.x < 0.5 || Math.hypot(m.position.x - q[0][0], m.position.z - q[0][1]) > 0.5;
     this.yaw = fresh ? null : m.rotation.y; m.userData.drive = this; this.x0 = q[0][0]; this.z0 = q[0][1]; this.x1 = q[q.length - 1][0]; this.z1 = q[q.length - 1][1]; this.key = q[0][0].toFixed(1) + ',' + q[0][1].toFixed(1);
   }
-  /* hold: true waits; 'back' backs up along the way it came (giving way to an aircraft, vehHold) */
+  /* hold: true waits; 'back' backs up along the way it came, 'go' drives on whatever is ahead (giving way to an aircraft, vehHold) */
   step(dt, hold) {
     if (hold === 'back') this.s = Math.max(0, this.s - this.v * 0.45 * dt);
-    else if (!hold) this.s = Math.min(this.len, this.s + this.v * dt * smoothstep(0, 1.5, this.s + 0.2) * (0.4 + 0.6 * smoothstep(0, 2, this.len - this.s)));
+    else if (!hold || hold === 'go') this.s = Math.min(this.len, this.s + this.v * dt * smoothstep(0, 1.5, this.s + 0.2) * (0.4 + 0.6 * smoothstep(0, 2, this.len - this.s)));
     const u = this.s / this.len, p = this.c.getPointAt(u), t = this.c.getTangentAt(u), ty = this.rev ? Math.atan2(t.z, -t.x) : Math.atan2(-t.z, t.x);
     this.yaw = this.yaw == null || !dt ? ty : this.yaw + clamp(Math.atan2(Math.sin(ty - this.yaw), Math.cos(ty - this.yaw)), -3 * dt, 3 * dt);
     if (this.lane) { const w = this.lane * smoothstep(0, 1.5, this.s) * smoothstep(0, 1.5, this.len - this.s); p.x -= t.z * w; p.z += t.x * w; }
@@ -180,16 +180,22 @@ class Drive {
    (but a pushback waits for one near its path) */
 function vehHold(d, own) {
   const p = d.ahead(_vh), m = d.m.position; d.ahead(_vh2, 3.5);
-  if (T < (d.giveWay || 0)) return 'back';                                                 // still backing out of an aircraft's way
+  if (T < (d.giveWay || 0)) return d.giveDir;                                              // still getting out of an aircraft's way
   for (const a of AIRCRAFT) {
     if (a === own || !a.onGround || !a.mesh.visible) continue;
-    // in the way of one that has to come through here: back up along the way we came (a pushback about to start for us,
-    // or one taxiing at us whose route runs over this spot) rather than both standing there
-    const q = a.mesh.position, rr = 1.0 + a.spec.len * 0.5;
-    let inPath = false;
-    if (a.state === 'ready' && AIRFIELD.wantsOut(a) && a.pb) inPath = a.pb.some(([x, z]) => Math.hypot(x - m.x, z - m.z) < rr);
-    else if (a.dcurve && a.ds < a.dlen && Math.abs(a.v || 0) > 0.05 && Math.hypot(q.x - m.x, q.z - m.z) < 9) for (let k = 2; k <= 8 && !inPath; k += 2) { const c = a.dcurve.getPointAt(Math.min(1, (a.ds + k) / a.dlen), _vr); if (Math.hypot(c.x - m.x, c.z - m.z) < 0.6 + a.spec.span * 0.35) inPath = true; }
-    if (inPath && d.s > 0.3 && d.holdSince != null && T - d.holdSince > 1.5) { d.giveWay = T + 2.5; d.holdSince = null; return 'back'; }
+    // in the way of one that has to come through here (a pushback about to start for us, or one taxiing at us whose route
+    // runs over this spot): back up along the way we came or drive on, whichever is clearer of its way, rather than both
+    // standing there
+    const q = a.mesh.position, rr = 1.0 + a.spec.len * 0.5, way = [];
+    if (a.state === 'ready' && AIRFIELD.wantsOut(a) && a.pb) { for (const [x, z] of a.pb) way.push(x, z); }
+    else if (a.dcurve && a.ds < a.dlen && Math.abs(a.v || 0) > 0.05 && Math.hypot(q.x - m.x, q.z - m.z) < 9) for (let k = 0; k <= 10; k += 2) { const c = a.dcurve.getPointAt(Math.min(1, (a.ds + k) / a.dlen), _vr); way.push(c.x, c.z); }
+    if (!way.length) continue;
+    const clear = (x, z) => { let b = 1e9; for (let i = 0; i < way.length; i += 2) b = Math.min(b, Math.hypot(way[i] - x, way[i + 1] - z)); return b; };
+    const inPath = clear(m.x, m.z) < (a.state === 'ready' ? rr : 0.6 + a.spec.span * 0.35);
+    if (inPath && d.s > 0.3 && d.holdSince != null && T - d.holdSince > 1.5) {
+      const pb = d.c.getPointAt(Math.max(0, d.s - 2) / d.len, _vr), back = clear(pb.x, pb.z), pf = d.c.getPointAt(Math.min(d.len, d.s + 2.5) / d.len, _vr), fwd = clear(pf.x, pf.z);
+      d.giveWay = T + 2.5; d.holdSince = null; return d.giveDir = fwd > back ? 'go' : 'back';
+    }
   }
   // setting off from a start point (a depot) only once the last one to leave it is clear of it: one at a time
   if (d.s < 0.05 && T - (d.startSince = d.startSince ?? T) < 10) {                                     // (after 10 s it goes anyway)
@@ -267,18 +273,22 @@ function segDist(px, pz, ax, az, bx, bz) {
 /* vehicles pop in / out at their depots: a quick grow / shrink */
 const vehScale = (m, k) => m.scale.setScalar(Math.max(0.01, Math.min(1, k)));
 
-const FIRE_STATION = { x: -4, z: 28.6 }, SERVICE_Z = -5.8, CARGO_YARD = { x: 41, z: SERVICE_Z };   // the service strip: between the taxiway's wingtips and the tails on the front row
+const FIRE_STATION = { x: -4, z: 28.6 }, SERVICE_Z = -5.8;   // the service strip: between the taxiway's wingtips and the tails on the front row
+// a depot: the point in front of a vehicle shed's door (x, z) and inside it (`in`: vehicles set off from there and end
+// there, out of sight; GROUND_OPS.update rolls the door up for them) — BASE_LAYOUT.garages
+const garageDepot = ([x, z, w, d, face, out]) => { const q = doorAt(x, z, w, d, face, 0, out); return { x: q.x, z: q.z, in: [q.ix, q.iz] }; };
 // ground crew depots: the cargo yard (east) and a west one, on the service strip between the taxiway and the front row;
-// HELI_DEPOT: on the road by the helicopter pad
-const CREW_DEPOTS = [CARGO_YARD, { x: -66.2, z: SERVICE_Z }], HELI_DEPOT = { x: 5.5, z: 27.2 };
+// HELI_DEPOT: on the road by the helicopter pads; FIRE_DOORS: the fire station's (west to east)
+const CARGO_YARD = garageDepot(BASE_LAYOUT.garages[1]), CREW_DEPOTS = [CARGO_YARD, garageDepot(BASE_LAYOUT.garages[0])], HELI_DEPOT = garageDepot(BASE_LAYOUT.garages[2]);
+const FIRE_DOORS = [-1, 0, 1].map(i => { const [x, z, w, d] = BASE_LAYOUT.fireStation; return doorAt(x, z, w, d, 'n', i * 2, 1); });
 const nearestDepot = x => CREW_DEPOTS.reduce((b, d) => Math.abs(d.x - x) < Math.abs(b.x - x) ? d : b);
 const tugDepot = s => s.row === 'c' ? CARGO_YARD : nearestDepot(s.x);
 /* a tug's way from the depot D to the nose (z nz) of an aircraft on the open home s: round its wingtip, in from the side
-   (not out over the lane); the east remote rows from the cargo yard. Reversed: the way back. */
+   (not out over the lane); the east remote rows from the cargo yard; from inside its shed. Reversed: the way back. */
 function tugWay(a, s, D, nz) {
   const sx = s.x + (Math.sign(D.x - s.x) || 1) * (a.spec.span / 2 + 0.6);
-  return s.row === 'c' ? [[D.x, D.z], [44.6, SERVICE_Z - 1.2], [44.6, nz - 1.6], [s.x - 1, nz - 1.6], [s.x, nz]]
-    : [[D.x, D.z], [sx + (Math.sign(D.x - sx) || 1) * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, s.z], [sx, nz + 0.2], [s.x + (sx - s.x) * 0.45, nz - 0.45], [s.x, nz]];
+  return s.row === 'c' ? [D.in, [D.x, D.z], [44.6, SERVICE_Z - 1.2], [44.6, nz - 1.6], [s.x - 1, nz - 1.6], [s.x, nz]]
+    : [D.in, [D.x, D.z], [sx + (Math.sign(D.x - sx) || 1) * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, s.z], [sx, nz + 0.2], [s.x + (sx - s.x) * 0.45, nz - 0.45], [s.x, nz]];
 }
 const GROUND_OPS = registerMissionWorld({
   scenes: [], chutes: [], emerg: null, emTimer: rand(420, 720), starts: {},   // starts: the last vehicle to set off from each start point ({ m, x, z }, vehHold)
@@ -293,6 +303,15 @@ const GROUND_OPS = registerMissionWorld({
       for (const k in this.starts) { const e = this.starts[k]; if (!e.m.visible || Math.hypot(e.m.position.x - e.x, e.m.position.z - e.z) > 1.8) delete this.starts[k]; }
     }
     for (const s of this.scenes) s.update(dt);
+    // shed / fire station doors roll up for a vehicle setting off from inside or driving in, and down behind it
+    for (const o of GARAGE_DOORS) {
+      let want = false;
+      for (const v of this.vehicles()) {
+        const d = v.userData.drive; if (!v.visible || !d || Math.hypot(v.position.x - o.fx, v.position.z - o.fz) > 3.6) continue;
+        if (Math.hypot(d.x0 - o.ix, d.z0 - o.iz) < 0.4 || Math.hypot(d.x1 - o.ix, d.z1 - o.iz) < 0.4) { want = true; break; }
+      }
+      const k = clamp(o.k + (want ? dt : -dt) * 2.2, 0, 1); if (k !== o.k) { o.k = k; o.g.scale.y = 1 - 0.94 * k; }
+    }
     for (let i = this.scenes.length - 1; i >= 0; i--) if (this.scenes[i].done) { this.endScene(this.scenes[i]); this.scenes.splice(i, 1); }
     this.updateChutes(dt);
     // unloading: a transport home with cargo, on a stand where it can be seen
@@ -378,14 +397,14 @@ class UnloadScene {
     const s = a.spot, tail = s.z + a.spec.len * 0.5 + 0.9;
     this.at = [s.x, tail + 0.75];
     this.loader = takeVehicle('kloader'); this.deck = this.loader.getObjectByName('deck');
-    this.loader.position.set(CARGO_YARD.x, 0, CARGO_YARD.z); vehScale(this.loader, 0.01); this.lk = 0;   // grows in at the yard as it sets off
+    this.loader.position.set(CARGO_YARD.in[0], 0, CARGO_YARD.in[1]); vehScale(this.loader, 0.01); this.lk = 0;   // grows in inside the yard's shed as it sets off
     this.pallets = []; this.veh = [this.loader];
   }
   update(dt) {
     const a = this.a; this.t += dt;
     if ((a.state !== 'parked' && a.state !== 'ready') || !AIRCRAFT.includes(a)) { this.done = true; return; }   // gone meanwhile (retired, rebuilt): drop it
     switch (this.phase) {
-      case 'ramp': if (this.t > 2.5) { this.phase = 'in'; this.drive = new Drive(this.loader, [[CARGO_YARD.x, CARGO_YARD.z], [this.at[0] + 4, SERVICE_Z], [this.at[0] + 1.6, this.at[1] + 1.3]], 2.2, false, 0.5); } break;
+      case 'ramp': if (this.t > 2.5) { this.phase = 'in'; this.drive = new Drive(this.loader, [CARGO_YARD.in, [CARGO_YARD.x, CARGO_YARD.z], [this.at[0] + 4, SERVICE_Z], [this.at[0] + 1.6, this.at[1] + 1.3]], 2.2, false, 0.5); } break;
       case 'in': {
         if (this.lk < 1) vehScale(this.loader, this.lk = Math.min(1, this.lk + dt * 2.5));
         if (this.drive.step(dt, vehHold(this.drive, a))) { const p = this.loader.position; this.phase = 'dock'; this.drive = new Drive(this.loader, [[p.x, p.z], [this.at[0] + 0.3, this.at[1] + 0.6], this.at], 1.0, true); }
@@ -402,7 +421,7 @@ class UnloadScene {
           const from = new V3(a.spot.x, 0.35, a.spot.z + a.spec.len * 0.2), to = this.loader.localToWorld(new V3(-0.2 + 0.45 - i * 0.45, this.deck.position.y + 0.05, 0));
           p.m.position.lerpVectors(from, to, k); p.m.rotation.y = this.loader.rotation.y;
         }
-        if (this.t > 1 + 3 * 2.2 + 1) { this.phase = 'out'; a.rampT = 0; this.drive = new Drive(this.loader, [this.at, [this.at[0] + 0.6, this.at[1] + 0.8], [this.at[0] + 4, SERVICE_Z], [CARGO_YARD.x, CARGO_YARD.z], [CARGO_YARD.x + 4, CARGO_YARD.z - 6]], 2.0, false, 0.5); }
+        if (this.t > 1 + 3 * 2.2 + 1) { this.phase = 'out'; a.rampT = 0; this.drive = new Drive(this.loader, [this.at, [this.at[0] + 0.6, this.at[1] + 0.8], [this.at[0] + 4, SERVICE_Z], [CARGO_YARD.x, CARGO_YARD.z], CARGO_YARD.in], 2.0, false, 0.5); }   // back into the shed (dropped there)
         break;
       }
       case 'out': {
@@ -426,9 +445,9 @@ class EmergencyScene {
     this.a = a; this.t = 0; this.phase = 'roll';
     const x = a.mesh.position.x, R = a.rwyL || BASE_LAYOUT.rwy;
     this.trucks = [-1, 1].map(i => {
-      const m = takeVehicle('firetruck'), to = [x + i * 2.4, R.z + R.w / 2 + 1.3]; vehScale(m, 0.01);   // out of the station: they grow in, no pop
-      const lx = FIRE_STATION.x + i * 1.2, mx = lerp(to[0], lx, Math.min(1, 3 / (Math.abs(to[0] - lx) || 1)));   // turning in from its own lane: the two never cross
-      return { m, k: 0, tur: m.getObjectByName('turret'), d: new Drive(m, [[lx, FIRE_STATION.z], [lx, R.z + R.w / 2 + 2.6], [mx, to[1] + 0.2], to], 4.5), home: [[to[0], to[1]], [mx, to[1] + 0.6], [lx, R.z + R.w / 2 + 2.6], [lx, FIRE_STATION.z]] };
+      const m = takeVehicle('firetruck'), to = [x + i * 2.4, R.z + R.w / 2 + 1.3]; vehScale(m, 0.01);   // inside the station: they grow in there, no pop
+      const dr = FIRE_DOORS[1 + i], lx = dr.fx, mx = lerp(to[0], lx, Math.min(1, 3 / (Math.abs(to[0] - lx) || 1)));   // out of its own door, turning in from its own lane: the two never cross
+      return { m, k: 0, tur: m.getObjectByName('turret'), d: new Drive(m, [[lx, dr.iz], [lx, dr.z], [lx, R.z + R.w / 2 + 2.6], [mx, to[1] + 0.2], to], 4.5), home: [[to[0], to[1]], [mx, to[1] + 0.6], [lx, R.z + R.w / 2 + 2.6], [lx, dr.z], [lx, dr.iz]] };
     });
     RADIO.say(RADIO_NAMES.tower, radioLine(LINES.emergency.rolling, { R: rwyName(a.rwyL) }), { role: 'tower', prio: 2 });
   }
@@ -452,7 +471,8 @@ class EmergencyScene {
           this.phase = 'tug'; this.t = 0;
           this.tug = takeVehicle('tug'); hideBar(this.tug); vehScale(this.tug, 0.01); this.tk = 0;
           const f = a.fwd, nose = a.mesh.position.clone().addScaledVector(f, a.spec.len * 0.5 + 0.75), sd = Math.sign(FIRE_STATION.z - nose.z) || 1;   // its towing spot (towTug), arriving the way it will lead
-          this.tugD = new Drive(this.tug, [[FIRE_STATION.x + 3, FIRE_STATION.z], [FIRE_STATION.x + 3, (a.rwyL || BASE_LAYOUT.rwy).z + 4.4], [nose.x - f.x * 2.2, nose.z - f.z * 2.2 + sd * 1.8], [nose.x - f.x * 0.6, nose.z - f.z * 0.6 + sd * 0.3], [nose.x, nose.z]], 3);
+          const dr = FIRE_DOORS[1];                                                         // out of the middle door
+          this.tugD = new Drive(this.tug, [[dr.fx, dr.iz], [dr.fx, dr.z], [dr.fx, (a.rwyL || BASE_LAYOUT.rwy).z + 4.4], [nose.x - f.x * 2.2, nose.z - f.z * 2.2 + sd * 1.8], [nose.x - f.x * 0.6, nose.z - f.z * 0.6 + sd * 0.3], [nose.x, nose.z]], 3);
           for (const k of this.trucks) k.d = new Drive(k.m, k.home, 2.5);
         }
         break;
@@ -526,8 +546,8 @@ class ServiceScene {
     if (a instanceof Helicopter) {
       // up the corridor east of the pad to beside it: the ammo loader further in, the fuel truck behind it
       const D = HELI_DEPOT, x = s.x + 3, zc = s.z + 3, sg = Math.sign(D.z - zc) || 1;
-      const inPts = z => [[D.x, D.z], [D.x, zc + sg * 1.2], [D.x + 1.4, zc], [x - 1.4, zc], [x, zc - 1.2], [x, z]];
-      const out = [[D.x + 1.4, zc], [D.x, zc + sg * 1.2], [D.x, D.z]];
+      const inPts = z => [D.in, [D.x, D.z], [D.x, zc + sg * 1.2], [D.x + 1.4, zc], [x - 1.4, zc], [x, zc - 1.2], [x, z]];
+      const out = [[D.x + 1.4, zc], [D.x, zc + sg * 1.2], [D.x, D.z], D.in];
       this.crew = kinds.map(k => new CrewCar(k, inPts(k === 'ammo' ? s.z - 1.2 : s.z + 1.1), [[x, zc - 0.5], [x + 1.4, zc]], out, k === 'fueler' && kinds.length > 1 ? 1.4 : 0));
       for (const c of this.crew) c.outDelay = c.kind === 'ammo' ? 5 : 0;   // the one behind backs out first, the loader once it has cleared the corridor
       const fu = this.crew.find(c => c.kind === 'fueler'), am = this.crew.find(c => c.kind === 'ammo'); if (fu && am) am.after = fu;
@@ -536,7 +556,7 @@ class ServiceScene {
       const D = nearestDepot(s.x), o = a.spec.span / 2 + 0.55, tz = s.z + a.spec.len * 0.12;
       this.crew = kinds.map((k, i) => {
         const sx = s.x + (k === 'fueler' ? o : -o), dir = Math.sign(D.x - sx) || 1;
-        const c = new CrewCar(k, [[D.x, D.z], [sx + dir * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, tz]], [[sx, SERVICE_Z - 1.0], [sx - dir * 1.4, SERVICE_Z]], [[D.x, SERVICE_Z]], i * 0.8);
+        const c = new CrewCar(k, [D.in, [D.x, D.z], [sx + dir * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, tz]], [[sx, SERVICE_Z - 1.0], [sx - dir * 1.4, SERVICE_Z]], [[D.x, D.z], D.in], i * 0.8);
         c.sx = sx; return c;
       });
       // out in order: the one nearer the depot first, the other once it is under way (they share the strip back)
@@ -656,8 +676,8 @@ class PushbackScene {
     const D = this.D || nearestDepot(s.x);
     if (this.inside) s.tugIn = this;                                                       // the door stays open until it is in
     const pts = this.inside ? [[p.x, p.z], [s.x, s.z + (s.d || 6) / 2 + 1.2]]
-      : s.row === 'c' ? [[p.x, p.z], [44.6, BASE_LAYOUT.lane - 2.4], [44.6, SERVICE_Z - 1.2], [D.x, D.z]]
-      : [[p.x, p.z], [p.x + (Math.sign(D.x - p.x) || 1) * 1.2, SERVICE_Z], [D.x, D.z]];
+      : s.row === 'c' ? [[p.x, p.z], [44.6, BASE_LAYOUT.lane - 2.4], [44.6, SERVICE_Z - 1.2], [D.x, D.z], D.in]
+      : [[p.x, p.z], [p.x + (Math.sign(D.x - p.x) || 1) * 1.2, SERVICE_Z], [D.x, D.z], D.in];
     this.d = new Drive(this.m, pts, 3, false, this.inside ? 0 : 0.5);
   }
   drop() { if (this.m) { vehScale(this.m, 1); hideBar(this.m); dropVehicle('tug', this.m); this.m = null; } }

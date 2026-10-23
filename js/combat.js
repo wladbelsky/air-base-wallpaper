@@ -106,7 +106,9 @@ function spawnArmor(p, dir, type, stopAt, sq, i) {
   for (let k = 0; k < 80 && nearFence(stopAt, 7); k++) stopAt.addScaledVector(back, 1);
   const go = stopAt.clone().sub(p).setY(0), L = go.length(); go.divideScalar(L || 1);
   for (let t = 0; t < L; t += 1) if (nearFence(_cv.copy(p).addScaledVector(go, t), 3)) { stopAt.copy(p).addScaledVector(go, Math.max(0, t - 2)); break; }
-  const e = { kind: 'armor', ground: true, type, mesh, p: p.clone(), dir: dir.clone().setY(0).normalize(), speed: ty.speed * rand(0.9, 1.1), v: new V3(), hp: ty.hp, age: 0, smokeT: 0, dustT: 0,
+  // heading straight for the stop: the line checked above is the way it drives (turning in from `dir` it would cut a
+  // corner of the fence)
+  const e = { kind: 'armor', ground: true, type, mesh, p: p.clone(), dir: L > 0.6 ? go.clone() : dir.clone().setY(0).normalize(), speed: ty.speed * rand(0.9, 1.1), v: new V3(), hp: ty.hp, age: 0, smokeT: 0, dustT: 0,
     stopAt, fireT: rand(2, 5), cs: `${sq} ${i + 1}`, sq, turret: mesh.getObjectByName('turret') };
   mesh.position.copy(e.p); orientFrom(mesh, e.dir, 0);
   ENEMIES.push(e); return e;

@@ -32,7 +32,8 @@ From source:
 
 - One runway (09/27) with a parallel taxiway, an apron, hardened aircraft shelters with sliding blast doors, a big and
   a medium hangar for the heavies, two small hangars for the drones, a heliport with twelve pads, a control tower with
-  a beacon, an airport surveillance radar, ops and squadron buildings, a fuel farm, a fire station, barracks, service
+  a beacon, an airport surveillance radar, ops and squadron buildings, a fuel farm, a fire station, vehicle sheds with
+  roll-up doors (tugs, fuel trucks and loaders drive out of them and back in), barracks, service
   roads and a fenced perimeter with a perimeter road, guard towers and a gate.
 - Air defence on the edges: a Patriot battery (radar and four launchers), NASAMS, Avenger (Stinger) vehicles, C-RAM
   (Phalanx on trailers) and twin 35 mm AA guns; M1 Abrams tanks in revetments along the southern perimeter.
