@@ -588,6 +588,7 @@ const _fp = new V3();
    into the crater one by one, the crater is filled in, it U-turns on the runway and drives back — the runway opens once
    it is off it. Its work is cut short to keep the closure within RWY_MAX. */
 const RWY_ENTRY = { n: [-30, 0, 32], s: [-14, 5.5, 36] }, ROAD_S = 27.2, CRANE_X = 0.55, CRANE_H = 0.96;
+const REPAIR_V = 3.4;   // it hurries: the departures wait at the holding point meanwhile (a closure is ~40–60 s)
 const wayPts = pts => pts.filter((p, i) => !i || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 0.3);
 class RepairScene {
   constructor(c) {
@@ -603,7 +604,7 @@ class RepairScene {
     this.crane = { g: g('crane'), boom: g('boom'), arm: g('arm'), hook: g('hook'), cable: g('cable'), blk: g('block'), carry: g('carry'), yaw: Math.PI, reach: 1.2, p: 0.05, hy: 0.75 };
     this.mats = []; this.m.traverse(o => { if (o.name === 'mat') this.mats.push(o); }); this.mats.sort((a, b) => b.position.y - a.position.y);   // top one first
     for (const t of this.mats) t.visible = true; this.craneTo(0);
-    this.d = new Drive(this.m, AIRFIELD.round([...this.entry, this.park], 1.6), 2.6, false, 0.5); this.d.step(0, true);
+    this.d = new Drive(this.m, AIRFIELD.round([...this.entry, this.park], 1.6), REPAIR_V, false, 0.5); this.d.step(0, true);
   }
   update(dt) {
     const c = this.c, m = this.m; this.t += dt;
@@ -615,13 +616,13 @@ class RepairScene {
         if (past && !this.through) this.through = !AIRFIELD.setOf(c.L).size && (this.sz > 0 || !AIRCRAFT.some(a => (a.state === 'rollout' || a.state === 'taxi_in') && a.mesh.position.z > BASE_LAYOUT.twy.z - 1.5));
         // too late to go in and be done within RWY_MAX (the rest of the way in, the shortest work, the way off; held up on
         // the way): called off — the crater is patched, the runway opens, the truck fades where it stands
-        if (!this.through && (DAMAGE.rwy !== c || c.t + (this.d.len - this.d.s) * 1.2 / 2.6 + 3 + this.offT > RWY_MAX)) { DAMAGE.reopen(c); this.phase = 'fade'; this.k = 1; this.off = true; break; }
+        if (!this.through && (DAMAGE.rwy !== c || c.t + (this.d.len - this.d.s) * 1.2 / REPAIR_V + 3 + this.offT > RWY_MAX)) { DAMAGE.reopen(c); this.phase = 'fade'; this.k = 1; this.off = true; break; }
         const h = (past && !this.through) || vehHold(this.d, null); if (!h || this.d.s > 0) vehScale(m, this.k += dt * 2.5);
-        if (this.d.step(dt, h)) { this.phase = 'work'; this.t = 0; this.W = clamp(RWY_MAX - c.t - this.offT, 3, 24); this.n = 0; }
+        if (this.d.step(dt, h)) { this.phase = 'work'; this.t = 0; this.W = clamp(RWY_MAX - c.t - this.offT, 3, 15); this.n = 0; }
         break;
       }
       case 'work': this.work(dt); if (this.t > this.W) { this.phase = 'stow'; this.t = 0; this.crane.carry.visible = false; DAMAGE.filled(c); } break;
-      case 'stow': this.craneTo(dt); if (this.t > 2.5) { this.phase = 'out'; this.d = new Drive(m, AIRFIELD.round(this.exit(), 1.4), 2.6, false, 0.5); } break;
+      case 'stow': this.craneTo(dt); if (this.t > 2.5) { this.phase = 'out'; this.d = new Drive(m, AIRFIELD.round(this.exit(), 1.4), REPAIR_V, false, 0.5); } break;
       case 'out': {
         const end = this.d.step(dt, vehHold(this.d, null));
         if (DAMAGE.rwy === c && Math.abs(m.position.z - c.L.z) > c.L.w / 2 + 1.2) DAMAGE.reopen(c);   // off the runway: it opens
@@ -636,7 +637,7 @@ class RepairScene {
   offTime() {
     const L = this.c.L, P = this.exit(this.park); let d = 0;
     for (let i = 1; i < P.length && Math.abs(P[i - 1][1] - L.z) < L.w / 2 + 1.2; i++) d += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
-    return 2.5 + d * 1.3 / 2.6 + 2;
+    return 2.5 + d * 1.3 / REPAIR_V + 2;
   }
   /* the way back: a U-turn on the runway past the (filled) crater, then the way in backwards */
   exit(from) {

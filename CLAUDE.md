@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=21`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=22`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -276,7 +276,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   (`DAMAGE.rwy`, `AIRFIELD.closed` → `canLineUp` / `canApproach` / `clearToLand` (go around) / `landR` / `canCross`;
   a pair's wingman still joins a lead already lined up) and sends a `RepairScene`. Caps: ≤ `DMG_UNITS` (40 %) units
   down, never the Patriot radar and both NASAMS launchers; one runway closed (none while an emergency has one, and no
-  emergency starts while one is closed; none for `RWY_GAP` (120 s) after a reopening — at threat 1.0 one runway was
+  emergency starts while one is closed; none for `RWY_GAP` (180 s) after a reopening — at threat 1.0 one runway was
   closed 70 % of the time) — a runway hit over the cap is a crater patched after 8 s (`patches`); more
   craters on the closed runway are filled with the first; ≤ a quarter of the air wing damaged. `RWY_MAX` (75 s) is a hard
   limit: a truck not on its way in by `RWY_MAX` − 45 is called off (crater patched, runway open), one that is fits
@@ -291,7 +291,10 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   one met it head-on), then goes through (`through`); it stops
   short of the crater, lifts the mats over into it (`work`, `craneTo`: slew / reach / hook height in the truck's frame,
   eased), `DAMAGE.filled` fades the craters, it U-turns on the runway and drives back the way it came; the runway
-  opens when it is off it (`reopen`). Its routes are `AIRFIELD.round`ed (a long truck: wide turns).
+  opens when it is off it (`reopen`). Its routes are `AIRFIELD.round`ed (a long truck: wide turns). It drives at
+  `REPAIR_V` (3.4) and works ≤ 15 s: a closure stops the departures at the holding point, the queue fills
+  (`queueFull`) and the tugs wait at the stands — a mass launch in a fight once looked stuck for a minute and more.
+  Departures waiting for a closed north runway (`ready` / `hold_short`) show RWY CLOSED on the panel (`status`).
 - **Fixed guns** (`gunAim` in `aircraft.js`): a jet's rounds (`gunTick`; not helicopters, nor side guns `o.side`) leave
   along `fwd`, bent toward the lead point by ≤ `GUN_CONE` (3°) sideways / up and ≤ `o.down` downward (`CAS_DIVE`, 15°,
   for the A-10's strafing); the hit only counts with the target inside that cone. Bursts start only with the target on

@@ -46,7 +46,7 @@ test('an aircraft hit on its stand: DAMAGED, no launch, the crash tender foams i
   const foam = await wp.until(() => GROUND_OPS.scenes.some(s => s instanceof FireScene && s.a === __a && s.phase === 'foam'), 90, { audio: true });
   expect(foam.violations).toEqual([]);
   expect(foam.done, 'the crash tender reaches it').toBe(true);
-  const out = await wp.until(() => !(__a.burnT > 0) && !GROUND_OPS.scenes.some(s => s instanceof FireScene), 90, { audio: true });
+  const out = await wp.until(() => !(__a.burnT > 0) && !GROUND_OPS.scenes.some(s => s instanceof FireScene && s.a === __a), 90, { audio: true });   // (bombs may hit others meanwhile)
   expect(out.violations).toEqual([]);
   expect(out.done, 'the fire is out, the tender gone').toBe(true);
   await wp.run(() => { __a.dmgT = 2; });

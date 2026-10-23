@@ -61,7 +61,11 @@ class Aircraft {
     for (const s of this.searchlights) { const i = SEARCHLIGHTS.indexOf(s); if (i >= 0) SEARCHLIGHTS.splice(i, 1); }
     disposeTree(this.mesh);
   }
-  get status() { return this.dmgT > 0 && this.state === 'parked' ? ['DAMAGED', 'wait'] : STATUS[this.state] || ['—', 'busy']; }
+  get status() {
+    if (this.dmgT > 0 && this.state === 'parked') return ['DAMAGED', 'wait'];
+    if ((this.state === 'ready' || this.state === 'hold_short') && DAMAGE.closed(BASE_LAYOUT.rwy)) return ['RWY CLOSED', 'wait'];   // what the departures wait for (DAMAGE)
+    return STATUS[this.state] || ['—', 'busy'];
+  }
   get airborne() { return this.state === 'orbit' || this.state === 'climb' || this.state === 'depart'; }
   get isAwacs() { return !!this.spec.awacs; }
   get isSupport() { return !!(this.spec.awacs || this.spec.tanker); }   // AWACS / tanker: stay up in combat, scrambled first

@@ -283,7 +283,7 @@ function enemyBomb(p) {
    runway closed at a time (none while an emergency has one, none within RWY_GAP of the last reopening), ≤ a quarter of
    the air wing damaged. A hit beyond a cap only
    burns and craters; a runway crater is patched in a few seconds then. ===== */
-const DMG_UNITS = 0.4, RWY_MAX = 75, RWY_GAP = 120, DMG_NAMES = { aa: 'AA gun', ciws: 'C-RAM', tank: 'tank', patriot: 'Patriot launcher', nasams: 'NASAMS launcher', shorad: 'Avenger', radar: 'Patriot radar' };
+const DMG_UNITS = 0.4, RWY_MAX = 75, RWY_GAP = 180, DMG_NAMES = { aa: 'AA gun', ciws: 'C-RAM', tank: 'tank', patriot: 'Patriot launcher', nasams: 'NASAMS launcher', shorad: 'Avenger', radar: 'Patriot radar' };
 const DAMAGE = {
   rwy: null,            // the closed runway: { L, x, z (the crater), t (s closed), scene }
   patches: [],          // runway craters to fill in shortly (hit while the runway couldn't be closed)

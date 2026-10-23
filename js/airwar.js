@@ -85,7 +85,7 @@ const AIRWAR = {
   meetColumn(p, v, lead, at) {
     const near = ENEMIES.filter(e => e.kind === 'armor' && enemyAlive(e));
     const sM = at || rand(0.45, 0.65) * p.P.length, M = p.P.sample(sM).pos.setY(0), tMeet = (sM - lead) / v;
-    if (!at && near.length && (Math.random() < 0.6 || near.length >= 4 + STRESS.level * 6)) { p.foes = near.slice(0, 4); return; }   // the ones already there (no more than a raid's worth)
+    if (near.length && ((!at && Math.random() < 0.6) || near.length >= 4 + STRESS.level * 6)) { p.foes = near.slice(0, 4); return; }   // the ones already there (no more than a raid's worth — a CAS run too)
     // they come in from beyond M toward the base and stop 25 short of it, but never inside the fence (M over the base:
     // short of the fence on that side)
     const u = M.lengthSq() < 1 ? new V3(-1, 0, 0) : M.clone().normalize(), dir = u.clone().negate(), rM = M.length();
