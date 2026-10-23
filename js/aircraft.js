@@ -303,7 +303,8 @@ class FixedWing extends Aircraft {
           const run = Math.max(S.climbOut, RW.x1 + 10 - p0.x), p1 = p0.clone().addScaledVector(f, run); p1.y += 5;   // straight out past the runway end, then the turn
           const P = new FlightPath().addLine(p0, p1);
           this.pickOrbit(true); this.pathToOrbit(P, p1, 0, 0.9, 5 / run); this.pitch = 0.12;   // the climb carries on into the turn; pitch from the rotation
-          this.fly(P, this.v, S.speed, acc * 1.5);   // keeps accelerating after lift-off (not spread over the whole way to the orbit)
+          // keeps accelerating after lift-off (not spread over the whole way to the orbit), at least enough to be at the orbit's speed by its end
+          this.fly(P, this.v, S.speed, Math.max(acc * 1.5, (S.speed * S.speed - this.v * this.v) / (1.8 * P.length)));
           this.fwd.copy(f); this.state = 'climb'; this.airT = 0;
           this.call('airborne', { delay: 0.6 });
         }

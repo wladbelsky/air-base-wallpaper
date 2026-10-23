@@ -22,12 +22,12 @@ const BASE_LAYOUT = {
   fence: [[-80, -6], [-80, -56], [-72, -64], [72, -64], [80, -56], [80, 60], [72, 68], [-25, 68], [-61, 68], [-72, 68], [-80, 60], [-80, 32], [-108, 32], [-108, -6]],
   gate: 7,                                                  // fence segment with the main gate (index of its first point)
   towers: [2, 4, 6, 9, 12],                                 // fence corners with a guard tower
-  fuel: [[-47, -40], [-40, -44], [-35, -40]], FUEL_R: 1.85,
+  fuel: [[-47, -40], [-40, -44], [-35, -40]], FUEL_R: 1.85,  // fuel farm tanks (the spur road runs in between)
   // vehicle sheds with a roll-up door [x, z, w, d, door face 'n' / 'e' / 's' / 'w', depot point this far in front of the
   // door]: the crew depots west / east (the cargo yard) and the heliport's; ground vehicles set off from inside and drive
   // back in (groundops: garageDepot)
   garages: [[-70.6, -5.8, 3.6, 3.6, 'e', 2.6], [41.2, -9.2, 3.4, 3.6, 's', 1.6], [2.8, 30.4, 3.4, 3.4, 'e', 1.0]],
-  fireStation: [-4, 32, 6, 4.5],                            // x, z, w, d: three roll-up doors on its north side  // fuel farm tanks (the spur road runs in between)
+  fireStation: [-4, 32, 6, 4.5],                            // x, z, w, d: three roll-up doors on its north side
   // with one runway the south strip is a storage yard and scrub: these footprints [x, z, r] (and the fire station's way
   // up to the runway, x −9…1) are kept free of the trees there (TERRAIN.fill)
   fillYard: [[-38, 19, 6.5], [-22, 18, 6.5], [22, 18.5, 3.5], [30, 20, 3.5], [48, 18.5, 3], [59, 15, 3]]   // … and the AA gun

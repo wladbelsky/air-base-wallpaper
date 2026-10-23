@@ -149,7 +149,7 @@ function takeVehicle(kind) {
   const m = VEH_POOL[kind].pop() || (VEH_TEMPLATES[kind] || (VEH_TEMPLATES[kind] = VEH_BUILD[kind]())).clone();
   m.visible = true; scene.add(m); return m;
 }
-function dropVehicle(kind, m) { scene.remove(m); m.visible = false; m.position.set(0, -50, 0); VEH_POOL[kind].push(m); }
+function dropVehicle(kind, m) { scene.remove(m); m.visible = false; m.position.set(0, -50, 0); m.userData.drive = null; VEH_POOL[kind].push(m); }   // (no stale Drive for the next job)
 /* a vehicle driving a smooth path ([x, z] points) at speed, nose along the path (rev: backing up, tail first), keeping
    `lane` to the right of it between its ends (two meeting head-on pass each other); step(dt, true) waits where it is
    (giving way, see vehHold) */
@@ -180,20 +180,22 @@ class Drive {
    (but a pushback waits for one near its path) */
 function vehHold(d, own) {
   const p = d.ahead(_vh), m = d.m.position; d.ahead(_vh2, 3.5);
-  if (T < (d.giveWay || 0)) return d.giveDir;                                              // still getting out of an aircraft's way
+  if (T < (d.giveWay || 0)) {                                                              // still getting out of an aircraft's way
+    if (d.giveDir === 'go') { d.ahead(_vh3, 0.8); for (const o of GROUND_OPS.vehicles()) if (o !== d.m && o.visible && Math.hypot(o.position.x - _vh3.x, o.position.z - _vh3.z) < 0.9) return true; }   // (driving on: not through another vehicle)
+    return d.giveDir;
+  }
   for (const a of AIRCRAFT) {
     if (a === own || !a.onGround || !a.mesh.visible) continue;
     // in the way of one that has to come through here (a pushback about to start for us, or one taxiing at us whose route
     // runs over this spot): back up along the way we came or drive on, whichever is clearer of its way, rather than both
     // standing there
-    const q = a.mesh.position, rr = 1.0 + a.spec.len * 0.5, way = [];
-    if (a.state === 'ready' && AIRFIELD.wantsOut(a) && a.pb) { for (const [x, z] of a.pb) way.push(x, z); }
-    else if (a.dcurve && a.ds < a.dlen && Math.abs(a.v || 0) > 0.05 && Math.hypot(q.x - m.x, q.z - m.z) < 9) for (let k = 0; k <= 10; k += 2) { const c = a.dcurve.getPointAt(Math.min(1, (a.ds + k) / a.dlen), _vr); way.push(c.x, c.z); }
-    if (!way.length) continue;
-    const clear = (x, z) => { let b = 1e9; for (let i = 0; i < way.length; i += 2) b = Math.min(b, Math.hypot(way[i] - x, way[i + 1] - z)); return b; };
-    const inPath = clear(m.x, m.z) < (a.state === 'ready' ? rr : 0.6 + a.spec.span * 0.35);
+    const q = a.mesh.position, rr = 1.0 + a.spec.len * 0.5, W = _way; W.length = 0;
+    if (a.state === 'ready' && AIRFIELD.wantsOut(a) && a.pb) { for (const [x, z] of a.pb) W.push(x, z); }
+    else if (a.dcurve && a.ds < a.dlen && Math.abs(a.v || 0) > 0.05 && Math.hypot(q.x - m.x, q.z - m.z) < 9) for (let k = 0; k <= 10; k += 2) { const c = a.dcurve.getPointAt(Math.min(1, (a.ds + k) / a.dlen), _vr); W.push(c.x, c.z); }
+    if (!W.length) continue;
+    const inPath = wayClear(m.x, m.z) < (a.state === 'ready' ? rr : 0.6 + a.spec.span * 0.35);
     if (inPath && d.s > 0.3 && d.holdSince != null && T - d.holdSince > 1.5) {
-      const pb = d.c.getPointAt(Math.max(0, d.s - 2) / d.len, _vr), back = clear(pb.x, pb.z), pf = d.c.getPointAt(Math.min(d.len, d.s + 2.5) / d.len, _vr), fwd = clear(pf.x, pf.z);
+      const pb = d.c.getPointAt(Math.max(0, d.s - 2) / d.len, _vr), back = wayClear(pb.x, pb.z), pf = d.c.getPointAt(Math.min(d.len, d.s + 2.5) / d.len, _vr), fwd = wayClear(pf.x, pf.z);
       d.giveWay = T + 2.5; d.holdSince = null; return d.giveDir = fwd > back ? 'go' : 'back';
     }
   }
@@ -247,7 +249,9 @@ function vehHoldAir(d, own, p, m) {
   }
   return false;
 }
-const _vh = new V3(), _vh2 = new V3(), _vh3 = new V3(), _vr = new V3(), _tn = new V3(), _tb = new V3();
+const _vh = new V3(), _vh2 = new V3(), _vh3 = new V3(), _vr = new V3(), _tn = new V3(), _tb = new V3(), _way = [];
+/* how far (x, z) is from the nearest point of an aircraft's way ahead (_way: x, z pairs, vehHold) */
+function wayClear(x, z) { let b = 1e9; for (let i = 0; i < _way.length; i += 2) b = Math.min(b, Math.hypot(_way[i] - x, _way[i + 1] - z)); return b; }
 /* the tug on its towbar at the aircraft's nose gear: it trails the hitch like a trailer (bending in turns, never glued
    to the nose); pushing it faces the aircraft (bar from its front), towing it faces away (bar from its back) */
 function towTug(m, a, push) {
@@ -273,7 +277,7 @@ function segDist(px, pz, ax, az, bx, bz) {
 /* vehicles pop in / out at their depots: a quick grow / shrink */
 const vehScale = (m, k) => m.scale.setScalar(Math.max(0.01, Math.min(1, k)));
 
-const FIRE_STATION = { x: -4, z: 28.6 }, SERVICE_Z = -5.8;   // the service strip: between the taxiway's wingtips and the tails on the front row
+const SERVICE_Z = -5.8;   // the service strip: between the taxiway's wingtips and the tails on the front row
 // a depot: the point in front of a vehicle shed's door (x, z) and inside it (`in`: vehicles set off from there and end
 // there, out of sight; GROUND_OPS.update rolls the door up for them) — BASE_LAYOUT.garages
 const garageDepot = ([x, z, w, d, face, out]) => { const q = doorAt(x, z, w, d, face, 0, out); return { x: q.x, z: q.z, in: [q.ix, q.iz] }; };
@@ -470,7 +474,7 @@ class EmergencyScene {
         if (this.t > 7) {
           this.phase = 'tug'; this.t = 0;
           this.tug = takeVehicle('tug'); hideBar(this.tug); vehScale(this.tug, 0.01); this.tk = 0;
-          const f = a.fwd, nose = a.mesh.position.clone().addScaledVector(f, a.spec.len * 0.5 + 0.75), sd = Math.sign(FIRE_STATION.z - nose.z) || 1;   // its towing spot (towTug), arriving the way it will lead
+          const f = a.fwd, nose = a.mesh.position.clone().addScaledVector(f, a.spec.len * 0.5 + 0.75), sd = Math.sign(FIRE_DOORS[1].z - nose.z) || 1;   // its towing spot (towTug), arriving the way it will lead
           const dr = FIRE_DOORS[1];                                                         // out of the middle door
           this.tugD = new Drive(this.tug, [[dr.fx, dr.iz], [dr.fx, dr.z], [dr.fx, (a.rwyL || BASE_LAYOUT.rwy).z + 4.4], [nose.x - f.x * 2.2, nose.z - f.z * 2.2 + sd * 1.8], [nose.x - f.x * 0.6, nose.z - f.z * 0.6 + sd * 0.3], [nose.x, nose.z]], 3);
           for (const k of this.trucks) k.d = new Drive(k.m, k.home, 2.5);
