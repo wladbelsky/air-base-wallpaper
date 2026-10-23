@@ -90,7 +90,8 @@ const AIRWAR = {
     const rStop = Math.max(rM - 25, fenceRadius(u) + 8), rStart = Math.max(rM, rStop);
     const sp = rand(2.8, 3.6), perp = new V3(-dir.z, 0, dir.x), n = randi(2, 3), sq = pick(ENEMY_NAMES.armor);
     for (let i = 0; i < n; i++) {
-      const st = u.clone().multiplyScalar(rStart + sp * tMeet + i * 3).addScaledVector(perp, (i - (n - 1) / 2) * 3);
+      // (never nearer than its stop: a meeting point already passed, tMeet < 0, put the start across the base, inside the fence)
+      const st = u.clone().multiplyScalar(Math.max(rStop + 2, rStart + sp * tMeet) + i * 3).addScaledVector(perp, (i - (n - 1) / 2) * 3);
       for (let k = 0; k < 12 && this.onScreen(st, 0.08); k++) st.addScaledVector(dir, -4);   // never pop up on screen
       const stop = u.clone().multiplyScalar(rStop).addScaledVector(perp, (i - (n - 1) / 2) * 3);
       const e = spawnArmor(st, dir, i ? pick(['bmp', 'btr', 't90']) : 't90', stop, sq, i); e.speed = sp; p.foes.push(e);

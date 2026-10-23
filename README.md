@@ -148,7 +148,7 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
 - **Our fighters** fly passes across the screen: chasing a bandit, chased by one (flares, the wingman saves them), or
   sweeping; the A-10 (and now and then an F-15E with bombs) on close air support runs.
 - **Hits:** a projectile that reaches its target scores on the **next beat** of the music. What gets through hits the
-  base: explosions, fires and scorch marks on the ground.
+  base: explosions, fires and craters in the ground. Knocked-out armour burns black, smokes, then settles into the ground.
 - When the music stops, the fighters and gunships return to their orbits, the missiles in the air are shot down or
   self-destruct and the armour turns back.
 - The **Enemy aircraft, missiles & armour in combat** property turns all of this off.

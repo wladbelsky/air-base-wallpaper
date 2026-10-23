@@ -102,7 +102,8 @@ const nearFence = (p, r) => { for (let k = 0; k < 8; k++) if (insideFence(p.x + 
 function spawnArmor(p, dir, type, stopAt, sq, i) {
   const ty = ARMOR_TYPES[type], mesh = enemyMesh(type); scene.add(mesh);
   // the stop well outside the fence (its corners and the approach-light annex reach out), and the way there clear of it
-  const back = dir.clone().setY(0).normalize().negate();
+  const back = dir.clone().setY(0).normalize().negate(), out = new V3(p.x, 0, p.z).normalize();
+  for (let k = 0; k < 80 && nearFence(p, 4); k++) p.addScaledVector(out, 1);                // never set off at or inside the fence
   for (let k = 0; k < 80 && nearFence(stopAt, 7); k++) stopAt.addScaledVector(back, 1);
   const go = stopAt.clone().sub(p).setY(0), L = go.length(); go.divideScalar(L || 1);
   for (let t = 0; t < L; t += 1) if (nearFence(_cv.copy(p).addScaledVector(go, t), 3)) { stopAt.copy(p).addScaledVector(go, Math.max(0, t - 2)); break; }
@@ -239,7 +240,7 @@ function damageEnemy(e, dmg, src) {
     if (mate) enemySay(mate.cs, ENEMY_LINES.lost, { K: e.cs }, { delay: 1.2 }); else if (Math.random() < 0.4) enemySay(e.cs, ENEMY_LINES.eject, null, { delay: 0.6 });
     if (CFG.shake) camShake = Math.min(1, camShake + 0.25);
   } else if (e.kind === 'armor') {
-    explosion(e.p.clone().setY(0.6), 1.0); e.falling = true; e.burnT = 0; FX.scorch.spawn(e.p, 1.6, 60);
+    explosion(e.p.clone().setY(0.6), 1.0); e.falling = true; e.burnT = 0; FX.scorch.spawn(e.p, 1.8, 70); wreckArmor(e);
     sayKill(src, radioLine(AIRWAR_LINES.armorKill));
     if (mate) enemySay(mate.cs, ENEMY_LINES.armorLost, { K: e.cs }, { delay: 1 });
   } else {
@@ -360,12 +361,32 @@ function updateHeli(e, dt, armed) {
   }
   if (Math.hypot(e.p.x, e.p.z) > 170 && e.age > 3) { e.dead = true; scene.remove(e.mesh); }
 }
+/* a knocked-out vehicle: burnt black (the shared WRECK colour on the clone's meshes), the turret knocked askew — a
+   T-90's sometimes blown off its ring — and a slight list */
+function wreckArmor(e) {
+  const W = M(0x2c2a26);
+  e.mesh.traverse(o => { if (o.isMesh) o.material = W; });
+  const t = e.turret;
+  if (t) {
+    t.rotation.y += rand(-0.9, 0.9); t.rotation.z = rand(-0.15, 0.15);
+    if (e.type === 't90' && Math.random() < 0.5) { t.position.x += rand(-0.6, 0.4); t.position.y += 0.12; t.position.z += rand(-0.5, 0.5); t.rotation.x = rand(-0.5, 0.5); }
+  }
+  e.mesh.rotateX(rand(-0.07, 0.07)); e.mesh.rotateZ(rand(-0.04, 0.04));
+}
+const WRECK_FIRE = 20, WRECK_SINK = 30, WRECK_SINK_T = 8;   // s: flames until ~20, smoulders, sinks into the ground from 30 over 8
 function updateArmor(e, dt, armed) {
-  if (e.falling) {                           // knocked out: burns, then the wreck is removed
-    e.burnT += dt;
-    if (Math.random() < dt * 10 * Math.max(0.2, 1 - e.burnT / 20)) FX.smoke.spawn(e.p.clone().setY(0.8), { s0: 0.6, s1: 3, life: 3, a0: 0.6, color: 0x1e1e1e, v: drift(1, 0.8) });
-    if (e.burnT < 6 && Math.random() < dt * 6) FX.flash.spawn(e.p.clone().setY(0.6), { s0: 0.7, s1: 1.1, life: 0.1, a0: 0.9, color: 0xff7a20 });
-    if (e.burnT > 24) { e.dead = true; scene.remove(e.mesh); }
+  if (e.falling) {                           // knocked out: burns, smoulders, then the wreck sinks into the ground and is removed
+    const b = e.burnT += dt, fire = 1 - smoothstep(WRECK_FIRE - 6, WRECK_FIRE, b), sink = clamp((b - WRECK_SINK) / WRECK_SINK_T, 0, 1);
+    const y = e.p.y + 0.7 - sink * 1.4;
+    // a column of black smoke (thinning as it smoulders out), flames licking over the hull while it burns
+    if (Math.random() < dt * (5 + 9 * fire)) FX.smoke.spawn(new V3(e.p.x + rand(-0.3, 0.3), y + 0.2, e.p.z + rand(-0.3, 0.3)), { s0: 0.6 + 0.4 * fire, s1: 2.6 + 1.6 * fire, life: rand(2.6, 4), a0: 0.35 + 0.35 * fire, color: fire > 0.3 ? 0x161616 : 0x3a3a38, v: drift(1, 0.7 + 0.6 * fire) });
+    if (fire > 0 && Math.random() < dt * 16 * fire) FX.flash.spawn(new V3(e.p.x + rand(-0.6, 0.6), y + rand(-0.1, 0.3), e.p.z + rand(-0.4, 0.4)), { s0: rand(0.4, 0.7), s1: rand(0.9, 1.4), life: rand(0.14, 0.3), a0: 0.9 * fire, color: pick([0xff6a18, 0xff8a28, 0xffb040]) });
+    if (b < 4 && Math.random() < dt * 3) FX.flash.spawn(new V3(e.p.x, y + 0.3, e.p.z), { s0: 0.9, s1: 1.8, life: 0.12, a0: 1, color: 0xffc060 });   // ammunition cooking off
+    if (sink > 0) {
+      e.mesh.position.y = e.p.y - sink * 1.4;
+      if (Math.random() < dt * 2 * (1 - sink)) FX.smoke.spawn(new V3(e.p.x + rand(-0.8, 0.8), e.p.y + 0.15, e.p.z + rand(-0.6, 0.6)), { s0: 0.5, s1: 1.6, life: 1.6, a0: 0.3, color: ENV.dustTint, v: drift(0.5, 0.3), drag: 0.8 });   // dust as it settles
+      if (sink >= 1) { e.dead = true; scene.remove(e.mesh); }
+    }
     return;
   }
   const toStop = e.stopAt.clone().sub(e.p).setY(0), d = toStop.length();

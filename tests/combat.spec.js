@@ -127,3 +127,31 @@ test('sky searchlights slew: with bandits coming and going, and the fight ending
   expect(r.tracked, 'the lights tracked bandits').toBeGreaterThan(0);
   expect(r.max, 'largest beam turn in one 0.05 s step').toBeLessThan(0.05);
 });
+
+test('a knocked-out vehicle burns black in its crater, smoulders, then sinks into the ground and is gone; craters fade', async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => {
+    window.__e = spawnArmor(new THREE.Vector3(-110, 0, 45), new THREE.Vector3(1, 0, 0), 't90', new THREE.Vector3(-110, 0, 45), 'X', 0); __e.speed = 0;
+    damageEnemy(__e, 99, null);
+    window.__c = FX.scorch.items.filter(i => i.on).length;
+  });
+  const r0 = await wp.run(() => {
+    const mats = new Set(); __e.mesh.traverse(o => { if (o.isMesh) mats.add(o.material.color.getHex()); });
+    return { mats: [...mats], falling: __e.falling, alive: enemyAlive(__e), craters: __c };
+  });
+  expect(r0.falling).toBe(true); expect(r0.alive).toBe(false);
+  expect(r0.mats, 'burnt black').toEqual([0x2c2a26]);
+  expect(r0.craters, 'a crater under it').toBeGreaterThan(0);
+  // burning: still on the ground at 20 s; sinking from 30 s; gone by 40 s
+  await wp.sim(20);
+  expect(await wp.run(() => [ENEMIES.includes(__e), __e.mesh.position.y - __e.p.y])).toEqual([true, 0]);
+  await wp.sim(13);
+  const y = await wp.run(() => __e.mesh.position.y - __e.p.y);
+  expect(y, 'sinking').toBeLessThan(-0.2); expect(y).toBeGreaterThan(-1.4);
+  const g = await wp.sim(8);
+  expect(g.violations).toEqual([]);
+  expect(await wp.run(() => [ENEMIES.includes(__e), !!__e.mesh.parent])).toEqual([false, false]);
+  // the crater shrinks away at the end of its life
+  await wp.sim(40);
+  expect(await wp.run(() => FX.scorch.items.filter(i => i.on).length)).toBe(0);
+});

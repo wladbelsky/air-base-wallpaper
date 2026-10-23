@@ -123,19 +123,32 @@ class SpriteFX {
   }
 }
 
-/* scorch marks where shells and bombs hit the ground: one instanced mesh, a ring buffer; old marks shrink away */
+/* craters where shells and bombs hit the ground: a low lathe (dark bowl, a raised rim of turned-up earth that catches
+   the light, soot-dark ejecta thinning out to the ground) in vertex colours; one instanced mesh, a ring buffer; old
+   ones flatten and shrink away */
+const CRATER_PROFILE = [[0, -0.01, 0x17130f, 1], [0.35, 0.0, 0x1f1a15, 1], [0.62, 0.05, 0x2e271f, 1], [0.8, 0.13, 0x5a4b3a, 1], [0.92, 0.1, 0x4a3e30, 1], [1.15, 0.035, 0x2a241d, 0.8], [1.5, 0.0, 0x3a332a, 0]];   // [r, y, colour, alpha]: the ejecta fades into the ground
+function craterGeometry() {
+  const geo = new THREE.LatheGeometry(CRATER_PROFILE.map(([r, y]) => new THREE.Vector2(r, y)).reverse(), 11), pos = geo.attributes.position, col = new Float32Array(pos.count * 4), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const r = Math.hypot(pos.getX(i), pos.getZ(i)); let j = 0; while (j < CRATER_PROFILE.length - 2 && CRATER_PROFILE[j + 1][0] < r - 1e-4) j++;
+    const P = CRATER_PROFILE[j], Q = CRATER_PROFILE[j + 1], u = clamp((r - P[0]) / (Q[0] - P[0]), 0, 1);
+    c.setHex(P[2]).lerp(new THREE.Color(Q[2]), u); c.toArray(col, i * 4); col[i * 4 + 3] = lerp(P[3], Q[3], u);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 4));   // rgba: vertex alpha (three picks it up from the item size)
+  return geo;
+}
 class Scorch {
   constructor(scene, n) {
-    const geo = new THREE.CircleGeometry(1, 12); geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x1c1814, transparent: true, opacity: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
-    this.mesh = new THREE.InstancedMesh(geo, mat, n); this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.mesh.frustumCulled = false; this.mesh.renderOrder = 1; this.mesh.count = n;
+    const geo = craterGeometry();
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, transparent: true, flatShading: true, shininess: 0, specular: 0x000000, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    this.mesh = new THREE.InstancedMesh(geo, mat, n); this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.mesh.receiveShadow = true;
+    this.mesh.frustumCulled = false; this.mesh.count = n;
     this.items = []; const zero = new THREE.Matrix4().makeScale(0, 0, 0);
     for (let i = 0; i < n; i++) { this.mesh.setMatrixAt(i, zero); this.items.push({ on: false, p: new V3(), r: 1, t: 0, max: 1, rot: 0 }); }
     this.next = 0; this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new V3(); this._y = new V3(0, 1, 0);
     scene.add(this.mesh);
   }
-  spawn(p, r, life) { const it = this.items[this.next]; this.next = (this.next + 1) % this.items.length; it.on = true; it.p.set(p.x, groundH(p.x, p.z) + 0.05, p.z); it.r = r; it.t = it.max = life || 45; it.rot = rand(0, TAU); }
+  spawn(p, r, life) { const it = this.items[this.next]; this.next = (this.next + 1) % this.items.length; it.on = true; it.p.set(p.x, groundH(p.x, p.z) + 0.01, p.z); it.r = r * 0.8; it.t = it.max = life || 45; it.rot = rand(0, TAU); }
   update(dt) {
     let changed = false;
     for (let i = 0; i < this.items.length; i++) {
@@ -143,7 +156,7 @@ class Scorch {
       it.t -= dt; changed = true;
       const k = it.t <= 0 ? 0 : Math.min(1, it.t / (it.max * 0.25));
       if (it.t <= 0) it.on = false;
-      this._q.setFromAxisAngle(this._y, it.rot); this._s.set(it.r * k, 1, it.r * k * 0.8);
+      this._q.setFromAxisAngle(this._y, it.rot); this._s.set(it.r * k, it.r * 0.8 * k * k, it.r * k * 0.85);   // flattens as it shrinks
       this.mesh.setMatrixAt(i, this._m.compose(it.p, this._q, this._s));
     }
     if (changed) this.mesh.instanceMatrix.needsUpdate = true;

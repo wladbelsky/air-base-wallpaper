@@ -225,8 +225,9 @@ function vehHold(d, own) {
       byVeh = o; break;
     }
   }
-  // 8 s behind the same one gives up on it (in a queue the one ahead keeps changing)
-  if (byVeh) { if (byVeh !== d.vehBy) { d.vehBy = byVeh; d.vehSince = T; } if (T - d.vehSince < 8) { d.heldBy = byVeh; d.heldAt = T; d.holdSince = d.holdSince ?? T; return true; } }
+  // 8 s behind the same one standing gives up on it (a deadlock; in a queue the one ahead keeps changing, and one that is
+  // moving — however slowly — is waited for)
+  if (byVeh) { const bp = byVeh.position; if (byVeh !== d.vehBy || Math.hypot(bp.x - d.vehX, bp.z - d.vehZ) > 0.3) { d.vehBy = byVeh; d.vehSince = T; d.vehX = bp.x; d.vehZ = bp.z; } if (T - d.vehSince < 8) { d.heldBy = byVeh; d.heldAt = T; d.holdSince = d.holdSince ?? T; return true; } }
   else d.vehBy = null;
   d.holdSince = h ? d.holdSince ?? T : null;                                              // how long it has been held (giving way above)
   return h;
@@ -528,7 +529,8 @@ class CrewCar {
       case 'in': {
         if ((this.delay -= dt) > 0) break;
         m.visible = true;
-        const h = vehHold(this.d, own); if (!h || this.d.s > 0) vehScale(m, this.k += dt * 2.5);   // doesn't pop in under a passing aircraft
+        const first = this.inAfter && this.inAfter.m && this.inAfter.stage === 'in' && this.inAfter.d.s < 3;   // the one going further in sets off first
+        const h = first || vehHold(this.d, own); if (!h || this.d.s > 0) vehScale(m, this.k += dt * 2.5);   // doesn't pop in under a passing aircraft
         if (this.d.step(dt, h)) { this.stage = 'park'; this.delay = 0; }
         break;
       }
@@ -554,7 +556,7 @@ class ServiceScene {
       const out = [[D.x + 1.4, zc], [D.x, zc + sg * 1.2], [D.x, D.z], D.in];
       this.crew = kinds.map(k => new CrewCar(k, inPts(k === 'ammo' ? s.z - 1.2 : s.z + 1.1), [[x, zc - 0.5], [x + 1.4, zc]], out, k === 'fueler' && kinds.length > 1 ? 1.4 : 0));
       for (const c of this.crew) c.outDelay = c.kind === 'ammo' ? 5 : 0;   // the one behind backs out first, the loader once it has cleared the corridor
-      const fu = this.crew.find(c => c.kind === 'fueler'), am = this.crew.find(c => c.kind === 'ammo'); if (fu && am) am.after = fu;
+      const fu = this.crew.find(c => c.kind === 'fueler'), am = this.crew.find(c => c.kind === 'ammo'); if (fu && am) { am.after = fu; fu.inAfter = am; }   // in: loader first (it goes further), out: fuel truck first
     } else {
       // from the nearest depot along the service strip, up beside the wings: fuel truck on the east side, loader on the west
       const D = nearestDepot(s.x), o = a.spec.span / 2 + 0.55, tz = s.z + a.spec.len * 0.12;

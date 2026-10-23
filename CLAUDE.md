@@ -22,7 +22,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); the fence is a rectangle with chamfered corners and a west annex around both runways' approach lights (`fence`, `gate` = the gate segment, `towers` = guard-tower corners; the perimeter road is its 5-unit inward offset, `insetPoly`); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
 | `js/terrain.js` | `TERRAIN`: the ground (tiled canvas texture + vertex-colour patches) and the vegetation per season (InstancedMesh per kind: firs and snow drifts / cacti, rocks, shrubs / leafy trees in spring or autumn colours), weather particles (snowfall, falling leaves) |
 | `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; smooth fuselages are `lathe` bodies (profile `[x, r, axis lift]`, `transportBody` for the transports with the cockpit `windscreen` band on the nose); `gear(g, legs, h)` legs `[x, z, kind]` — `n` / `s` / `t` / `tan` / `b4` / `b6` — folding up over ~1 s with `st.gearDown` (`tickGear`); KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
-| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (scorch marks, instanced ring buffer), `FlashLights` |
+| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — instanced ring buffer; they flatten and shrink away at the end of their life), `FlashLights` |
 | `js/radio.js` | callsigns (+ `ENEMY_NAMES`, `RADIO_NAMES` — the tower is `<base name> TOWER`), `RADIO` subtitle queue, mission orders, `STRESS` + `THREAT_TIERS`, `radioLine()`, line pools `OPS` / `OPS_VOICE` / `OPS_UNARMED` / `COMBAT` / `AIRWAR_LINES` / `ENEMY_LINES` / `TANKER_LINES` / `LINES` (see "Radio lines & threat tiers") |
 | `js/airfield.js` | `AIRFIELD`: homes (`assignHome` / `release`), taxi routes (`pushback`, `toHold`, `lineUp`, `exitFor`, `homeRoute`), runway use (`rwy`, `arrivals`, `canLineUp`, `canApproach`, `clearToLand`), ground traffic (`blocked`), shelter / hangar doors, stand markings and helicopter pads (`updateMarks`) — see "Airfield" |
 | `js/aircraft.js` | `Aircraft` → `FixedWing` / `Helicopter` state machines, types, `Flyby` |
@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=10`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=11`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -219,7 +219,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   and the x 35 heavy stand's wingtip west of it are why it is narrow), the heliport's beside the fire station (door
   east onto the road at x 5.5).
 - **Vehicles vs vehicles** (`vehHold`, `GROUND_OPS.vehicles()`): one stops behind another close ahead (two holding for
-  each other: the lower id goes; several setting off from one spot: in id order; 8 s behind the same one gives up); one
+  each other: the lower id goes; several setting off from one spot: in id order; 8 s behind the same one *standing* gives
+  up — one that moves, however slowly, is waited for); a helicopter's loader sets off before its fuel truck (`inAfter`:
+  it goes further up the corridor; reversed they block each other there); one
   sets off from a start point only once the last to leave it is 1.8 clear and none is arriving there
   (`GROUND_OPS.starts`, pruned every 5 s; after 10 s it goes anyway); one still small in its depot isn't on the road; one
   under a moving aircraft ignores them and clears out. The harness flags a vehicle under a
@@ -234,9 +236,14 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   others may loose a cruise missile), `cruise` (low, at a structure; C-RAM / NASAMS / Stingers), `ballistic` (from
   high above; Patriot), `heli` (Ka-52 / Mi-24: with the armour, hover off the fence, rockets), `armor` (columns from
   `spawnColumn`, `AIRWAR.meetColumn`: drive to a stop line outside the fence on their own side (`fenceRadius(u)` + 8),
-  fire at the perimeter — cosmetic; the harness flags armour inside the fence). `spawnArmor` pushes the stop ≥ 7 off
+  fire at the perimeter — cosmetic; the harness flags armour inside the fence). Knocked out (`falling`): `wreckArmor` turns
+  the clone's meshes to one shared burnt colour and knocks the turret askew (a T-90's sometimes off its ring); it burns
+  (flames, black smoke, cooking-off flashes) for `WRECK_FIRE` s, smoulders, then sinks into the ground from `WRECK_SINK`
+  over `WRECK_SINK_T` s and is removed (no pop). `spawnArmor` pushes the stop ≥ 7 off
   the fence, cuts the straight way there short where it comes within 3 of it, and starts the vehicle heading along that
-  line (turning in from the column's direction it once cut the west annex's corner). Dogfight bandits (`duel`)
+  line (turning in from the column's direction it once cut the west annex's corner); a start at or inside the fence is
+  pushed out radially (`meetColumn` once put one across the base when its meeting point was already passed: its start
+  radius is now never below the stop's). Dogfight bandits (`duel`)
   fly a pass path and are left to the fighters.
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
   site rows show DAMAGED). Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
