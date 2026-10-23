@@ -36,7 +36,9 @@ From source:
   roll-up doors (tugs, fuel trucks and loaders drive out of them and back in), barracks, service
   roads and a fenced perimeter with a perimeter road, guard towers and a gate.
 - Air defence on the edges: a Patriot battery (radar and four launchers), NASAMS, Avenger (Stinger) vehicles, C-RAM
-  (Phalanx on trailers) and twin 35 mm AA guns; M1 Abrams tanks in revetments along the southern perimeter.
+  (Phalanx on trailers) and twin 35 mm AA guns; M1 Abrams tanks in revetments along the southern perimeter. In a fight
+  the AA guns' search radars spin up (their tracking dishes follow the guns) and the Patriot radar's head turns, slowly,
+  to face the nearest air threat — a phased array doesn't spin — and back to its sector afterwards.
 - At night: runway edge and threshold lights, the approach lights with their sequenced flashers, PAPI, blue taxiway
   lights, lit windows, floodlight masts over the apron, guard-tower searchlights sweeping the ground outside the fence
   and big sky searchlights sweeping the sky (in a fight they follow the enemy aircraft).

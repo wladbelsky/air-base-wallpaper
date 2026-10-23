@@ -222,7 +222,13 @@ function buildAAGun(parent, x, z, center, half) {
   cyl(parent, 0.45, 0.5, 0.2, 8, OLIVE2, x, 0.15, z);
   const m = mountBase(parent, x, 0.25, z, 'aa', center, half, { yawRate: 2.2, pitchRate: 1.6, pmin: 0.35, pmax: 1.3, muzzles: [new V3(1.6, 0, -0.18), new V3(1.6, 0, 0.18)], mi: 0 });
   box(m.yawG, 0.9, 0.5, 0.9, OLIVE, -0.05, 0.3, 0); box(m.yawG, 0.3, 0.3, 0.5, OLIVE2, -0.55, 0.35, 0);
+  // fire control (Gepard / Skyguard style): a search antenna on a short mast at the back, spinning in a fight (m.search:
+  // dynamic, the caller lists it), and a tracking dish on the gun cradle that follows the aim
+  cyl(m.yawG, 0.04, 0.05, 0.35, 5, DARK, -0.55, 0.66, 0);
+  m.search = new THREE.Group(); m.search.position.set(-0.55, 0.86, 0); m.yawG.add(m.search);
+  box(m.search, 0.07, 0.22, 0.72, 0x6a6f60, 0.02, 0.06, 0).rotation.z = 0.25; box(m.search, 0.12, 0.05, 0.1, DARK, -0.04, -0.04, 0);
   m.pitchG.position.set(0.15, 0.55, 0);
+  const dish = cyl(m.pitchG, 0.17, 0.17, 0.05, 10, 0x6a6f60, 0.05, 0.3, 0); dish.rotation.z = -Math.PI / 2;   // tracking radar, facing along the guns
   m.barrelG = new THREE.Group(); m.pitchG.add(m.barrelG);
   for (const s of [-1, 1]) { box(m.barrelG, 0.5, 0.18, 0.12, OLIVE, 0.25, 0, s * 0.18); const b = cyl(m.barrelG, 0.03, 0.04, 1.3, 5, DARK, 1.0, 0, s * 0.18); b.rotation.z = -Math.PI / 2; }
   m.muzzle = m.muzzles[0];
@@ -277,13 +283,16 @@ function buildAvenger(parent, x, z, center, half) {
   m.muzzle = m.muzzles[0];
   return m;
 }
-/* Patriot radar (AN/MPQ-65) on its trailer: a tilted phased-array face toward `center` */
+/* Patriot radar (AN/MPQ-65) on its trailer: a tilted phased-array face toward `center`. A phased array doesn't spin: its
+   head (g.head: shelter and face on a turntable, dynamic — the caller lists it) is turned toward the threat (updateSite) */
 function buildPatriotRadar(parent, x, z, center) {
   const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = center * DEG; parent.add(g);
   box(g, 2.6, 0.3, 1.2, OLIVE2, 0, 0.42, 0);
   for (const xx of [-0.9, 0.9]) for (const s of [-1, 1]) { const w = cyl(g, 0.2, 0.2, 0.16, 8, DARK, xx, 0.2, s * 0.6); w.rotation.x = Math.PI / 2; }
-  box(g, 1.6, 0.8, 1.15, OLIVE, -0.3, 0.97, 0);
-  const face = new THREE.Group(); face.position.set(0.7, 1.0, 0); face.rotation.z = 0.45; g.add(face);
+  cyl(g, 0.5, 0.55, 0.1, 10, DARK, 0.1, 0.62, 0);                                       // turntable
+  const head = g.head = new THREE.Group(); head.position.set(0.1, 0, 0); g.add(head);
+  box(head, 1.6, 0.8, 1.15, OLIVE, -0.4, 0.97, 0);
+  const face = new THREE.Group(); face.position.set(0.6, 1.0, 0); face.rotation.z = 0.45; head.add(face);
   box(face, 0.18, 1.5, 1.5, OLIVE, 0, 0.55, 0); const d = cyl(face, 0.6, 0.6, 0.04, 12, 0x3f4436, 0.1, 0.55, 0); d.rotation.z = Math.PI / 2;
   return g;
 }

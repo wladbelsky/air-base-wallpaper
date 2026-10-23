@@ -155,3 +155,25 @@ test('a knocked-out vehicle burns black in its crater, smoulders, then sinks int
   await wp.sim(40);
   expect(await wp.run(() => FX.scorch.items.filter(i => i.on).length)).toBe(0);
 });
+
+test('air-defence radars: AA search antennas spin in a fight, the Patriot radar turns (slowly) toward its target, all settle in peace', async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => { window.__rd = { spin: 0, max: 0, prev: null, aimed: 0 }; });
+  const watch = () => {
+    const pr = BASE.patriotRadar, h = pr.head.rotation.y;
+    if (__rd.prev != null) __rd.max = Math.max(__rd.max, Math.abs(angleWrap(h - __rd.prev))); __rd.prev = h;
+    __rd.spin = Math.max(__rd.spin, ...BASE.mounts.aa.map(m => m.sv || 0));
+    if (pr.tgt) { const want = Math.atan2(-(pr.tgt.p.z - pr.position.z), pr.tgt.p.x - pr.position.x) - pr.rotation.y; if (Math.abs(angleWrap(want - h)) < 0.2) __rd.aimed++; }
+    return false;
+  };
+  expect(await wp.run(() => BASE.mounts.aa.every(m => m.search) && !!BASE.patriotRadar.head)).toBe(true);
+  await wp.run(() => { __t.forceFight(); STRESS.level = 0.8; });
+  await wp.until(watch, 120, { audio: true });
+  const r = await wp.run(() => __rd);
+  expect(r.spin, 'search antennas up to speed').toBeGreaterThan(3.9);
+  expect(r.aimed, 'the Patriot radar faced its target').toBeGreaterThan(20);
+  expect(r.max, 'its head turns at ≤ 0.35 rad/s').toBeLessThan(0.35 * 0.05 + 1e-6);
+  await wp.run(() => __t.fightOff());
+  const calm = await wp.until(() => !AUD.armed && BASE.mounts.aa.every(m => m.sv === 0) && Math.abs(BASE.patriotRadar.head.rotation.y) < 0.01, 90);
+  expect(calm.done, 'after the fight: antennas stopped, the radar back to its sector').toBe(true);
+});

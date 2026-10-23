@@ -36,7 +36,8 @@ const TANKER = registerMissionWorld({
   nextKind() {
     if (this.next && AIRCRAFT.some(a => a.spec.tankKind === this.next && !a.retiring)) return this.next;
     const kinds = ['boom', 'drogue'].filter(k => AIRCRAFT.some(a => a.spec.tankKind === k && !a.retiring) && AIRCRAFT.some(a => canReceive(a, k) && !a.retiring));
-    return this.next = kinds.length ? pick(kinds) : null;
+    const up = kinds.filter(k => AIRCRAFT.some(a => canReceive(a, k) && a.aloft && !a.retiring));   // rather one whose receivers are up (a drogue pass waits for helicopters)
+    return this.next = up.length ? pick(up) : kinds.length ? pick(kinds) : null;
   },
   /* a pass is due and no tanker of that kind is up: send one (auto flight ops; runs every step, so no allocations) */
   launchTanker() {

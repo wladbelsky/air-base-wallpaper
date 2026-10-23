@@ -587,6 +587,17 @@ function updateFlybys(dt) {
 const _w = new V3();
 function updateSite(dt) {
   for (const r of BASE.radars) r.rotation.y += dt * 1.4;
+  // air-defence radars in a fight: the AA guns' search antennas spin up (and run down after); the Patriot radar's head
+  // slews toward the nearest air threat (kept while it lives) and back to its sector in peace — a phased array, it doesn't spin
+  const armed = AUD.armed;
+  for (const m of BASE.mounts.aa) if (m.search) { m.sv = (m.sv || 0) + clamp((armed ? 4 : 0) - (m.sv || 0), -1.5 * dt, 1.5 * dt); if (m.sv) m.search.rotation.y += m.sv * dt; }
+  const pr = BASE.patriotRadar;
+  if (pr && pr.head) {
+    if (pr.tgt && !(armed && enemyAlive(pr.tgt))) pr.tgt = null;
+    if (!pr.tgt && armed) { let best = 1e9; for (const e of ENEMIES) if (e.kind !== 'armor' && enemyAlive(e)) { const d = Math.hypot(e.p.x - pr.position.x, e.p.z - pr.position.z); if (d < best) { best = d; pr.tgt = e; } } }
+    const want = pr.tgt ? angleWrap(Math.atan2(-(pr.tgt.p.z - pr.position.z), pr.tgt.p.x - pr.position.x) - pr.rotation.y) : armed ? pr.head.rotation.y : 0;
+    pr.head.rotation.y = angleWrap(approachAngle(pr.head.rotation.y, want, dt * 0.35));
+  }
   for (const sl of BASE.guards) {
     const sw = sl.sweep, ang = sw.base + Math.sin(T * sw.speed + sw.ph) * sw.amp, h = sl.holder.position;
     sl.holder.lookAt(_w.set(h.x + Math.cos(ang) * sw.dist, 0, h.z - Math.sin(ang) * sw.dist));

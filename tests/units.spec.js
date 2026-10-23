@@ -372,3 +372,46 @@ test('landing gear: every airframe stands on its wheels, the gear folds away in 
   });
   expect(r).toEqual([]);
 });
+
+test("airfield: floodlight masts stand clear of every taxiing aircraft (fuselage and wings, the biggest that uses each route) and of the ground vehicles' ways", async ({ wp }) => {
+  const r = await wp.run(() => {
+    const fw = Object.values(AIRCRAFT_TYPES).filter(C => C.prototype instanceof FixedWing).map(C => C.spec);
+    const biggest = l => l.reduce((b, S) => S.span > b.span ? S : b, l[0]);
+    const FIGHTER = biggest(fw.filter(S => S.park === 'f')), ANY = biggest(fw), DRONE = biggest(fw.filter(S => S.park === 'd'));
+    const who = s => PARKING.shelters.includes(s) || s.kind === 'f' ? FIGHTER : s.size === 'small' ? DRONE : ANY;
+    const routes = [];
+    for (const s of [...PARKING.stands, ...PARKING.shelters, ...PARKING.hangars, ...PARKING.remote]) {
+      const S = who(s);
+      routes.push([AIRFIELD.pushback(s), S], [AIRFIELD.toHold(s), S]);
+      for (const R of [RW, BASE_LAYOUT.rwy2]) for (const x0 of [-40, -10, 20, 50]) routes.push([AIRFIELD.homeRoute(s, x0, AIRFIELD.exitFor(s, x0), R), S]);
+    }
+    // the ground vehicles' ways to the open homes (tug, fuel truck / loader) with the biggest that parks there
+    const ways = [];
+    for (const s of [...PARKING.stands, ...PARKING.remote]) {
+      const S = who(s), D = tugDepot(s), o = S.span / 2 + 0.55, tz = s.z + S.len * 0.12;
+      ways.push(tugWay({ spec: S }, s, D, s.z - S.len / 2 - 0.75));
+      if (s.row === 'a') for (const sg of [-1, 1]) { const C = nearestDepot(s.x), sx = s.x + sg * o, dir = Math.sign(C.x - sx) || 1; ways.push([C.in, [C.x, C.z], [sx + dir * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, tz]]); }
+    }
+    const out = [];
+    for (const [mx, mz] of BASE_LAYOUT.masts) {
+      for (const pts of ways) {
+        const c = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(p[0], 0, p[1])), false, 'centripetal'), L = c.getLength();
+        for (let u = 0; u <= L; u += 0.25) { const p = c.getPointAt(u / L), d = Math.hypot(mx - p.x, mz - p.z); if (d < 1.0) { out.push(`mast ${mx},${mz}: a vehicle's way passes ${d.toFixed(2)} from it at ${p.x.toFixed(1)},${p.z.toFixed(1)}`); break; } }   // (half a vehicle, 0.45, + its lane offset, 0.5)
+      }
+      let worst = null;
+      for (const [pts, S] of routes) {
+        const c = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(p[0], 0, p[1])), false, 'centripetal'), L = c.getLength();
+        for (let u = 0; u <= L; u += 0.25) {
+          const p = c.getPointAt(u / L), t = c.getTangentAt(u / L), dx = mx - p.x, dz = mz - p.z;
+          const al = dx * t.x + dz * t.z, sd = Math.abs(dx * t.z - dz * t.x);
+          // the aircraft as a cross: fuselage along the heading, wings across it (half a length / span each way)
+          const gap = Math.min(Math.hypot(Math.max(0, Math.abs(al) - S.len / 2), sd), Math.hypot(al, Math.max(0, sd - S.span / 2)));
+          if (gap < 0.5 && (!worst || gap < worst.gap)) worst = { gap, S: S.key, at: `${p.x.toFixed(1)},${p.z.toFixed(1)}` };
+        }
+      }
+      if (worst) out.push(`mast ${mx},${mz}: a ${worst.S} passes ${worst.gap.toFixed(2)} from it at ${worst.at}`);
+    }
+    return out;
+  });
+  expect(r).toEqual([]);
+});

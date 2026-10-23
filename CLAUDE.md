@@ -19,7 +19,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/core.js` | utils (`V3`, `rand`, `clamp`, `lerp`, `smoothstep`, `pick`…), `CFG` defaults, `WIND` (smoke / dust drift), `groundH` (flat ground), `SEASONS` + `seasonNow()`, sun position, sky palette, canvas textures `TEX` |
 | `js/flightpath.js` | `FlightPath`: Dubins CSC curves (turn-radius-limited flight) + lines; a Dubins piece eases its altitude as a cubic from `slope0` (the climb it arrives with: no kink after a climbing line) to level |
 | `js/models.js` | mesh helpers (`M`, `box`, `cyl`, `taper`, `prism`, `strut`, `deckLine`…), `mergeStatic`, `disposeTree`, nav lights, searchlights, seasonal shared materials `ROOF_MAT` / `ARCH_MAT`, mounts: `buildCIWS` / `buildGun` and the land ones `buildCRAM`, `buildAAGun`, `buildTank`, `buildSamLauncher` (Patriot / NASAMS), `buildAvenger`, `buildPatriotRadar` |
-| `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); the fence is a rectangle with chamfered corners and a west annex around both runways' approach lights (`fence`, `gate` = the gate segment, `towers` = guard-tower corners; the perimeter road is its 5-unit inward offset, `insetPoly`); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
+| `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); the fence is a rectangle with chamfered corners and a west annex around both runways' approach lights (`fence`, `gate` = the gate segment, `towers` = guard-tower corners; the perimeter road is its 5-unit inward offset, `insetPoly`); `masts` (floodlight masts; units.spec keeps them clear of every taxiing aircraft's fuselage / wings and of the vehicles' ways); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
 | `js/terrain.js` | `TERRAIN`: the ground (tiled canvas texture + vertex-colour patches) and the vegetation per season (InstancedMesh per kind: firs and snow drifts / cacti, rocks, shrubs / leafy trees in spring or autumn colours), weather particles (snowfall, falling leaves) |
 | `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; smooth fuselages are `lathe` bodies (profile `[x, r, axis lift]`, `transportBody` for the transports with the cockpit `windscreen` band on the nose); `gear(g, legs, h)` legs `[x, z, kind]` — `n` / `s` / `t` / `tan` / `b4` / `b6` — folding up over ~1 s with `st.gearDown` (`tickGear`); KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
 | `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — instanced ring buffer; they flatten and shrink away at the end of their life), `FlashLights` |
@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=14`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=18`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -250,6 +250,10 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
   site rows show DAMAGED). Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
   tracers with gravity (`dropBombStick`, `FixedWing.dropBombs`), resolved in `FX.tracers.onSplash`.
+- Air-defence radars (`updateSite`): the AA guns' search antennas (`m.search`, a dynamic child of `yawG`) spin up to 4
+  rad/s while `AUD.armed` and run down after; the tracking dish is on `pitchG` (follows the aim). The Patriot radar
+  (`BASE.patriotRadar`) has a turntable head (`.head`, dynamic) that slews at 0.35 rad/s toward the nearest live air
+  threat (`.tgt`, kept while it lives), holds in a lull, and goes back to 0 in peace; its angle is kept wrapped.
 - Base weapons on the beat (`onBeat`): tanks (`fireTank`: at armour in range (110), else far out past the wire;
   with nothing to shoot their turrets look around now and then, `scanT`), AA guns
   (`fireAA`, `fireFlak`), C-RAM bursts (`startCIWS`), Patriot / NASAMS (`launchSAM`; always at an incoming ballistic
@@ -264,7 +268,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   while `combatOn()` the timer is frozen and `start()` refuses. A fight starting while the event still gathers
   (`!ev.P`) aborts it; a pass already on screen is flown to the end. If nobody is ready it looks again every
   8–15 s for ~3 min, then waits for the next one. `nextKind()` picks the kind of the next pass (a tanker of that kind
-  and receivers exist); with auto flight ops that tanker is launched ~5 min before a pass is due (`launchTanker`;
+  and receivers exist; one whose receivers are up when it is picked, if any — a drogue pass waits for UH-60s); with auto flight ops that tanker is launched ~5 min before a pass is due (`launchTanker`;
   `autoLaunch` never launches tankers, nor does `scrambleSupport` — AWACS only), and `autoRecover` keeps a tanker up
   for `TANKER_STATION` (300 s) and never recovers it while a pass is due (`TANKER.timer < 300`).
 - **Kinds** (`spec.tankKind` / receivers' `spec.refuel`): `boom` (KC-46 with up to 4 jets of one flight: one on the
@@ -361,6 +365,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   updateCamera()` (the camera looks at `CAM_TGT`); hide the UI with `#panel, #subs, #cfgGear, #cfg` → `display: none`;
   a world point on screen: `new THREE.Vector3(x, 0, z).project(camera)`. The Browser pane's screenshot can show the frame
   from before the last JS call (or older): take it in a call of its own after the change, and wait ~1 s if it still shows the old view.
+- **When the Browser pane's screenshots stay stale** (the splash, an old frame): a throw-away spec that boots the page,
+  sets the camera, calls `renderer.render(scene, camera)` and `wp.page.screenshot({ path: 'test-results/x.png' })`, then
+  Read the png (the harness has no rAF: render by hand).
 - **Debugging an invariant failure**: re-run the failing test with the same seed (deterministic), then a throw-away
   spec (`tests/zz-debug.spec.js`, deleted afterwards) whose `wp.until(pred)` predicate runs every step and pushes a log
   line per step (positions, `drive.s`, phases, the aircraft's state) — print the last lines around the first violation.

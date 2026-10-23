@@ -353,7 +353,7 @@ function buildE3(color) {
   airlinerBody(g, C, C2, 4.66, 0.19, [[0.6, 0.18], [-0.72, 2.2], [-1.0, 2.2], [-0.32, 0.18]], [[0.55, 0.75, 0.42, 0.07], [0.0, 1.42, 0.42, 0.07]], fy);
   for (const dz of [-0.06, 0.06]) strut(g, new V3(-0.55, fy + 0.18, dz), new V3(-0.75, fy + 0.62, dz * 1.5), 0.035, C2);
   const dome = new THREE.Group(); dome.position.set(-0.75, fy + 0.68, 0); g.add(dome);
-  cyl(dome, 0.46, 0.46, 0.08, 20, 0xe6e8ea, 0, 0, 0); box(dome, 0.84, 0.085, 0.06, 0x2e3236, 0, 0, 0);
+  cyl(dome, 0.46, 0.46, 0.08, 20, 0x26292c, 0, 0, 0); box(dome, 0.84, 0.085, 0.06, 0xe6e8ea, 0, 0, 0);   // black rotodome, a white band across it
   const gr = gear(g, [[1.5, 0, 't'], [-0.05, 0.36, 'b4'], [-0.05, -0.36, 'b4']], 0.18);
   mergeStatic(g, [dome, gr]);
   return jetModel(g, gr, [], 0, 0, { more(dt, st) { if (st.airborne) dome.rotation.y += dt * 0.6; } });

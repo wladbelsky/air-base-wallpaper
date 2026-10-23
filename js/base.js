@@ -27,6 +27,9 @@ const BASE_LAYOUT = {
   // door]: the crew depots west / east (the cargo yard) and the heliport's; ground vehicles set off from inside and drive
   // back in (groundops: garageDepot)
   garages: [[-70.6, -5.8, 3.6, 3.6, 'e', 2.6], [41.2, -9.2, 3.4, 3.6, 's', 1.6], [2.8, 30.4, 3.4, 3.4, 'e', 1.0]],
+  // floodlight masts [x, z, aim x, aim z, a real SpotLight]: clear of every taxiing wingtip (units.spec checks it)
+  masts: [[-30.1, -12.6, -32, -4, true], [30.9, -12.6, 28, -4, true],   // (behind the front row, in the gaps between stands: on the taxiway's edge a heavy's wing hit them)
+    [-48, -12, -54, -14, false], [62.3, -12, 56, -8, false], [34.5, 31, 22, 38, false]],
   fireStation: [-4, 32, 6, 4.5],                            // x, z, w, d: three roll-up doors on its north side
   // with one runway the south strip is a storage yard and scrub: these footprints [x, z, r] (and the fire station's way
   // up to the runway, x −9…1) are kept free of the trees there (TERRAIN.fill)
@@ -355,11 +358,11 @@ function buildBase() {
   const road = box(g, 170, 0.04, 3.0, ASPH2, gp.x + go.x * 75, 0.01, gp.z + go.z * 75); road.rotation.y = Math.atan2(-go.z, go.x); road.castShadow = false;   // the road in (enemy columns come along it)
   // --- air defence, tanks (mounts are dynamic)
   const mounts = { ciws: [], aa: [], tanks: [], sams: [], shorad: [] };
-  const add = (list, m) => { list.push(m); dyn.push(m.yawG, m.pitchG); if (m.barrelG) dyn.push(m.barrelG); return m; };
+  const add = (list, m) => { list.push(m); dyn.push(m.yawG, m.pitchG); if (m.barrelG) dyn.push(m.barrelG); if (m.search) dyn.push(m.search); return m; };
   add(mounts.ciws, buildCRAM(g, -12, 35, 225, 120)); add(mounts.ciws, buildCRAM(g, -2, -50, 135, 120)); add(mounts.ciws, buildCRAM(g, 44, -4, 45, 120));
   add(mounts.aa, buildAAGun(g, -56, -16, 200, 140)); add(mounts.aa, buildAAGun(g, 59, 15, 20, 140)); add(mounts.aa, buildAAGun(g, -20, 57, 235, 140)); add(mounts.aa, buildAAGun(g, 30, -52, 90, 140));
   for (const [x, z, f] of [[-22, 49, 230], [-6, 56, 255], [18, 58, 290], [-56, 28.5, 200]]) add(mounts.tanks, buildTank(g, x, z, f, 70, true));
-  const pr = buildPatriotRadar(g, -40, 32, 215);
+  const pr = buildPatriotRadar(g, -40, 32, 215); dyn.push(pr.head);
   for (const [x, z, f] of [[-49, 38, 215], [-30, 33, 230], [-33, 40, 245], [-54, 34, 200]]) add(mounts.sams, buildSamLauncher(g, x, z, f, 70, 'patriot'));
   for (const [x, z, f] of [[38, -40, 60], [44, -34, 40]]) add(mounts.sams, buildSamLauncher(g, x, z, f, 80, 'nasams'));
   add(mounts.shorad, buildAvenger(g, -60, 4, 180, 150)); add(mounts.shorad, buildAvenger(g, 60, -20, 20, 150)); add(mounts.shorad, buildAvenger(g, -14, 50, 300, 150));
@@ -367,7 +370,7 @@ function buildBase() {
   for (let x = TW.x0; x <= TW.x1; x += 4) for (const sz of [-1, 1]) lines.push([x, 0.1, TW.z + sz * (TW.w / 2 + 0.2), 0x4a7cff]);
   const navs = [navLights(g, lines, null, 0.8), ...tower.lights];
   const floods = [];
-  for (const [x, z, ax, az, real] of [[-30, -4.2, -30, -16, true], [16, -4.2, 18, -16, true], [-48, -12, -54, -14, false], [56, -12, 56, -14, false], [34.5, 31, 22, 38, false]]) floods.push(buildLightMast(g, x, z, ax, az, real));
+  for (const [x, z, ax, az, real] of BL.masts) floods.push(buildLightMast(g, x, z, ax, az, real));
   const skyLights = [[-30, 52], [60, -36], [-62, 30], [40, 52]].map(([x, z]) => buildSkyLight(g, x, z));
   dyn.push(...floods.map(f => f.holder), ...guards.map(s => s.holder), ...skyLights.map(s => s.holder), ...GARAGE_DOORS.map(o => o.g));
   mergeStatic(g, dyn);
