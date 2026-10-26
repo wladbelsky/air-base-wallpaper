@@ -30,7 +30,8 @@ const ENEMY_TYPES = {
   su47: { name: 'Su-47 Berkut', build: buildSu47, speed: [25, 30], alt: [18, 26], hp: 2, missile: 0.2, w: st => 0.15 + st * 0.6 },
   su57: { name: 'Su-57 Felon', build: buildSu57, speed: [26, 31], alt: [18, 26], hp: 2, missile: 0.35, w: st => 0.25 + st * 1.2 },
   su34: { name: 'Su-34 Fullback', build: buildSu34, speed: [17, 21], alt: [12, 17], hp: 3, missile: 0.25, bombs: 6, scale: 1.3, w: st => 0.35 + st * 0.6, bomber: true },
-  tu22: { name: 'Tu-22M3 Backfire', build: buildTu22, speed: [20, 23], alt: [26, 32], hp: 4, missile: 0.5, bombs: 10, scale: 1.5, w: st => st > 0.3 ? 0.2 + st * 0.7 : 0.02, bomber: true, single: true }
+  tu22: { name: 'Tu-22M3 Backfire', build: buildTu22, speed: [20, 23], alt: [26, 32], hp: 4, missile: 0.5, bombs: 10, scale: 1.5, w: st => st > 0.3 ? 0.2 + st * 0.7 : 0.02, bomber: true, single: true },
+  tu95: { name: 'Tu-95 Bear', build: buildTu95, speed: [13, 16], alt: [28, 34], hp: 5, missile: 0.5, bombs: 10, scale: 1.7, w: st => st > 0.35 ? 0.1 + st * 0.5 : 0.02, bomber: true, single: true, props: true }   // like the Tu-22: slower, higher, tougher
 };
 const HELI_TYPES = { ka52: { name: 'Ka-52 Alligator', build: buildKa52, hp: 2 }, mi24: { name: 'Mi-24 Hind', build: buildMi24, hp: 3 } };
 const ARMOR_TYPES = { t90: { name: 'T-90', build: buildT90, hp: 3, speed: 2.6 }, bmp: { name: 'BMP-3', build: buildBMP, hp: 2, speed: 3.2 }, btr: { name: 'BTR-82', build: buildBTR, hp: 2, speed: 3.6 } };
@@ -83,7 +84,8 @@ function spawnBandits(n) {
     target.add(miss);
     const v = target.clone().sub(p).normalize().multiplyScalar(speed);
     const mesh = enemyMesh(type); mesh.scale.setScalar(1.25 * (ty.scale || 1)); scene.add(mesh);
-    ENEMIES.push({ kind: 'bandit', type, mesh, p, v, hp: ty.hp, age: 0, fired: false, smokeT: 0, sq, cs: `${sq} ${i + 1}`, bombAt: ty.bombs ? target.clone().setY(0) : null, bombs: ty.bombs || 0, miss });
+    const props = ty.props ? [] : null; if (props) mesh.traverse(o => { if (o.name === 'prop' || o.name === 'prop2') props.push([o, o.name === 'prop' ? 1 : -1]); });   // contra-rotating
+    ENEMIES.push({ kind: 'bandit', type, mesh, p, v, hp: ty.hp, age: 0, fired: false, smokeT: 0, sq, cs: `${sq} ${i + 1}`, bombAt: ty.bombs ? target.clone().setY(0) : null, bombs: ty.bombs || 0, miss, props });
   }
   const [who, role] = hq(), vars = { B: bearingWords(h), D: compassWord(h), T: ty.name, N: n === 1 ? 'a single bandit' : n === 2 ? 'two bandits' : n === 3 ? 'three bandits' : 'multiple bandits' };
   RADIO.say(who, radioLine(ty.bomber ? COMBAT.bombers : COMBAT.newBandits, vars), { role, cat: 'combat', prio: 2 });
@@ -322,7 +324,7 @@ const DAMAGE = {
   damage(a, inside) {
     a.dmgT = rand(150, 300); a.burnT = inside ? 0 : 40; a.dmgIn = inside; a.needsService = false;
     sayOnce('acHit', 6, () => RADIO.say(RADIO_NAMES.tower, radioLine(COMBAT.aircraftHit, { C: a.callsign }), { role: 'tower', cat: 'combat', prio: 3 }));
-    if (!inside && crewSpot(a)) GROUND_OPS.scenes.push(new FireScene(a));
+    if (!inside && crewSpot(a)) GROUND_OPS.scenes.push(new FireScene(a));            // the tender, then the repair crew (MaintScene)
   },
   close(L, p) {
     this.rwy = { L, x: p.x, z: p.z, t: 0 };
@@ -438,6 +440,7 @@ function updateBandit(e, dt, armed, st) {
     if (e.ps >= e.path.length) { e.dead = e.escaped = true; scene.remove(e.mesh); return; }
   } else e.p.addScaledVector(e.v, dt);
   e.mesh.position.copy(e.p); orientFrom(e.mesh, _al.copy(e.v).normalize(), e.path ? -e.smp.turn * 0.7 : 0.15 * Math.sin(e.age));
+  if (e.props) for (const [o, d] of e.props) o.rotation.x += d * 38 * dt;
   if (e.smoking) { e.smokeT += dt; while (e.smokeT > 0.06) { e.smokeT -= 0.06; FX.smoke.spawn(e.p.clone(), { s0: 0.5, s1: 2, life: 1.8, a0: 0.5, color: 0x333333, v: drift(1, 0.3) }); } }
   const dc = Math.hypot(e.p.x, e.p.z), ty = ENEMY_TYPES[e.type];
   // bombers (and attack jets) drop their stick when they get over the target; the others may loose a cruise missile on the run in

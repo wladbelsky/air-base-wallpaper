@@ -178,6 +178,20 @@ test('air-defence radars: AA search antennas spin in a fight, the Patriot radar 
   expect(calm.done, 'after the fight: antennas stopped, the radar back to its sector').toBe(true);
 });
 
+test('a Tu-95 wave: four turning propeller pairs (contra-rotating), and it bombs like the Tu-22', async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => { __t.forceFight(); window.__bombs = 0; const f = window.enemyBomb; window.enemyBomb = p => { __bombs++; return f(p); };
+    const w = ENEMY_TYPES.tu95.w; ENEMY_TYPES.tu95.w = () => 1e6; spawnBandits(1); ENEMY_TYPES.tu95.w = w;
+    window.__b = ENEMIES.find(e => e.type === 'tu95'); __b.hp = 1e6; window.__r0 = __b.props.map(([o]) => o.rotation.x); });
+  await wp.sim(1, { audio: true });
+  const r = await wp.run(() => ({ n: __b.props.length, turned: __b.props.map(([o, d], i) => Math.sign(o.rotation.x - __r0[i]) === d) }));
+  expect(r.n).toBe(8);
+  expect(r.turned.every(Boolean)).toBe(true);
+  const b = await wp.until(() => __bombs > 0 || !ENEMIES.includes(__b), 60, { audio: true });
+  expect(b.violations).toEqual([]);
+  expect(await wp.run(() => __bombs), 'its stick hit the ground').toBeGreaterThan(0);
+});
+
 test('the threat level builds by time only — 10 min to the top — hits on the base do not push it', async ({ wp }) => {
   await wp.boot();
   await wp.run(() => { __t.forceFight(); STRESS.level = 0.5; });

@@ -140,6 +140,7 @@ function craterGeometry() {
 }
 class Scorch {
   static MERGE = 0.6;                                // two craters closer than MERGE × (r1 + r2) become one
+  static CROWD = 30;                                 // slots kept free (crowd): a 3 s fade frees them at ~10/s
   constructor(scene, n) {
     const geo = craterGeometry();
     // no depth write: its faded ejecta would cut holes in ground decals drawn after it (runway lettering); nearly flat, so it doesn't need it
@@ -147,14 +148,15 @@ class Scorch {
     this.mesh = new THREE.InstancedMesh(geo, mat, n); this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false; this.mesh.renderOrder = 1; this.mesh.count = n;
     this.items = []; const zero = new THREE.Matrix4().makeScale(0, 0, 0);
-    for (let i = 0; i < n; i++) { this.mesh.setMatrixAt(i, zero); this.items.push({ on: false, p: new V3(), r: 1, base: 1, t: 0, max: 1, rot: 0 }); }
-    this.next = 0; this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new V3(); this._y = new V3(0, 1, 0);
+    for (let i = 0; i < n; i++) { this.mesh.setMatrixAt(i, zero); this.items.push({ on: false, fade: false, k: 0, p: new V3(), r: 1, base: 1, t: 0, max: 1, rot: 0 }); }
+    this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new V3(); this._y = new V3(0, 1, 0);
     scene.add(this.mesh);
   }
   spawn(p, r, life) {
     r *= 0.8; life = life || 45;
     if (pavedAt(p.x, p.z) && !runwayAt(p.x, p.z, 0.3)) life = Math.min(life, 40);   // (a runway's stays until it is repaired / patched)
-    let it = this.items.find(o => o.on && Math.hypot(o.p.x - p.x, o.p.z - p.z) < Scorch.MERGE * (o.r + r));
+    if (r < 1.1) life = Math.min(life, 20);          // shell holes (tank rounds far out past the wire, several a second): not for long
+    let it = this.items.find(o => o.on && !o.fade && Math.hypot(o.p.x - p.x, o.p.z - p.z) < Scorch.MERGE * (o.r + r));
     if (it) {                                        // on a live one: it grows (up to 1.4× the bigger of the two), its centre a little toward the hit
       const b = Math.max(it.base, r), w = 0.25 * r / (it.r + r);
       it.r = Math.min(Math.max(it.r, r) * 1.12, 1.4 * b); it.base = b; it.p.x += (p.x - it.p.x) * w; it.p.z += (p.z - it.p.z) * w;
@@ -162,27 +164,31 @@ class Scorch {
       this.absorb(it);
       return it;
     }
-    it = this.items[this.next]; this.next = (this.next + 1) % this.items.length;
-    it.on = true; it.p.set(p.x, groundH(p.x, p.z) + 0.01, p.z); it.r = it.base = r; it.t = it.max = life; it.rot = rand(0, TAU);
+    // a free slot (crowding keeps some); with none at all this one isn't made — rather than cut a showing one short
+    it = this.items.find(o => !o.on); if (!it) return null;
+    it.on = true; it.fade = false; it.k = 1; it.p.set(p.x, groundH(p.x, p.z) + 0.01, p.z); it.r = it.base = r; it.t = it.max = life; it.rot = rand(0, TAU);
+    this.crowd();
     return it;
   }
-  absorb(it) {                                       // a grown crater takes in neighbours it now overlaps (they're mostly under it)
-    for (let more = true; more;) {
-      more = false;
-      for (const o of this.items) if (o !== it && o.on && Math.hypot(o.p.x - it.p.x, o.p.z - it.p.z) < Scorch.MERGE * (o.r + it.r)) {
-        o.on = false; this.mesh.setMatrixAt(this.items.indexOf(o), this._m.makeScale(0, 0, 0)); this.mesh.instanceMatrix.needsUpdate = true;
-        it.t = it.max = Math.max(it.t, o.t); more = true;
-      }
-    }
+  /* a grown crater takes in the neighbours it now overlaps (mostly under it): they shrink away */
+  absorb(it) { for (const o of this.items) if (o !== it && o.on && !o.fade && Math.hypot(o.p.x - it.p.x, o.p.z - it.p.z) < Scorch.MERGE * (o.r + it.r)) { it.t = it.max = Math.max(it.t, o.t); this.fadeOut(o); } }
+  /* a crater on its way out: it shrinks away over (at most) 3 s — never just switched off */
+  fadeOut(o) { if (!o.fade) { o.fade = true; o.max = 12; o.t = Math.min(o.t, 3); } }
+  /* fewer than CROWD slots free (heavy bombing): the oldest start shrinking away, so a new one never takes a live one's slot */
+  crowd() {
+    let free = 0; for (const o of this.items) if (!o.on) free++;
+    if (free >= Scorch.CROWD) return;
+    const live = this.items.filter(o => o.on && !o.fade).sort((a, b) => a.t - b.t);
+    for (let i = 0; i < Scorch.CROWD - free && i < live.length; i++) this.fadeOut(live[i]);
   }
   /* fill in the craters around p (within r of their rim) */
-  repair(p, r) { for (const it of this.items) if (it.on && Math.hypot(it.p.x - p.x, it.p.z - p.z) < r + it.r * 0.5 && it.t > 3) { it.max = 12; it.t = 3; } }
+  repair(p, r) { for (const it of this.items) if (it.on && Math.hypot(it.p.x - p.x, it.p.z - p.z) < r + it.r * 0.5) this.fadeOut(it); }
   update(dt) {
     let changed = false;
     for (let i = 0; i < this.items.length; i++) {
       const it = this.items[i]; if (!it.on) continue;
       it.t -= dt; changed = true;
-      const k = it.t <= 0 ? 0 : Math.min(1, it.t / (it.max * 0.25));
+      const k = it.k = it.t <= 0 ? 0 : Math.min(1, it.t / (it.max * 0.25));
       if (it.t <= 0) it.on = false;
       this._q.setFromAxisAngle(this._y, it.rot); this._s.set(it.r * k, it.r * 0.8 * k * k, it.r * k * 0.85);   // flattens as it shrinks
       this.mesh.setMatrixAt(i, this._m.compose(it.p, this._q, this._s));

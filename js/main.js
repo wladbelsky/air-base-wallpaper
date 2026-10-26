@@ -95,7 +95,7 @@ function init() {
   FX.tracers = new Tracers(scene, 1200);
   FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);
   FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 320, true);
-  FX.scorch = new Scorch(scene, 60);
+  FX.scorch = new Scorch(scene, 120);
   FX.lights = new FlashLights(scene, 4);
   // shells, rockets and bombs that reach the ground: dust, or a bomb hitting a structure
   FX.tracers.onSplash = (p, big) => {

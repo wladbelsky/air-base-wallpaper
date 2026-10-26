@@ -130,7 +130,7 @@ controls how often this happens (0 = off).
 - **Ground crew:** an aircraft back on an open stand, or a helicopter on its pad, gets a fuel truck (hose out) and,
   if it is armed, a munitions loader with its type's load (bombs, missiles, gun ammunition for the A-10, rockets for
   the attack helicopters, crates) that it lifts onto the aircraft; it can't leave until they pull away (a launch cuts
-  the work short). The vehicles (the tugs in olive drab) have cab glass, headlights and amber beacons, keep to their side of the road, queue
+  the work short). The vehicles (the tugs and munitions loaders in olive drab) have cab glass, headlights and amber beacons, keep to their side of the road, queue
   behind each other and back out of an aircraft's way. Unloaded pallets carry crates, drums, covered loads or spares.
 - In peacetime the tanks on the perimeter turn their turrets now and then, looking around.
 
@@ -139,7 +139,7 @@ controls how often this happens (0 = off).
 When the music has been playing for 5 seconds, the base goes to an air raid:
 
 - **Enemy aircraft:** Su-25 Frogfoot (bombs), Su-35 Flanker, Su-47 Berkut, Su-57 Felon, Su-34 Fullback bombers and,
-  as stress builds, Tu-22M3 Backfire bombers. Bombers aim their stick at the hangars, shelters, the tower or the
+  as stress builds, Tu-22M3 Backfire and Tu-95 Bear bombers (four turboprops with contra-rotating propellers). Bombers aim their stick at the hangars, shelters, the tower or the
   runway, but only about a third of them put it on target: the rest land wide, a line of craters across the grass or
   the concrete. The others may loose a cruise missile on the run in.
 - **Missiles:** cruise missiles skim in low toward the base's structures (C-RAM, NASAMS, Stingers and helicopter guns
@@ -152,12 +152,14 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
 - **Our fighters** fly passes across the screen: chasing a bandit, chased by one (flares, the wingman saves them), or
   sweeping; the A-10 (and now and then an F-15E with bombs) on close air support runs.
 - **Hits:** a projectile that reaches its target scores on the **next beat** of the music. What gets through hits the
-  base: explosions, fires and craters in the ground (a second hit on a crater widens it rather than piling on).
+  base: explosions, fires and craters in the ground (a second hit on a crater widens it rather than piling on; every
+  crater shrinks away in the end). Aircraft in flight always pass above the buildings' roofs.
   Knocked-out armour burns black, smokes, then settles into the ground.
 - **Damage:** whatever a bomb or missile lands on is out for a while. An AA gun, C-RAM, Avenger, tank, launcher or the
   Patriot radar stops tracking and firing for one to two minutes, burning and then smoking, until it is back on line.
-  An aircraft hit on its stand is DAMAGED for a few minutes: a crash tender foams it and the ground crew services it
-  afterwards. A crater on a runway closes it: a green 10x10 repair truck drives out, its crane lowers repair mats into
+  An aircraft hit on its stand is DAMAGED: a crash tender foams it, then a maintenance truck (the same green 10x10
+  with a workshop body) sets a spare engine down beside it with its crane while the crew works on it — repaired, it
+  gets the usual fuel truck. A crater on a runway closes it: a green 10x10 repair truck drives out, its crane lowers repair mats into
   the crater, and the runway opens again (within about a minute, and stays open at least three minutes; the departures
   waiting for it show RWY CLOSED); with two runways the arrivals use the other one meanwhile. The
   base never goes down completely: at most 40 % of the air defence, one runway and a quarter of the aircraft are out at

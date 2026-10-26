@@ -108,6 +108,14 @@ function textDecal(p, text, w, h, x, y, z, rotY) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshPhongMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 }));
   m.rotation.set(-Math.PI / 2, 0, rotY || 0); m.position.set(x, y, z); m.receiveShadow = true; p.add(m); return m;
 }
+/* what an aircraft in flight keeps clear of (Aircraft.clearRoofs): the buildings' boxes [x0, x1, z0, z1, top, group] —
+   collected by the builders below; one in a hidden group (the storage yard with two runways) doesn't count */
+const OBSTACLES = [];
+function obstacle(p, x, z, w, d, top, rotY = 0) {
+  const c = Math.abs(Math.cos(rotY)), s = Math.abs(Math.sin(rotY)), hw = (w * c + d * s) / 2, hd = (w * s + d * c) / 2;
+  OBSTACLES.push([x - hw, x + hw, z - hd, z + hd, top, p]); OBSTACLES.top = Math.max(OBSTACLES.top, top);
+}
+function obstacleTop(x, z, m = 0) { let t = 0; for (const o of OBSTACLES) if (x > o[0] - m && x < o[1] + m && z > o[2] - m && z < o[3] + m && o[4] > t && o[5].visible) t = o[4]; return t; }   // (m: that much around each)
 /* hardened aircraft shelter: concrete arch (seasonal material), back wall, front headwall with two sliding door leaves */
 function buildShelter(p, s, win) {
   const g = new THREE.Group(); g.position.set(s.x, 0, s.z); p.add(g);
@@ -129,6 +137,7 @@ function buildShelter(p, s, win) {
   }
   box(g, s.w * 1.6, 0.08, 0.15, DARK, 0, 0.04, fz + 0.5);                                       // door rail
   s.leaves = leaves; s.group = g; s.H = H;
+  obstacle(p, s.x, s.z + 0.25, s.w + 1.6, s.d + 1.1, H + 0.42);
   return [...leaves.map(l => l.g)];
 }
 /* hangar: walls, a shallow curved roof (seasonal), front door made of sliding panels, lit office windows */
@@ -155,11 +164,13 @@ function buildHangar(p, s, win) {
   }
   if (s.size !== 'small') { box(g, w * 0.3, 1.2, 1.2, WALL2, -w / 2 + w * 0.15, 0.6, -d / 2 - 0.6); box(g, w * 0.3 + 0.02, 0.22, 0.02, win, -w / 2 + w * 0.15, 0.8, -d / 2 - 1.21); }   // office lean-to
   s.panels = panels; s.group = g; s.H = H;
+  obstacle(p, s.x, s.z, w + 0.3, d + 0.4, cy + R);                                              // (up to the roof's crown)
   return panels.map(q => q.g);
 }
 /* control tower: shaft, glazed cab (window material, lit at night), roof, beacon and antennas */
 function buildTower(p, x, z, win) {
   const g = new THREE.Group(); g.position.set(x, 0, z); g.scale.setScalar(0.75); p.add(g);
+  obstacle(p, x - 0.9 * 0.75, z, 4.4 * 0.75, 3.3 * 0.75, 1.8 * 0.75); obstacle(p, x + 0.6 * 0.75, z, 3.2 * 0.75, 3.2 * 0.75, 7.45 * 0.75);   // base, shaft and cab (up to its roof: the antennas are wires)
   box(g, 4.2, 1.6, 3.2, WALL, -1.2, 0.8, 0); box(g, 4.3, 0.12, 3.3, ROOF_MAT, -1.2, 1.66, 0);  // base building
   box(g, 4.25, 0.25, 0.02, win, -1.2, 1.0, 1.61);
   taper(g, 1.6, 6.2, 1.6, WALL, 0.6, 3.1, 0, 0.82, 0.82);                                    // shaft
@@ -175,6 +186,7 @@ function buildTower(p, x, z, win) {
 /* airport surveillance radar: lattice mast and the rotating antenna (dynamic) */
 function buildRadar(p, x, z) {
   const g = new THREE.Group(); g.position.set(x, 0, z); p.add(g);
+  obstacle(p, x, z, 2.8, 2.8, 5.3);
   box(g, 1.6, 0.8, 1.6, WALL2, 0, 0.4, 0);
   for (const [a, b] of [[-0.6, -0.6], [0.6, -0.6], [-0.6, 0.6], [0.6, 0.6]]) strut(g, new V3(a, 0.8, b), new V3(a * 0.3, 4.2, b * 0.3), 0.05, 0x9a9a92);
   box(g, 0.8, 0.1, 0.8, 0x9a9a92, 0, 4.25, 0);
@@ -211,6 +223,7 @@ function rollDoors(p, cx, cz, w, d, face, n, dw, dh, gap, c, out) {
 /* a vehicle shed: walls, flat roof, a concrete pad in front, one roll-up door (rollDoors) */
 function buildGarage(p, [x, z, w, d, face, out], win) {
   const h = 1.8, [nx, nz] = FACE[face];
+  obstacle(p, x, z, w + 0.15, d + 0.15, h + 0.1);
   box(p, w, h, d, WALL2, x, h / 2, z); box(p, w + 0.15, 0.1, d + 0.15, ROOF_MAT, x, h + 0.05, z);
   const pl = nx ? w / 2 : d / 2, ax = x + nx * pl, bx = x + nx * (pl + 1.4), az = z + nz * pl, bz = z + nz * (pl + 1.4), sx = Math.abs(nz) * 1.2, sz = Math.abs(nx) * 1.2;
   slab(p, Math.min(ax, bx) - sx, Math.min(az, bz) - sz, Math.max(ax, bx) + sx, Math.max(az, bz) + sz, 0.035, CONC);   // the pad in front of the door
@@ -219,6 +232,7 @@ function buildGarage(p, [x, z, w, d, face, out], win) {
 }
 function buildBuilding(p, x, z, w, d, h, win, rotY, c) {
   const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rotY || 0; p.add(g);
+  obstacle(p, x, z, w + 0.15, d + 0.15, h + 0.42, rotY);
   box(g, w, h, d, c || WALL, 0, h / 2, 0); box(g, w + 0.15, 0.12, d + 0.15, ROOF_MAT, 0, h + 0.06, 0);
   for (const sz of [-1, 1]) for (let fy = 0; fy < Math.round(h / 1.1); fy++) box(g, w * 0.86, 0.22, 0.02, win, 0, 0.6 + fy * 1.1, sz * (d / 2 + 0.01));
   box(g, 0.5, 0.3, 0.4, 0x7a7d80, w * 0.25, h + 0.27, 0);                                    // AC unit
@@ -226,7 +240,7 @@ function buildBuilding(p, x, z, w, d, h, win, rotY, c) {
 }
 /* light mast with floodlights (one real SpotLight on the first `real` masts, cones only on the rest) */
 function buildLightMast(p, x, z, aimX, aimZ, real) {
-  cyl(p, 0.08, 0.12, 5.2, 5, 0x8a8c8e, x, 2.6, z); box(p, 0.9, 0.12, 0.2, 0x55585b, x, 5.25, z);
+  cyl(p, 0.08, 0.12, 5.2, 5, 0x8a8c8e, x, 2.6, z); box(p, 0.9, 0.12, 0.2, 0x55585b, x, 5.25, z); obstacle(p, x, z, 1.2, 1.2, 5.4);
   const sl = makeSearchlight(p, x, 5.15, z, { angle: 0.55, len: 14, intensity: 1.4, coneOpacity: 0.07, color: 0xffe2b8, noLight: !real });
   sl.holder.lookAt(aimX, 0, aimZ); sl.mast = true;
   return sl;
@@ -311,6 +325,7 @@ function buildRunway(g, R, names, lines, rabbit, papi) {
 }
 /* the whole base; returns its parts (mounts, lights, doors, structures to hit) for main.js / airfield.js */
 function buildBase() {
+  OBSTACLES.length = 0; OBSTACLES.top = 0;
   const g = new THREE.Group(), dyn = [], win = windowMat(), R = BL.rwy, TW = BL.twy, A = BL.apron;
   const lines = [];   // light lists for navLights
   const rabbit = [], my = 0.046;

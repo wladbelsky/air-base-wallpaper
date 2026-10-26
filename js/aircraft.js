@@ -15,6 +15,7 @@ function orientFrom(obj, f, bank) {
   _m4.makeBasis(f, _u2, _r2); obj.quaternion.setFromRotationMatrix(_m4);
 }
 const headingOf = d => Math.atan2(d.z, d.x);
+const ROOF_CLEAR = 1.6;   // how far above a roof an aircraft passes (rotor / gear clear of it: Aircraft.clearRoofs)
 /* fixed guns (jets): a round leaves along the nose f, bent toward the wanted direction d (unit, changed in place) by at most
    GUN_CONE sideways / up and `down` downward (a strafing run has its nose on the ground); true when d was inside that cone */
 const GUN_CONE = 0.05, _gr = new V3(), _gu = new V3();
@@ -120,10 +121,21 @@ class Aircraft {
     this.mesh.position.copy(s.pos);
     if (this.pathOff) this.mesh.position.add(_po.set(-s.dir.z, 0, s.dir.x).normalize().multiplyScalar(this.pathOff));   // wingman beside the lead
     if (this.pathDy) this.mesh.position.y += this.pathDy;
+    this.clearRoofs(dt);
     this.orientFlight(s.dir, s.turn * this.bankFor(this.v, s.R), dt);
     return this.ps >= P.length - 1e-4;
   }
   bankFor(v, R) { return Math.min(this.spec.bankMax, Math.atan(v * v / (R * 9.8))); }
+  /* rooftops (OBSTACLES): looking ahead along its way (about 1.5 s) it rises to ROOF_CLEAR above any roof under it —
+     eased up, and back down after; away from the buildings nothing changes (a helicopter coming home low once flew
+     through the big hangar) */
+  clearRoofs(dt) {
+    const p = this.mesh.position, f = this.fwd, hl = Math.hypot(f.x, f.z) || 1, ahead = Math.max(6, (this.v || 0) * 1.5);
+    if (!this.roofLift && p.y > OBSTACLES.top + ROOF_CLEAR) return;                     // above them all anyway
+    let top = 0; for (let k = 0; k <= ahead; k += 1.5) top = Math.max(top, obstacleTop(p.x + f.x / hl * k, p.z + f.z / hl * k, 1));   // (1 around: a mast is narrower than the step)
+    const want = top ? Math.max(0, top + ROOF_CLEAR - p.y) : 0, l = this.roofLift || 0;
+    this.roofLift = l + clamp(want - l, -1.5 * dt, 4 * dt); p.y += this.roofLift;
+  }
   orientFlight(dir, bankT, dt) {
     this.bank += (bankT - this.bank) * Math.min(1, dt * 1.5);
     // the pitch eases toward the path's: no snap where pieces join (a climb levelling off, the flare); orientation only
@@ -151,7 +163,7 @@ class Aircraft {
     o.R += clamp(o.tR - o.R, -1.5 * dt, 1.5 * dt);
     this.theta += (o.v / o.R) * dt;
     const th = this.theta; this.orbitPos(th, this.mesh.position);
-    this.v = o.v;
+    this.v = o.v; this.clearRoofs(dt);
     this.orientFlight(_v.set(-Math.sin(th), 2.4 * Math.cos(th * 2 + o.ph) / o.R, Math.cos(th)), this.bankFor(o.v, o.R), dt);
   }
   pathToOrbit(path, from, heading, lead, slope0) {   // slope0: the climb rate it arrives with (no kink in the climb)

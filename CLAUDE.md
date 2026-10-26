@@ -21,8 +21,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/models.js` | mesh helpers (`M`, `box`, `cyl`, `taper`, `prism`, `strut`, `deckLine`…), `mergeStatic`, `disposeTree`, nav lights, searchlights, seasonal shared materials `ROOF_MAT` / `ARCH_MAT`, mounts: `buildCIWS` / `buildGun` and the land ones `buildCRAM`, `buildAAGun`, `buildTank`, `buildSamLauncher` (Patriot / NASAMS), `buildAvenger`, `buildPatriotRadar` |
 | `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); the fence is a rectangle with chamfered corners and a west annex around both runways' approach lights (`fence`, `gate` = the gate segment, `towers` = guard-tower corners; the perimeter road is its 5-unit inward offset, `insetPoly`); `masts` (floodlight masts; units.spec keeps them clear of every taxiing aircraft's fuselage / wings and of the vehicles' ways); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
 | `js/terrain.js` | `TERRAIN`: the ground (tiled canvas texture + vertex-colour patches) and the vegetation per season (InstancedMesh per kind: firs and snow drifts / cacti, rocks, shrubs / leafy trees in spring or autumn colours), weather particles (snowfall, falling leaves) |
-| `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; smooth fuselages are `lathe` bodies (profile `[x, r, axis lift]`, `transportBody` for the transports with the cockpit `windscreen` band on the nose); `gear(g, legs, h)` legs `[x, z, kind]` — `n` / `s` / `t` / `tan` / `b4` / `b6` — folding up over ~1 s with `st.gearDown` (`tickGear`); KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
-| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — instanced ring buffer; they flatten and shrink away at the end of their life; a hit within `MERGE`·(r1 + r2) of a live one widens it (≤ 1.4×; `absorb` takes in neighbours it then overlaps — the harness flags stacked craters); `repair(p, r)` fades them in 3 s; on paved ground (`pavedAt`, base.js) ≤ 40 s), `FlashLights` |
+| `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; smooth fuselages are `lathe` bodies (profile `[x, r, axis lift]`, `transportBody` for the transports with the cockpit `windscreen` band on the nose); `gear(g, legs, h)` legs `[x, z, kind]` — `n` / `s` / `t` / `tan` / `b4` / `b6` — folding up over ~1 s with `st.gearDown` (`tickGear`); KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Tu-95 — propeller groups `prop` / `prop2`, spun contra-rotating on the clones (`e.props`) —, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
+| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — instanced ring buffer; they flatten and shrink away at the end of their life — every one: `fadeOut` (3 s) is the only early way out (`repair`, `absorb`, and `crowd`: fewer than `CROWD` of the 120 slots free, the oldest start fading), and with no free slot a new crater simply isn't made — once a full ring buffer took over live ones and they vanished at once; a hit within `MERGE`·(r1 + r2) of a live one widens it (≤ 1.4×; `absorb` fades out the neighbours it then overlaps — the harness flags stacked craters, fading ones aside); on paved ground (`pavedAt`, base.js) ≤ 40 s, shell holes (r < 1.1: the tanks' rounds past the wire, several a second) ≤ 20 s), `FlashLights` |
 | `js/radio.js` | callsigns (+ `ENEMY_NAMES`, `RADIO_NAMES` — the tower is `<base name> TOWER`), `RADIO` subtitle queue, mission orders, `STRESS` + `THREAT_TIERS`, `radioLine()`, line pools `OPS` / `OPS_VOICE` / `OPS_UNARMED` / `COMBAT` / `AIRWAR_LINES` / `ENEMY_LINES` / `TANKER_LINES` / `LINES` (see "Radio lines & threat tiers") |
 | `js/airfield.js` | `AIRFIELD`: homes (`assignHome` / `release`), taxi routes (`pushback`, `toHold`, `lineUp`, `exitFor`, `homeRoute`), runway use (`rwy`, `arrivals`, `canLineUp`, `canApproach`, `clearToLand`), ground traffic (`blocked`), shelter / hangar doors, stand markings and helicopter pads (`updateMarks`) — see "Airfield" |
 | `js/aircraft.js` | `Aircraft` → `FixedWing` / `Helicopter` state machines, types, `Flyby` |
@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=22`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=23`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -84,6 +84,13 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   (every 2 s) rebuilds when `seasonNow()` changes. Weather (`CFG.weather`): snowfall in winter, leaves in autumn.
 
 ## Airfield (`js/airfield.js`, `js/aircraft.js`)
+- **Rooftops**: the builders in `base.js` list the buildings' boxes in `OBSTACLES` (`obstacle(p, x, z, w, d, top)`:
+  hangars to the barrel roof's crown, shelters, the tower to its cab roof, buildings, sheds, the radar, the floodlight
+  masts; one in a hidden group — the storage yard with two runways — doesn't count); `obstacleTop(x, z)`. In flight
+  (`followPath`, `orbitStep`) `clearRoofs` looks ahead along the way (≥ 6, ~1.5 s) and eases the aircraft up to
+  `ROOF_CLEAR` (1.6) above a roof under it (up 4/s, down 1.5/s; nothing below `OBSTACLES.top` + 1.6 is checked) —
+  a helicopter coming home low once flew through the big hangar. The harness flags anything in flight lower than a roof
+  top + 0.6 inside its box.
 - **A count lowered** (`syncAirWing` → `retiring`, `retireAircraft` in `main.js`): one still in `ready` (not pushed back)
   goes back to `parked`, a helicopter in `spinup` to `spindown` — then it leaves at once; one taxiing out takes off and
   one up is sent to land (`requestLand`); each leaves the air wing once parked. In the air that takes a few minutes
@@ -234,11 +241,20 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   taxiing aircraft's fuselage / inner wing, a vehicle jump (> 0.8 in a step), two moving vehicles < 0.65 apart, and a
   vehicle through a shut shelter / hangar door. Scenes list their vehicles in `veh` (objects with a `position`).
 - **Vehicle models** (`VEH_BUILD`): cab glass (`cabGlass`), bumpers, head / tail lights and an amber beacon (`vehLights`;
-  the beacon's material has `userData.day`: `updateLights` flashes it by day too). Tugs and the repair truck are olive
-  drab (`OD_GREEN`), the K-loader and the munitions loader yellow, the crash tenders red.
-- **Damage scenes**: `FireScene` (a damaged aircraft on a `crewSpot`: one crash tender — a `CrewCar` on the fuel
-  truck's way, east side — waits while a crew still holds `groundBusy`, then foams it) and `RepairScene` (runway
-  repair: see "Combat").
+  the beacon's material has `userData.day`: `updateLights` flashes it by day too). Tugs, munitions loaders and the HX
+  trucks are olive drab (`OD_GREEN`), the K-loader yellow, the crash tenders red.
+- **HX trucks** (`hxTruck(g, carry)`: MAN HX 10x10 style chassis, cab, five axles, flatbed and a loader crane — `crane` →
+  `boom` → `arm` / `hook` → `cable` / `block` → `carry`, all dynamic): `repair` (three `mat`s on the bed) and `maint`
+  (a workshop box and a `spare` engine on a cradle; its `carry` is an engine). `Crane` drives the crane: `to(dt, lx,
+  lz, hy)` eases slew (1.5 rad/s) / reach / hook height toward a point in the truck's frame and sets `there`; `run(dt)`
+  works through `steps` ({ at, h, act, hold }), each one only once `there` — `lift(src, dst, pick, drop)` is the six
+  steps of one load. The runway truck used to work on fixed time slices: with the work cut to 15 s the mats were let go
+  halfway round.
+- **Damage scenes**: `FireScene` (a damaged aircraft on a `crewSpot`: one crash tender on `besideWay` — the fuel
+  truck's way, east side — waits while a crew still holds `groundBusy`, then foams it; when it pulls away it hands over
+  to `MaintScene`): the `maint` truck the same way a wingtip further out, its crane sets the spare engine down by the
+  aircraft (held on the hook while the crew works `MAINT_T` 30–40 s, sparks), takes it back, stows, drives off — the
+  aircraft is repaired (`dmgT` 0, kept ≥ 5 till then, `needsService`). `RepairScene` (runway repair: see "Combat").
 - **Parachutes** (`dropChute`, `updateChutes`): open, drift with `WIND`, land, the canopy collapses, gone after ~16 s.
 
 ## Combat (`js/combat.js`, `js/airwar.js`, `js/main.js`)
@@ -272,7 +288,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   antennas / the radar head still; fire then smoke (`DAMAGE.smoke`), back with its crater repaired. Aircraft `parked`
   within R + span·0.35 (in a shelter / hangar: 30 %) get `dmgT` 150–300 s: `canLaunch()` false (autoLaunch /
   scrambleSupport / `requestLaunch` go by it), status DAMAGED, no service / unloading meanwhile, a `FireScene` (one
-  crash tender the crew's way, foams it: `burnT` 0), `needsService` after. A bomb on a runway (`runwayAt`) closes it
+  crash tender the crew's way, foams it: `burnT` 0) then a `MaintScene` (repaired when its crew is done, ~1.5 min in
+  all); the 150–300 s timer is left for the ones no crew reaches (shelters, hangars, other homes). A bomb on a runway (`runwayAt`) closes it
   (`DAMAGE.rwy`, `AIRFIELD.closed` → `canLineUp` / `canApproach` / `clearToLand` (go around) / `landR` / `canCross`;
   a pair's wingman still joins a lead already lined up) and sends a `RepairScene`. Caps: ≤ `DMG_UNITS` (40 %) units
   down, never the Patriot radar and both NASAMS launchers; one runway closed (none while an emergency has one, and no
@@ -289,10 +306,11 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   road until the aircraft on the runway when it closed are off it (`AIRFIELD.setOf(L)` empty: a lined-up E-3 once
   rolled into it) and, for the north one, none landed is still on a link (`rollout` / `taxi_in` south of the taxiway:
   one met it head-on), then goes through (`through`); it stops
-  short of the crater, lifts the mats over into it (`work`, `craneTo`: slew / reach / hook height in the truck's frame,
-  eased), `DAMAGE.filled` fades the craters, it U-turns on the runway and drives back the way it came; the runway
+  short of the crater, lifts the mats over into it (`work`: a `Crane.lift` per mat, a new one only while a whole
+  `CYCLE_T` (9 s) still fits in `W` — `W` ≥ one cycle, ≤ 18 s — the one under way always finishes), `DAMAGE.filled`
+  fades the craters, it U-turns on the runway and drives back the way it came; the runway
   opens when it is off it (`reopen`). Its routes are `AIRFIELD.round`ed (a long truck: wide turns). It drives at
-  `REPAIR_V` (3.4) and works ≤ 15 s: a closure stops the departures at the holding point, the queue fills
+  `REPAIR_V` (3.4): a closure stops the departures at the holding point, the queue fills
   (`queueFull`) and the tugs wait at the stands — a mass launch in a fight once looked stuck for a minute and more.
   Departures waiting for a closed north runway (`ready` / `hold_short`) show RWY CLOSED on the panel (`status`).
 - **Fixed guns** (`gunAim` in `aircraft.js`): a jet's rounds (`gunTick`; not helicopters, nor side guns `o.side`) leave

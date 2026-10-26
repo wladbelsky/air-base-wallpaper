@@ -35,7 +35,7 @@ test('bombs on every air-defence unit: at most 40 % go down, never the Patriot a
   expect((await wp.sim(5, { audio: true })).violations).toEqual([]);
 });
 
-test('an aircraft hit on its stand: DAMAGED, no launch, the crash tender foams it, serviced afterwards', async ({ wp }) => {
+test('an aircraft hit on its stand: DAMAGED, no launch, the crash tender foams it, the maintenance truck repairs it, then serviced', async ({ wp }) => {
   await wp.boot();
   await wp.run(() => { CFG.auto = false; CFG.missions = 0; CFG.flyby = 0; TANKER.timer = 1e9; GROUND_OPS.emTimer = 1e9;
     window.__a = AIRCRAFT.find(a => a instanceof FixedWing && a.state === 'parked' && crewSpot(a));
@@ -49,9 +49,21 @@ test('an aircraft hit on its stand: DAMAGED, no launch, the crash tender foams i
   const out = await wp.until(() => !(__a.burnT > 0) && !GROUND_OPS.scenes.some(s => s instanceof FireScene && s.a === __a), 90, { audio: true });   // (bombs may hit others meanwhile)
   expect(out.violations).toEqual([]);
   expect(out.done, 'the fire is out, the tender gone').toBe(true);
-  await wp.run(() => { __a.dmgT = 2; });
-  const fixed = await wp.until(() => GROUND_OPS.scenes.some(s => s instanceof ServiceScene && s.a === __a), 60);
-  expect(fixed.done, 'repaired: the ground crew services it').toBe(true);
+  // the maintenance truck: its crane sets the spare engine down beside it (on the ground, near the aircraft), the crew
+  // works, the engine goes back; then it is repaired and the fuel truck comes
+  await wp.run(() => { window.__mt = { down: null }; });
+  const fixed = await wp.until(() => {
+    const sc = GROUND_OPS.scenes.find(s => s instanceof MaintScene && s.a === __a);
+    if (sc && sc.phase === 'work' && sc.crane.steps[0] === sc.holdStep && sc.crane.there && !__mt.down) {
+      const b = sc.crane.blk.getWorldPosition(new THREE.Vector3()); __mt.down = [b.y, Math.hypot(b.x - __a.mesh.position.x, b.z - __a.mesh.position.z), sc.crane.carry.visible, __a.groundBusy];
+    }
+    return !(__a.dmgT > 0) && GROUND_OPS.scenes.some(s => s instanceof ServiceScene && s.a === __a);
+  }, 150, { audio: true });
+  expect(fixed.violations).toEqual([]);
+  expect(fixed.done, 'repaired, then serviced').toBe(true);
+  const d = await wp.run(() => __mt.down);
+  expect(d, 'the engine was set down by the aircraft').not.toBeNull();
+  expect(d[0]).toBeLessThan(0.5); expect(d[1]).toBeLessThan(3.5); expect(d[2]).toBe(true); expect(d[3], 'held by the repair crew').toBe(true);
   expect(await wp.run(() => __a.status[0])).not.toBe('DAMAGED');
 });
 
@@ -71,13 +83,22 @@ test(`a bomb on the runway closes it: the repair truck mats the crater, the runw
   await wp.boot();
   await wp.run((n) => { CFG.runways = n; __t.reset(); }, runways);
   await wp.sim(30);
-  await wp.run(() => { window.__L = CFG.runways > 1 ? BASE_LAYOUT.rwy2 : BASE_LAYOUT.rwy; window.__ph = new Set(); enemyBomb(new THREE.Vector3(14, 0, __L.z)); });
+  await wp.run(() => { window.__L = CFG.runways > 1 ? BASE_LAYOUT.rwy2 : BASE_LAYOUT.rwy; window.__ph = new Set(); window.__drops = []; enemyBomb(new THREE.Vector3(14, 0, __L.z)); });
   expect(await wp.run(() => [!!DAMAGE.rwy, DAMAGE.closed(__L), AIRFIELD.landR() === BASE_LAYOUT.rwy])).toEqual([true, true, true]);
-  const r = await wp.until(() => { const sc = GROUND_OPS.scenes.find(s => s instanceof RepairScene); if (sc) __ph.add(sc.phase); return !DAMAGE.rwy; }, 80);
+  // every mat is let go with the hook right over the crater, down at the bottom (the boom swung all the way round)
+  const r = await wp.until(() => {
+    const sc = GROUND_OPS.scenes.find(s => s instanceof RepairScene); if (!sc) return !DAMAGE.rwy;
+    __ph.add(sc.phase);
+    if ((sc.placed || 0) > __drops.length) { const b = sc.crane.blk.getWorldPosition(new THREE.Vector3()); __drops.push([Math.hypot(b.x - sc.c.x, b.z - sc.c.z), b.y]); }
+    return !DAMAGE.rwy;
+  }, 80);
   expect(r.violations).toEqual([]);
   expect(r.done, 'open again').toBe(true);
   expect(await wp.run(() => [...__ph])).toEqual(expect.arrayContaining(['in', 'work', 'stow', 'out']));
-  expect(await wp.run(() => FX.scorch.items.some(i => i.on && runwayAt(i.p.x, i.p.z) === __L)), 'the crater is filled').toBe(false);
+  const drops = await wp.run(() => __drops);
+  expect(drops.length, 'mats laid').toBeGreaterThan(0);
+  for (const [d, y] of drops) { expect(d, 'over the crater').toBeLessThan(0.15); expect(y, 'hook down').toBeLessThan(0.3); }
+  expect(await wp.run(() => FX.scorch.items.some(i => i.on && !i.fade && runwayAt(i.p.x, i.p.z) === __L)), 'the crater is filled').toBe(false);
   const gone = await wp.until(() => !GROUND_OPS.scenes.some(s => s instanceof RepairScene), 60);
   expect(gone.violations).toEqual([]);
   expect(gone.done, 'the truck is back in its shed').toBe(true);
@@ -95,6 +116,21 @@ test('a second runway hit while one is closed only craters (patched soon): never
   expect(await wp.run(() => [DAMAGE.closed(BASE_LAYOUT.rwy2), DAMAGE.closed(BASE_LAYOUT.rwy)])).toEqual([true, false]);
   await wp.sim(12);
   expect(await wp.run(() => FX.scorch.items.some(i => i.on && runwayAt(i.p.x, i.p.z) === BASE_LAYOUT.rwy && i.t > 3))).toBe(false);
+});
+
+test('craters always shrink away, even when the pool overflows under heavy bombing', async ({ wp }) => {
+  await wp.boot();
+  // 200 craters in 10 s (more than the pool holds): a crater only ever goes off at the end of its shrink (scale ~0) — never
+  // switched off or taken over while it still shows
+  const r = await wp.run(() => {
+    const S = FX.scorch, sh = new Map(); let popped = 0, made = 0;
+    const look = () => { for (const o of S.items) { if (sh.has(o) && sh.get(o).on && (!o.on || o.p.x !== sh.get(o).x) && sh.get(o).k > 0.05) popped++; sh.set(o, { on: o.on, k: o.k, x: o.p.x }); } };
+    for (let i = 0; i < 400; i++) { if (i % 2 === 0 && S.spawn(new THREE.Vector3(-70 + (i % 40) * 3.5, 0, 40 + Math.floor(i / 40) * 4), 2)) made++; look(); S.update(0.05); look(); }
+    return { popped, made };
+  });
+  expect(r.popped, 'none cut short while showing').toBe(0);
+  expect(r.made).toBeGreaterThan(100);
+  expect((await wp.sim(10)).violations).toEqual([]);
 });
 
 test('craters never stack: hits on a live crater widen it', async ({ wp }) => {

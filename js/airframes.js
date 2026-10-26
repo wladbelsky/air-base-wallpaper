@@ -601,6 +601,30 @@ function buildTu22() {
   enemyGlows(g, -2.05, 0.28, [-0.22, 0.22], 0.8);
   mergeStatic(g, []); return g;
 }
+/* Tu-95 Bear — the turboprop strategic bomber, ~46 m: a long slim fuselage, 35° swept wings with four nacelles, each
+   with contra-rotating propellers (groups 'prop' / 'prop2': combat.js spins them on the clones), a tall swept fin, a tail
+   gun (scaled up in ENEMY_TYPES) */
+const PROP_DISC = new THREE.MeshBasicMaterial({ color: 0x2a2f34, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }); PROP_DISC.userData.shared = true;
+function buildTu95() {
+  const g = new THREE.Group(), C = M(0xb4b8bc), C2 = M(0x9ea3a8), D = M(0x2c2f33), R = M(0x8f2b22), CAN = CANOPY();
+  tube(g, -2.1, 1.3, 0.17, 0.19, C, 0.3, 0, 10); noseCone(g, 1.3, 0.3, 0.19, 0.55, C, 10);
+  taper(g, 0.42, 0.1, 0.26, CAN, 1.2, 0.46, 0, 0.6, 0.75, -0.04);                                   // flight deck glazing
+  tube(g, -2.6, -2.1, 0.08, 0.17, C, 0.33, 0, 8); box(g, 0.14, 0.12, 0.12, D, -2.66, 0.33, 0);     // tail cone, tail gun turret
+  pair(g, [[0.45, 0.18], [-0.75, 2.4], [-1.0, 2.4], [-0.2, 0.18]], 0.32, 0.05, C);                  // 35° swept wings
+  fin(g, -2.0, 0.42, 0, 0.9, 0.95, C, 0.45, 0, 0.05); box(g, 0.18, 0.1, 0.06, R, -2.3, 1.1, 0);
+  pair(g, [[-1.75, 0.12], [-2.15, 0.95], [-2.35, 0.95], [-2.25, 0.12]], 0.5, 0.03, C);              // tailplane
+  const props = [];
+  for (const z of [0.75, 1.55]) for (const s of [-1, 1]) {
+    const xl = 0.45 - (z - 0.18) * 0.54;                                                             // the wing's leading edge there
+    tube(g, xl - 0.5, xl + 0.22, 0.075, 0.09, C2, 0.29, s * z, 8); noseCone(g, xl + 0.4, 0.29, 0.045, 0.12, D, 8);
+    for (const [n, dx] of [['prop', 0.26], ['prop2', 0.36]]) {
+      const pr = new THREE.Group(); pr.name = n; pr.position.set(xl + dx, 0.29, s * z); g.add(pr); props.push(pr);
+      for (let i = 0; i < 4; i++) { const b = new THREE.Group(); b.rotation.x = i * Math.PI / 2 + (n === 'prop2' ? Math.PI / 4 : 0); pr.add(b); box(b, 0.02, 0.27, 0.035, D, 0, 0.15, 0).castShadow = false; }
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(0.3, 16), PROP_DISC); disc.rotation.y = Math.PI / 2; pr.add(disc);
+    }
+  }
+  mergeStatic(g, props); return g;
+}
 /* ---------- enemy attack helicopters (the rotor group is named 'rotor' — combat.js spins it on the clones) ---------- */
 function enemyRotor(g, x, y, n, len, color, name) {
   const r = new THREE.Group(); r.name = name || 'rotor'; r.position.set(x, y, 0); g.add(r);

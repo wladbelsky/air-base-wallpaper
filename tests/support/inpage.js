@@ -80,6 +80,9 @@
       const p = a.mesh.position;
       if (!Number.isFinite(p.x + p.y + p.z + a.v)) v.push(`non-finite position/speed ${who(a)}`);
       if (a.mesh.visible && a.aloft && p.y < -0.3) v.push(`${who(a)} under ground (y=${p.y.toFixed(2)})`);
+      // in flight never through a roof (Aircraft.clearRoofs)
+      const flying = a instanceof Helicopter ? !['parked', 'spinup', 'spindown'].includes(a.state) : !a.onGround;
+      if (a.mesh.visible && flying) { const top = obstacleTop(p.x, p.z); if (top && p.y < top + 0.6) v.push(`${who(a)} through a roof (y ${p.y.toFixed(2)}, roof ${top.toFixed(2)}) at ${p.x.toFixed(0)},${p.z.toFixed(0)}`); }
       if (!!a.mission !== H.MISSION_STATES.has(a.state)) v.push(`mission context / state mismatch ${who(a)}`);
       if (a.tank && !H.TANK_STATES.has(a.state)) v.push(`tank event outside a tanker state ${who(a)}`);
       if (a.spec.tanker && a.hoseOut && a.state !== 'tank_pass') v.push(`hose out outside the pass ${who(a)}`);
@@ -132,7 +135,7 @@
       if (d < 0.65) v.push(`vehicles overlap (${vehs[i].sc.constructor.name} ${vehs[i].tag} / ${vehs[j].sc.constructor.name} ${vehs[j].tag}, ${d.toFixed(2)} apart at ${a.position.x.toFixed(1)},${a.position.z.toFixed(1)})`);
     }
     // craters never stack: two live ones are merged (Scorch.MERGE)
-    const cr = FX.scorch.items.filter(i => i.on);
+    const cr = FX.scorch.items.filter(i => i.on && !i.fade);   // (one shrinking away may lie under a new one)
     for (let i = 0; i < cr.length; i++) for (let j = i + 1; j < cr.length; j++) { const a = cr[i], b = cr[j]; if (Math.hypot(a.p.x - b.p.x, a.p.z - b.p.z) < Scorch.MERGE * (a.r + b.r) - 1e-6) v.push(`craters stacked at ${a.p.x.toFixed(1)},${a.p.z.toFixed(1)}`); }
     // damage (combat.js DAMAGE): within the caps, a knocked-out unit doesn't track or fire, a closed runway takes no new
     // line-ups / landings and opens within RWY_MAX

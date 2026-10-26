@@ -124,6 +124,23 @@ test('climb-out eases into level flight; the landing roll is long, longer for he
   }
 });
 
+test('helicopters never fly through a roof: one sent home low across the big hangar climbs over it', async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => { CFG.auto = false; CFG.missions = 0; CFG.flyby = 0; TANKER.timer = 1e9; GROUND_OPS.emTimer = 1e9;
+    window.__h = AIRCRAFT.find(a => a.spec.key === 'uh60'); __h.requestLaunch(); });
+  const up = await wp.until(() => __h.state === 'orbit', 120);
+  expect(up.done).toBe(true);
+  await wp.run(() => {                                             // a path at 3 high, north of the hangar, across it toward the pads
+    const hg = PARKING.hangars.find(s => s.size === 'big'), s = __h.spot;
+    const P = new FlightPath().addLine(new THREE.Vector3(hg.x, 3, hg.z - 14), new THREE.Vector3(hg.x, 3, hg.z + 14)).addDubins(new THREE.Vector3(hg.x, 3, hg.z + 14), Math.PI / 2, new THREE.Vector3(s.x, 4, s.z), 0, 5);
+    __h.mesh.position.set(hg.x, 3, hg.z - 14); __h.fwd.set(0, 0, 1); __h.fly(P, 6, 0.7); __h.state = 'ret'; window.__over = 0; window.__hg = hg;
+  });
+  const r = await wp.until(() => { const p = __h.mesh.position; if (Math.abs(p.x - __hg.x) < __hg.w / 2 && Math.abs(p.z - __hg.z) < __hg.d / 2) __over = Math.max(__over, p.y); return __h.state === 'parked'; }, 120);
+  expect(r.violations).toEqual([]);                                // (the invariant: never under a roof top + 0.6)
+  expect(r.done, 'home on its pad').toBe(true);
+  expect(await wp.run(() => __over), 'it went over the roof').toBeGreaterThan(5.5);
+});
+
 test('two runways: departures from the north one while arrivals land on the south one and cross back', async ({ wp }) => {
   await quietBase(wp);
   await wp.run(() => { window.__in = AIRCRAFT.filter(a => ['f16', 'f15'].includes(a.spec.key)).slice(0, 3); __in.forEach(a => a.requestLaunch()); });
