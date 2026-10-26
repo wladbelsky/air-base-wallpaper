@@ -173,7 +173,7 @@ test('air-defence radars: AA search antennas spin in a fight, the Patriot radar 
   expect(r.spin, 'search antennas up to speed').toBeGreaterThan(3.9);
   expect(r.aimed, 'the Patriot radar faced its target').toBeGreaterThan(20);
   expect(r.max, 'its head turns at ≤ 0.35 rad/s').toBeLessThan(0.35 * 0.05 + 1e-6);
-  await wp.run(() => __t.fightOff());
+  await wp.run(() => { __t.fightOff(); for (const u of DAMAGE.units()) u.downT = 0; });   // (a knocked-out one stands still until repaired: DAMAGE)
   const calm = await wp.until(() => !AUD.armed && BASE.mounts.aa.every(m => m.sv === 0) && Math.abs(BASE.patriotRadar.head.rotation.y) < 0.01, 90);
   expect(calm.done, 'after the fight: antennas stopped, the radar back to its sector').toBe(true);
 });

@@ -67,6 +67,24 @@ test('an aircraft hit on its stand: DAMAGED, no launch, the crash tender foams i
   expect(await wp.run(() => __a.status[0])).not.toBe('DAMAGED');
 });
 
+test('a helicopter hit on its pad: the crash tender and the maintenance truck come up the corridor, it is repaired', async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => { CFG.auto = false; CFG.missions = 0; CFG.flyby = 0; TANKER.timer = 1e9; GROUND_OPS.emTimer = 1e9;
+    window.__a = AIRCRAFT.find(a => a instanceof Helicopter && a.state === 'parked'); window.__seen = new Set();
+    __t.forceFight(); enemyBomb(__a.mesh.position.clone().setY(0)); });
+  expect(await wp.run(() => [__a.dmgT > 100, __a.status[0]])).toEqual([true, 'DAMAGED']);
+  const r = await wp.until(() => {
+    for (const s of GROUND_OPS.scenes) if (s.a === __a) __seen.add(s.constructor.name + ':' + s.phase);
+    return !(__a.dmgT > 0) && __seen.has('MaintScene:work');
+  }, 200, { audio: true });
+  expect(r.violations).toEqual([]);
+  expect(r.done, [...(await wp.run(() => [...__seen]))].join(' ')).toBe(true);
+  expect(await wp.run(() => [...__seen])).toEqual(expect.arrayContaining(['FireScene:foam', 'MaintScene:work']));
+  const gone = await wp.until(() => !GROUND_OPS.scenes.some(s => (s instanceof FireScene || s instanceof MaintScene) && s.a === __a), 90);
+  expect(gone.violations).toEqual([]);
+  expect(gone.done, 'both back in their sheds').toBe(true);
+});
+
 test('only a few aircraft are damaged at once (a quarter of the air wing)', async ({ wp }) => {
   await wp.boot();
   const r = await wp.run(() => {

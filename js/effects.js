@@ -124,7 +124,7 @@ class SpriteFX {
 }
 
 /* craters where shells and bombs hit the ground: a low lathe (dark bowl, a raised rim of turned-up earth that catches
-   the light, soot-dark ejecta thinning out to the ground) in vertex colours; one instanced mesh, a ring buffer; old
+   the light, soot-dark ejecta thinning out to the ground) in vertex colours; one instanced mesh, a fixed pool of slots; old
    ones flatten and shrink away. A hit on a live crater widens it instead of stacking a second one on it (merge); on paved
    ground they are cleared sooner, a repair (runway crew, a mount back on line) fills them in over 3 s */
 const CRATER_PROFILE = [[0, 0.004, 0x17130f, 1], [0.35, 0.006, 0x1f1a15, 1], [0.62, 0.05, 0x2e271f, 1], [0.8, 0.13, 0x5a4b3a, 1], [0.92, 0.1, 0x4a3e30, 1], [1.15, 0.035, 0x2a241d, 0.8], [1.5, 0.0, 0x3a332a, 0]];   // [r, y, colour, alpha]: the ejecta fades into the ground

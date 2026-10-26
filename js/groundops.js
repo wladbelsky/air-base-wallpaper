@@ -655,7 +655,7 @@ class MaintScene {
     const a = this.a; this.t += dt;
     if (!AIRCRAFT.includes(a)) { this.done = true; return; }
     if (this.phase !== 'out') a.dmgT = Math.max(a.dmgT, 5);                  // damaged until the crew is done
-    if (this.phase === 'wait') { if (!a.groundBusy) this.start(); return; }
+    if (this.phase === 'wait') { if (!a.groundBusy) this.start(); else if (this.t > 60) this.done = true; return; }   // (held too long: its dmgT runs out instead)
     const c = this.car, C = this.crane;
     if (this.phase === 'in' && c.stage === 'park') { this.phase = 'work'; this.queue(); }
     if (this.phase === 'work') {
@@ -722,7 +722,7 @@ class RepairScene {
         break;
       }
       case 'work': if (this.work(dt)) { this.phase = 'stow'; this.t = 0; DAMAGE.filled(c); } break;
-      case 'stow': this.crane.to(dt); if (this.t > 2.5) { this.phase = 'out'; this.d = new Drive(m, AIRFIELD.round(this.exit(), 1.4), REPAIR_V, false, 0.5); } break;
+      case 'stow': this.crane.to(dt); if ((this.crane.there && this.t > 0.5) || this.t > 5) { this.phase = 'out'; this.d = new Drive(m, AIRFIELD.round(this.exit(), 1.4), REPAIR_V, false, 0.5); } break;   // (not off with the boom still out)
       case 'out': {
         const end = this.d.step(dt, vehHold(this.d, null));
         if (DAMAGE.rwy === c && Math.abs(m.position.z - c.L.z) > c.L.w / 2 + 1.2) DAMAGE.reopen(c);   // off the runway: it opens
@@ -737,7 +737,7 @@ class RepairScene {
   offTime() {
     const L = this.c.L, P = this.exit(this.park); let d = 0;
     for (let i = 1; i < P.length && Math.abs(P[i - 1][1] - L.z) < L.w / 2 + 1.2; i++) d += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
-    return 2.5 + d * 1.3 / REPAIR_V + 2;
+    return 5 + d * 1.3 / REPAIR_V + 2;                                               // (the crane stowed: ≤ 5 s)
   }
   /* the way back: a U-turn on the runway past the (filled) crater, then the way in backwards */
   exit(from) {

@@ -131,6 +131,7 @@ class Aircraft {
      through the big hangar) */
   clearRoofs(dt) {
     const p = this.mesh.position, f = this.fwd, hl = Math.hypot(f.x, f.z) || 1, ahead = Math.max(6, (this.v || 0) * 1.5);
+    if (!this.mesh.visible) { this.roofLift = 0; return; }                              // waiting off-screen: the next pass starts afresh
     if (!this.roofLift && p.y > OBSTACLES.top + ROOF_CLEAR) return;                     // above them all anyway
     let top = 0; for (let k = 0; k <= ahead; k += 1.5) top = Math.max(top, obstacleTop(p.x + f.x / hl * k, p.z + f.z / hl * k, 1));   // (1 around: a mast is narrower than the step)
     const want = top ? Math.max(0, top + ROOF_CLEAR - p.y) : 0, l = this.roofLift || 0;
