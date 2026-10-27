@@ -29,9 +29,11 @@ test('emergency landing: smoke, priority approach, stop on the runway, crash ten
   const trucks = await wp.until(() => GROUND_OPS.scenes.some(s => s.phase === 'foam'), 120);
   expect(trucks.done, 'the crash tenders reach it and foam it').toBe(true);
   // the tug goes home round the wingtip to a depot (or stays in the shelter), never across a runway
-  await wp.run(() => { window.__tugOn = null; window.__tugBack = false; });
+  // under tow the tug leads: always ahead of the nose (it once trailed the hitch like a trailer and jackknifed behind)
+  await wp.run(() => { window.__tugOn = null; window.__tugBack = false; window.__lead = 1e9; });
   const home = await wp.until(() => {
     const sc = GROUND_OPS.scenes.find(x => x instanceof EmergencyScene), q = sc && (sc.phase === 'back' || sc.phase === 'fade') && sc.tug.position;
+    if (sc && sc.phase === 'tow' && __a.state === 'towed') { const n = new THREE.Vector3(1, 0, 0).applyQuaternion(__a.mesh.quaternion), d = sc.tug.position.clone().sub(__a.mesh.position); __lead = Math.min(__lead, (d.x * n.x + d.z * n.z) / __a.spec.len); }
     if (q) __tugBack = true;
     if (q && [BASE_LAYOUT.rwy, BASE_LAYOUT.rwy2].some(L => Math.abs(q.z - L.z) < L.w / 2 + 1 && q.x > L.x0 - 2 && q.x < L.x1 + 2)) __tugOn = __tugOn || [q.x, q.z];
     return __a.state === 'parked' && !GROUND_OPS.scenes.length;
@@ -39,6 +41,7 @@ test('emergency landing: smoke, priority approach, stop on the runway, crash ten
   expect(home.violations).toEqual([]);
   expect(home.done, (await wp.run(() => __t.log.get(__a.callsign))).join(' > ')).toBe(true);
   expect(await wp.run(() => __tugOn), 'the tug on a runway on its way back').toBe(null);
+  expect(await wp.run(() => __lead), 'the tug ahead of the nose all the way').toBeGreaterThan(0.45);
   expect(await wp.run(() => [__tugBack, AIRFIELD.sheltered(__a.spot)])).toEqual([runways === 1, runways !== 1]);
   const r = await wp.run(() => ({ log: __t.log.get(__a.callsign), emerg: !!GROUND_OPS.emerg || __a.emerg, rwy: AIRFIELD.rwy.size + AIRFIELD.rwy2.size, home: __a.mesh.position.distanceTo(new THREE.Vector3(__a.spot.x, 0, __a.spot.z)) }));
   expect(r.log.join('>')).toMatch(/approach>final>rollout>emergency>towed>parked/);
