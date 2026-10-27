@@ -329,7 +329,7 @@ function vehHoldAir(d, own, p, m) {
   }
   return false;
 }
-const _vh = new V3(), _vh2 = new V3(), _vh3 = new V3(), _vr = new V3(), _tn = new V3(), _tb = new V3(), _way = [];
+const _vh = new V3(), _vh2 = new V3(), _vh3 = new V3(), _vr = new V3(), _tn = new V3(), _tb = new V3(), _tgp = new V3(), _tgt = new V3(), _way = [];
 /* how far (x, z) is from the nearest point of an aircraft's way ahead (_way: x, z pairs, vehHold) */
 function wayClear(x, z) { let b = 1e9; for (let i = 0; i < _way.length; i += 2) b = Math.min(b, Math.hypot(_way[i] - x, _way[i + 1] - z)); return b; }
 /* the tug on its towbar at the aircraft's nose gear: pushing it trails the hitch like a trailer (bending in turns, never
@@ -338,14 +338,14 @@ function wayClear(x, z) { let b = 1e9; for (let i = 0; i < _way.length; i += 2) 
 function towTug(m, a, push) {
   const nose = _tn.set(1, 0, 0).applyQuaternion(a.mesh.quaternion).setY(0).normalize(), q = a.mesh.position;
   const hx = q.x + nose.x * a.spec.len * 0.3, hz = q.z + nose.z * a.spec.len * 0.3, D = a.spec.len * 0.2 + 0.75;
-  if (!push && a.dcurve) {
-    const s = a.ds + a.spec.len * 0.5 + 0.75, u = Math.min(1, s / a.dlen), p = a.dcurve.getPointAt(u), t = a.dcurve.getTangentAt(u), over = Math.max(0, s - a.dlen);
+  if (!push) {                                                     // (towed: its deck path is the tow route, startTow)
+    const s = a.ds + a.spec.len * 0.5 + 0.75, u = Math.min(1, s / a.dlen), p = a.dcurve.getPointAt(u, _tgp), t = a.dcurve.getTangentAt(u, _tgt), over = Math.max(0, s - a.dlen);
     m.position.set(p.x + t.x * over, 0, p.z + t.z * over); m.rotation.set(0, Math.atan2(-t.z, t.x), 0);
   } else {
     let dx = m.position.x - hx, dz = m.position.z - hz, l = Math.hypot(dx, dz);
     if (l < 0.05) { dx = nose.x; dz = nose.z; l = 1; }
     dx /= l; dz /= l;
-    m.position.set(hx + dx * D, 0, hz + dz * D); m.rotation.set(0, push ? Math.atan2(dz, -dx) : Math.atan2(-dz, dx), 0);
+    m.position.set(hx + dx * D, 0, hz + dz * D); m.rotation.set(0, Math.atan2(dz, -dx), 0);
   }
   const bar = barOf(m); if (!bar) return;
   bar.visible = true; bar.position.x = push ? 0.6 : -0.57; m.updateMatrixWorld();

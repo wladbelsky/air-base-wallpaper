@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=25`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=26`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -187,8 +187,10 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   (`emergency`), `EmergencyScene`: two crash tenders from the fire station foam it, a tug tows it home (`towed`, via
   `AIRFIELD.homeRoute`), the runway opens as soon as it is towed off it (`GROUND_OPS.emerg` cleared: the tow may
   queue behind departures). The tenders and the tug fade in at the station; the tenders keep to their own lanes; the
-  tug drives straight to its towing spot and goes home round the wingtip to a depot (`tugWay`, reversed) or stays in
-  the shelter / hangar.
+  tug drives straight to its towing spot, leads on the aircraft's own tow route (`towTug` without `push`: on its deck
+  path `len`·0.5 + 0.75 ahead of its centre, facing along it — trailing the hitch like the pushback tug it jackknifed
+  behind the aircraft in the turn off the runway) and goes home round the wingtip to a depot (`tugWay`, reversed) or
+  stays in the shelter / hangar.
 - **Unloading** (`UnloadScene`): a transport parked with `a.cargo` on a stand (not in a hangar): `a.rampT` opens the
   ramp (C-130 / C-17 models), a K-loader comes from the cargo yard along the service road and backs up to the ramp, three pallets slide onto it
   (each a random `PALLET_KINDS` load, `setPallet`), it drives away; `a.groundBusy` holds the aircraft's departure in `ready` meanwhile.

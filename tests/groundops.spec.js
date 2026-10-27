@@ -41,7 +41,8 @@ test('emergency landing: smoke, priority approach, stop on the runway, crash ten
   expect(home.violations).toEqual([]);
   expect(home.done, (await wp.run(() => __t.log.get(__a.callsign))).join(' > ')).toBe(true);
   expect(await wp.run(() => __tugOn), 'the tug on a runway on its way back').toBe(null);
-  expect(await wp.run(() => __lead), 'the tug ahead of the nose all the way').toBeGreaterThan(0.45);
+  const lead = await wp.run(() => __lead);
+  expect(lead, 'the tow was seen').toBeLessThan(1e9); expect(lead, 'the tug ahead of the nose all the way').toBeGreaterThan(0.45);
   expect(await wp.run(() => [__tugBack, AIRFIELD.sheltered(__a.spot)])).toEqual([runways === 1, runways !== 1]);
   const r = await wp.run(() => ({ log: __t.log.get(__a.callsign), emerg: !!GROUND_OPS.emerg || __a.emerg, rwy: AIRFIELD.rwy.size + AIRFIELD.rwy2.size, home: __a.mesh.position.distanceTo(new THREE.Vector3(__a.spot.x, 0, __a.spot.z)) }));
   expect(r.log.join('>')).toMatch(/approach>final>rollout>emergency>towed>parked/);
