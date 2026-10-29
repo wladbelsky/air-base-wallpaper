@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=28`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=29`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -293,10 +293,10 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   `updateMounts`: gun barrels droop), no fire (guards in `fireAA` / `fireFlak` / `fireTank` / `startCIWS` /
   `launchSAM` — the Patriot radar down stops the Patriots — / `launchStinger`, the CIWS last-ditch loop), search
   antennas / the radar head still; fire then smoke (`DAMAGE.smoke`), back with its crater repaired. Aircraft `parked`
-  within R + span·0.35 (in a shelter / hangar: 30 %) get `dmgT` 150–300 s: `canLaunch()` false (autoLaunch /
+  within R + span·0.35 (in a shelter / hangar: 30 %) get `dmgT` 80–120 s: `canLaunch()` false (autoLaunch /
   scrambleSupport / `requestLaunch` go by it), status DAMAGED, no service / unloading meanwhile, a `FireScene` (one
   crash tender the crew's way, foams it: `burnT` 0) then a `MaintScene` (repaired when its crew is done, ~1.5 min in
-  all); the 150–300 s timer is left for the ones no crew reaches (shelters, hangars, other homes). A bomb on a runway (`runwayAt`) closes it
+  all); the 80–120 s timer is left for the ones no crew reaches (the `FireScene` holds it ≥ 5 too, so it never runs out between the two) (shelters, hangars, other homes). A bomb on a runway (`runwayAt`) closes it
   (`DAMAGE.rwy`, `AIRFIELD.closed` → `canLineUp` / `canApproach` / `clearToLand` (go around) / `landR` / `canCross`;
   a pair's wingman still joins a lead already lined up) and sends a `RepairScene`. Caps: ≤ `DMG_UNITS` (40 %) units
   down, never the Patriot radar and both NASAMS launchers; one runway closed (none while an emergency has one, and no

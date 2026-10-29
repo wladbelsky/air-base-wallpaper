@@ -40,7 +40,7 @@ test('an aircraft hit on its stand: DAMAGED, no launch, the crash tender foams i
   await wp.run(() => { CFG.auto = false; CFG.missions = 0; CFG.flyby = 0; TANKER.timer = 1e9; GROUND_OPS.emTimer = 1e9;
     window.__a = AIRCRAFT.find(a => a instanceof FixedWing && a.state === 'parked' && crewSpot(a));
     __t.forceFight(); enemyBomb(__a.mesh.position.clone().setY(0)); });
-  expect(await wp.run(() => [__a.dmgT > 100, __a.status[0], __a.canLaunch()])).toEqual([true, 'DAMAGED', false]);
+  expect(await wp.run(() => [__a.dmgT > 60, __a.status[0], __a.canLaunch()])).toEqual([true, 'DAMAGED', false]);
   await wp.run(() => __a.requestLaunch());
   expect(await wp.run(() => __a.state)).toBe('parked');
   const foam = await wp.until(() => GROUND_OPS.scenes.some(s => s instanceof FireScene && s.a === __a && s.phase === 'foam'), 90, { audio: true });
@@ -72,7 +72,7 @@ test('a helicopter hit on its pad: the crash tender and the maintenance truck co
   await wp.run(() => { CFG.auto = false; CFG.missions = 0; CFG.flyby = 0; TANKER.timer = 1e9; GROUND_OPS.emTimer = 1e9;
     window.__a = AIRCRAFT.find(a => a instanceof Helicopter && a.state === 'parked'); window.__seen = new Set();
     __t.forceFight(); enemyBomb(__a.mesh.position.clone().setY(0)); });
-  expect(await wp.run(() => [__a.dmgT > 100, __a.status[0]])).toEqual([true, 'DAMAGED']);
+  expect(await wp.run(() => [__a.dmgT > 60, __a.status[0]])).toEqual([true, 'DAMAGED']);
   const r = await wp.until(() => {
     for (const s of GROUND_OPS.scenes) if (s.a === __a) __seen.add(s.constructor.name + ':' + s.phase);
     return !(__a.dmgT > 0) && __seen.has('MaintScene:work');

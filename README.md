@@ -159,7 +159,7 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
   Patriot radar stops tracking and firing for one to two minutes, burning and then smoking, until it is back on line.
   An aircraft hit on its stand is DAMAGED: a crash tender foams it, then a maintenance truck (the same green 10x10
   with a workshop body) sets a spare engine down beside it with its crane while the crew works on it — repaired, it
-  gets the usual fuel truck. A crater on a runway closes it: a green 10x10 repair truck drives out, its crane lowers repair mats into
+  gets the usual fuel truck (in a shelter or hangar it is repaired out of sight, in up to two minutes). A crater on a runway closes it: a green 10x10 repair truck drives out, its crane lowers repair mats into
   the crater, and the runway opens again (within about a minute, and stays open at least three minutes; the departures
   waiting for it show RWY CLOSED); with two runways the arrivals use the other one meanwhile. The
   base never goes down completely: at most 40 % of the air defence, one runway and a quarter of the aircraft are out at

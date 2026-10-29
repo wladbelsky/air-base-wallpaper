@@ -322,7 +322,7 @@ const DAMAGE = {
     sayOnce('unitDown', 6, () => RADIO.say(u.radio || RADIO_NAMES.patriot, radioLine(COMBAT.unitDown, { M: name }), { role: 'ground', cat: 'combat', prio: 3 }));
   },
   damage(a, inside) {
-    a.dmgT = rand(150, 300); a.burnT = inside ? 0 : 40; a.dmgIn = inside; a.needsService = false;
+    a.dmgT = rand(80, 120); a.burnT = inside ? 0 : 40; a.dmgIn = inside; a.needsService = false;
     sayOnce('acHit', 6, () => RADIO.say(RADIO_NAMES.tower, radioLine(COMBAT.aircraftHit, { C: a.callsign }), { role: 'tower', cat: 'combat', prio: 3 }));
     if (!inside && crewSpot(a)) GROUND_OPS.scenes.push(new FireScene(a));            // the tender, then the repair crew (MaintScene)
   },

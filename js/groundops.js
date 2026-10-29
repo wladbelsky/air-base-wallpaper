@@ -630,6 +630,7 @@ class FireScene {
   update(dt) {
     const a = this.a; this.t += dt;
     if (!AIRCRAFT.includes(a)) { this.done = true; return; }
+    if (!this.handed) a.dmgT = Math.max(a.dmgT, 5);                         // damaged until the repair crew is done (MaintScene): its timer is for the ones no crew reaches
     if (this.phase === 'wait') { if (!a.groundBusy) this.start(); else if (this.t > 40) { this.done = true; this.next(); } return; }
     const c = this.car;
     if (this.phase === 'in' && c.stage === 'park') { this.phase = 'foam'; this.t = 0; }
