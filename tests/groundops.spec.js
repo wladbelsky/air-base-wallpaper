@@ -84,6 +84,19 @@ for (const cargo of [false, true]) {
     expect(r).toEqual({ dz: true, clear: true });
     const landed = await wp.until(() => GROUND_OPS.chutes.some(c => c.landed >= 0), 120);
     expect(landed.done).toBe(true);
+    // a collapsed canopy lies flat on the ground about its own size (it once kept widening into a big white disc)
+    await wp.run(() => { window.__can = [1e9, 0, 0]; });
+    await wp.until(() => {
+      for (const c of GROUND_OPS.chutes) if (c.landed > 2 && c.landed < 14) {
+        const b = new THREE.Box3().setFromObject(c.can), g = groundH(c.m.position.x, c.m.position.z);
+        __can[0] = Math.min(__can[0], b.min.y - g); __can[1] = Math.max(__can[1], b.max.y - g); __can[2] = Math.max(__can[2], Math.max(b.max.x - b.min.x, b.max.z - b.min.z));
+      }
+      return false;
+    }, 15);
+    const can = await wp.run(() => __can);
+    expect(can[2], 'landed canopies seen').toBeGreaterThan(0.5); expect(can[0], 'on the ground, not under it').toBeGreaterThan(-0.05);
+    expect(can[1], 'lying flat').toBeLessThan(0.45);
+    expect(can[2], 'about its own size').toBeLessThan(cargo ? 2.6 : 1.8);
     const end = await wp.until(() => !GROUND_OPS.chutes.length && __f.every(a => !a.mission), 400);
     expect(end.violations).toEqual([]);
     expect(end.done).toBe(true);

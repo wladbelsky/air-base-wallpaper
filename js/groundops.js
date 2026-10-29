@@ -459,7 +459,7 @@ const GROUND_OPS = registerMissionWorld({
   /* ---- parachutes ---- */
   dropChute(p, v, cargo) {
     const kind = cargo ? 'cargochute' : 'chute', m = takeVehicle(kind); m.position.copy(p);
-    const can = m.getObjectByName('canopy'); can.scale.set(0.05, 0.05, 0.05);
+    const can = m.getObjectByName('canopy'); can.scale.set(0.05, 0.05, 0.05); can.position.set(0, 1, 0); can.rotation.set(0, 0, 0);
     this.chutes.push({ kind, m, can, v: v.clone(), t: 0, landed: -1, ph: rand(0, 6) });
   },
   updateChutes(dt) {
@@ -471,13 +471,16 @@ const GROUND_OPS = registerMissionWorld({
         if (open < 0.05) c.v.y -= 9 * dt;
         p.addScaledVector(c.v, dt); c.can.scale.setScalar(Math.max(0.05, open));
         c.m.rotation.set(Math.sin(c.t * 1.3 + c.ph) * 0.15, c.t * 0.3, Math.cos(c.t * 1.1 + c.ph) * 0.12);
-        if (p.y <= groundH(p.x, p.z) + 0.12) { c.landed = 0; p.y = groundH(p.x, p.z) + 0.1; c.m.rotation.set(0, c.m.rotation.y, 0); }
+        if (p.y <= groundH(p.x, p.z) + 0.12) { c.landed = 0; p.y = groundH(p.x, p.z) + 0.1; c.m.rotation.set(0, Math.atan2(-WIND.z, WIND.x), 0); }   // (local +x downwind)
       } else {
-        c.landed += dt;
-        c.can.scale.set(1 + c.landed * 0.3, Math.max(0.05, 1 - c.landed * 1.2), 1 + c.landed * 0.3);   // the canopy collapses
-        c.can.position.x = Math.min(0.7, c.landed * 0.6); c.can.position.y = Math.max(0.15, 1 - c.landed * 0.9);
+        // the canopy collapses: it tips over downwind, then lies flat beyond the load as a long strip of cloth (it once
+        // only flattened and kept widening: big white discs on the grass)
+        c.landed += dt; const tip = smoothstep(0, 0.9, c.landed), lie = smoothstep(0.5, 1.8, c.landed), r = c.kind === 'cargochute' ? 0.75 : 0.5;
+        c.can.scale.set(1 + lie * 0.5, Math.max(0.05, 1 - lie * 0.9), 1 - lie * 0.5);
+        c.can.rotation.z = -0.9 * tip * (1 - lie) - 0.08 * lie;
+        c.can.position.set(r * 1.7 * tip, 1 - 0.88 * lie - 0.3 * tip * (1 - lie), 0);
         if (c.landed > 14) { const k = 1 - smoothstep(14, 16, c.landed); c.m.scale.setScalar(Math.max(0.01, k)); }
-        if (c.landed > 16) { c.m.scale.setScalar(1); c.can.position.set(0, 1, 0); dropVehicle(c.kind, c.m); this.chutes.splice(i, 1); }
+        if (c.landed > 16) { c.m.scale.setScalar(1); dropVehicle(c.kind, c.m); this.chutes.splice(i, 1); }
       }
     }
   }

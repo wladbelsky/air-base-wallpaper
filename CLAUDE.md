@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=26`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=28`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -142,6 +142,9 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   nobody waiting to cross for > 20 s. `canApproach`: per landing runway, one at a time (the next once the one ahead is
   on final), none while a departure has waited > 25 s at the hold when they share it. `clearToLand` over the arrival's
   runway at the start of the final and close in (strict) — else `goAround()`. `rwyPose(x, dz, L)`.
+- **Paving**: the south runway is shorter (x1 61) than the last link (64): `buildBase` paves a stub from its end to that
+  connector (a link beyond a runway's end gets one) — the last exit once ran over the grass; `units.spec` raycasts every
+  route home, both runways, every exit, onto the paving.
 - **Crossing**: home from the south runway (`homeRoute(s, x0, lk, L)`, `a.cross = { ok, x, t }`, `crossAt`) an aircraft
   holds at `BASE_LAYOUT.crossZ` on the connector (`holdCross`, in `followDeck`) until `canCross` (no lineup, no roll
   toward the connector, nothing near it on the runway, no arrival to it close in); then it holds the north runway
@@ -257,7 +260,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   to `MaintScene`): the `maint` truck the same way a wingtip further out, its crane sets the spare engine down by the
   aircraft (held on the hook while the crew works `MAINT_T` 30–40 s, sparks), takes it back, stows, drives off — the
   aircraft is repaired (`dmgT` 0, kept ≥ 5 till then, `needsService`). `RepairScene` (runway repair: see "Combat").
-- **Parachutes** (`dropChute`, `updateChutes`): open, drift with `WIND`, land, the canopy collapses, gone after ~16 s.
+- **Parachutes** (`dropChute`, `updateChutes`): open, drift with `WIND`, land, the canopy collapses (tips over downwind
+  and lies flat beyond the load as a strip, ≤ 1.5× its length — it once only flattened and kept widening: big white
+  discs), gone after ~16 s.
 
 ## Combat (`js/combat.js`, `js/airwar.js`, `js/main.js`)
 - Enemy kinds: `bandit` (waves from `ENEMY_TYPES`; bombers / attack jets drop a stick on a `BASE.targets` structure,

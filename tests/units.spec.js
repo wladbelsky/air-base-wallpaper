@@ -160,6 +160,23 @@ test('airfield: every home is reachable — taxi routes start at the home and en
   expect(r).toEqual([]);
 });
 
+test('airfield: the routes home from both runways, every exit, keep to the paving (the last exit off the shorter south runway once crossed the grass)', async ({ wp }) => {
+  await wp.boot();
+  const r = await wp.run(() => {
+    CFG.runways = 2; BASE.setRunways(2); scene.updateMatrixWorld(true);
+    const ms = []; BASE.group.traverseVisible(o => { if (o.isMesh && !o.isInstancedMesh) ms.push(o); }); BASE.rwy2.traverseVisible(o => { if (o.isMesh && !o.isInstancedMesh) ms.push(o); });
+    const rc = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0), out = [];
+    const paved = (x, z) => { rc.set(new THREE.Vector3(x, 0.5, z), down); const h = rc.intersectObjects(ms, false)[0]; return !!h && h.point.y > 0.02; };
+    const s = PARKING.stands[0];
+    for (const L of [BASE_LAYOUT.rwy, BASE_LAYOUT.rwy2]) for (const lk of BASE_LAYOUT.links.slice(1)) {
+      const c = new THREE.CatmullRomCurve3(AIRFIELD.homeRoute(s, lk - 10, lk, L).map(p => new THREE.Vector3(p[0], 0, p[1])), false, 'centripetal'), n = Math.ceil(c.getLength() / 0.5);
+      for (let i = 0; i <= n; i++) { const p = c.getPointAt(i / n); if (!paved(p.x, p.z)) { out.push(`${L === BASE_LAYOUT.rwy ? 'north' : 'south'} runway, exit ${lk}: grass at ${p.x.toFixed(1)},${p.z.toFixed(1)}`); break; } }
+    }
+    return out;
+  });
+  expect(r).toEqual([]);
+});
+
 test('airfield: taxi routes never loop — no more than a U-turn within 6 units of the path', async ({ wp }) => {
   const r = await wp.run(() => {
     // the heading change over any 6-unit stretch of the smoothed path (as followDeck drives it)

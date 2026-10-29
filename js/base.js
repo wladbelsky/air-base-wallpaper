@@ -340,6 +340,12 @@ function buildBase() {
     deckLine(g2, lx, R.z + R.w / 2, lx, R2.z - R2.w / 2, 0.08, 0xd8b030, my - 0.006);
     for (const dz of [0, 0.3]) deckLine(g2, lx - TW.w / 2 + 0.15, BL.crossZ + dz, lx + TW.w / 2 - 0.15, BL.crossZ + dz, 0.07, 0xd8b030, my);   // hold short of the north runway
     for (const sx of [-1, 1]) for (let z = R.z + R.w / 2 + 1.6; z < R2.z - R2.w / 2 - 1; z += 3) lines2.push([lx + sx * (TW.w / 2 + 0.2), 0.1, z, 0x4a7cff]);
+    // a connector past the south runway's end (it is shorter): a stub on from its end, the exit line curving onto it —
+    // without it the last exit (AIRFIELD.homeRoute) once ran over the grass
+    if (lx + TW.w / 2 > R2.x1) {
+      slab(g2, R2.x1, R2.z - R2.w / 2, lx + TW.w / 2, R2.z + R2.w / 2, 0.035, ASPH2);
+      deckLine(g2, R2.x1, R2.z, lx - 1, R2.z - 0.6, 0.08, 0xd8b030, my - 0.006); deckLine(g2, lx - 1, R2.z - 0.6, lx, R2.z - R2.w / 2, 0.08, 0xd8b030, my - 0.006);
+    }
   }
   slab(g2, -7.5, R2.z + R2.w / 2 + 0.9, -0.5, 29.7, 0.03, CONC);   // the fire station's apron out onto it
   navLights(g2, lines2, null, 0.8);
