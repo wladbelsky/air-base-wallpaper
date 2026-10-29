@@ -558,11 +558,13 @@ class UnloadScene {
     vehScale(this.loader, 1); dropVehicle('kloader', this.loader); for (const p of this.pallets) dropVehicle('pallet', p.m);
   }
 }
-/* an aircraft in the apron channel at x ch (between the lane and the taxiway) or about to turn into it */
+/* an aircraft in the apron channel at x ch (south of the lane, up to the taxiway), or one on the move about to turn into
+   it — not one standing on the lane (queued behind the unloading aircraft: it waits for the loader that waits here) */
 function channelBusy(ch, own) {
+  const L = BASE_LAYOUT.lane, TZ = BASE_LAYOUT.twy.z;
   for (const b of AIRCRAFT) {
     if (b === own || !b.onGround || !b.mesh.visible || b.state === 'parked' || b.state === 'unload') continue;
-    const q = b.mesh.position; if (Math.abs(q.x - ch) < 4 && q.z > BASE_LAYOUT.lane - 3 && q.z < BASE_LAYOUT.twy.z + 2) return true;
+    const q = b.mesh.position; if (Math.abs(q.x - ch) < 4 && q.z < TZ + 2 && (q.z > L + 1.5 || (Math.abs(b.v || 0) > 0.05 && q.z > L - 3))) return true;
   }
   return false;
 }

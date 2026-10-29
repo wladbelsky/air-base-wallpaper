@@ -272,9 +272,11 @@ function damageEnemy(e, dmg, src) {
 /* something got through: an impact on the base — explosion, scorch, a fire on the structure for a while (r: how far
    over its roof the flames spread) */
 function baseImpact(p, s, name) {
-  explosion(p, s * 1.4); FX.scorch.spawn(p, 2.2 * s, 90);
-  const q = p.clone(); q.y = Math.max(q.y, obstacleTop(q.x, q.z));   // the fire on its roof (the aim point is inside: the roof hid the flames)
-  BASE_FIRES.push({ p: q, t: 30 + s * 10, r: 0.6 + 0.6 * s, name: name || 'BASE' });
+  const q = p.clone(); q.y = Math.max(q.y, obstacleTop(q.x, q.z));   // on its roof (the aim point is inside: the roof hid the blast and the flames)
+  explosion(q, s * 1.4); FX.scorch.spawn(p, 2.2 * s, 90);
+  // a fire already burning there spreads and burns on (stacked fires on one roof churned the smoke / flash pools)
+  const t = 30 + s * 10, r = 0.6 + 0.6 * s, f = BASE_FIRES.find(o => Math.hypot(o.p.x - q.x, o.p.z - q.z) < o.r + 1.5);
+  if (f) { f.t = Math.max(f.t, t); f.r = Math.min(f.r + 0.4, 2.6); } else BASE_FIRES.push({ p: q, t, r, name: name || 'BASE', fl: 0, sm: 0 });
   sayOnce('hit', 5, () => RADIO.say(RADIO_NAMES.tower, radioLine(COMBAT.baseHit), { role: 'tower', cat: 'combat', prio: 4 }));
   if (Math.random() < 0.6) { const b = ENEMIES.find(o => o.kind === 'bandit' && !o.duel && enemyAlive(o)); enemySay(b ? b.cs : ENEMY_NAMES.hq, ENEMY_LINES.baseHit, null, { delay: 1.4 }); }
   if (CFG.shake) camShake = 1;
@@ -438,9 +440,9 @@ function updateCombat(dt) {
     const f = BASE_FIRES[i]; f.t -= dt;
     if (f.t <= 0) { BASE_FIRES.splice(i, 1); continue; }
     const k = Math.min(1, f.t / 8), r = f.r || 1;
-    if (Math.random() < dt * 26) FX.flash.spawn(_bf.set(f.p.x + rand(-r, r), f.p.y + rand(0.1, 0.5), f.p.z + rand(-r, r)),
+    for (f.fl += dt * 26; f.fl >= 1; f.fl--) FX.flash.spawn(_bf.set(f.p.x + rand(-r, r), f.p.y + rand(0.1, 0.5), f.p.z + rand(-r, r)),
       { s0: rand(1.4, 2.2) * k, s1: rand(2.6, 3.6) * k, life: rand(0.25, 0.45), a0: k, color: pick(FIRE_COLS), v: _bv.set(WIND.x * 0.3, rand(1.8, 3), WIND.z * 0.3) });
-    if (Math.random() < dt * 12) FX.smoke.spawn(_bf.set(f.p.x + rand(-r, r) * 0.6, f.p.y + 1.2, f.p.z + rand(-r, r) * 0.6),
+    for (f.sm += dt * 12; f.sm >= 1; f.sm--) FX.smoke.spawn(_bf.set(f.p.x + rand(-r, r) * 0.6, f.p.y + 1.2, f.p.z + rand(-r, r) * 0.6),
       { s0: 1.6, s1: 7, life: rand(4, 5.5), a0: 0.85 * k, color: 0x1a1a1a, v: drift(1.4, rand(1.8, 2.8)), drag: 0.15 });
   }
 }

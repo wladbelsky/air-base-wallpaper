@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=38`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=39`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -293,8 +293,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   radius is now never below the stop's). Dogfight bandits (`duel`)
   fly a pass path and are left to the fighters.
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
-  site rows show DAMAGED; 30–40 s: flame tongues over `r` of its roof, a tall black smoke column, dying down over the last
-  8 s; the smoke pool is 420 for it). Craters (`Scorch`) sit `Scorch.LIFT` (0.055) up: above the paving and its painted lines. Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
+  site rows show DAMAGED; on its roof (`obstacleTop`), the blast too; 30–40 s: flame tongues over `r` of it, a tall black
+  smoke column, dying down over the last 8 s, spawned by time accumulators (`fl`, `sm`); a hit near a burning one spreads
+  that fire instead of stacking another; the smoke pool is 420 for it). Craters (`Scorch`) sit `Scorch.LIFT` (0.055) up: above the paving and its painted lines. Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
   tracers with gravity (`dropBomb`, `FixedWing.dropBombs`), resolved in `FX.tracers.onSplash` (splash ≥ 2.3 = an enemy
   bomb → `enemyBomb`: a structure within 3 of where it fell takes the hit, else a crater; then `DAMAGE.hit`).
   **Threat (`STRESS`) goes by time only** (10 min up while `AUD.fighting`, 3 min down): hits used to bump it +0.03 per

@@ -152,6 +152,23 @@ test('craters always shrink away, even when the pool overflows under heavy bombi
   expect((await wp.sim(10)).violations).toEqual([]);
 });
 
+test('a hit on a structure burns on its roof (one fire, spreading with a second hit); craters sit above the painted lines', async ({ wp }) => {
+  await wp.boot();
+  const r = await wp.run(() => {
+    __t.forceFight(); BASE_FIRES.length = 0;
+    const hg = PARKING.hangars.find(h => h.size === 'big'), top = obstacleTop(hg.x, hg.z);
+    enemyBomb(new THREE.Vector3(hg.x, 0, hg.z)); const f = BASE_FIRES[0], r1 = f && f.r;
+    enemyBomb(new THREE.Vector3(hg.x + 1, 0, hg.z));
+    const c = FX.scorch.spawn(new THREE.Vector3(-12, 0, BASE_LAYOUT.twy.z), 2);
+    return { n: BASE_FIRES.length, y: f && f.p.y, top, grew: f && f.r > r1, cy: c && c.p.y };
+  });
+  expect(r.n, 'one fire on that roof').toBe(1);
+  expect(r.y, 'on the roof, not inside').toBeGreaterThanOrEqual(r.top);
+  expect(r.grew, 'the second hit spreads it').toBe(true);
+  expect(r.cy, 'a crater above the taxiway line (y 0.04)').toBeGreaterThan(0.048);
+  expect((await wp.sim(5, { audio: true })).violations).toEqual([]);
+});
+
 test('craters never stack: hits on a live crater widen it', async ({ wp }) => {
   await wp.boot();
   const r = await wp.run(() => {
