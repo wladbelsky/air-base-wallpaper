@@ -10,6 +10,7 @@ The sequel to [Carrier Strike Group](https://github.com/wladbelsky/carrier-wallp
 
 ![Autumn afternoon air raid: jets fighting low over the shelters, the fuel farm burning](screenshots/dogfight.jpg)
 
+- **Steam Workshop:** https://steamcommunity.com/sharedfiles/filedetails/?id=3829499782
 - **Live demo** (runs in the browser): https://wladbelsky.github.io/air-base-wallpaper/
 
 | Winter night under attack | Refuelling pass (KC-46 and F-16s) | Emergency on 09R while 09L keeps launching |
@@ -17,6 +18,8 @@ The sequel to [Carrier Strike Group](https://github.com/wladbelsky/carrier-wallp
 | ![Night attack](screenshots/night.jpg) | ![Refuelling pass](screenshots/refuel.jpg) | ![Emergency landing](screenshots/emergency.jpg) |
 
 ## Install
+
+The easiest way: subscribe on the [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3829499782).
 
 From source:
 
