@@ -247,7 +247,7 @@ const AIRFIELD = {
   /* departures on their way to the runway (taxiing out, at the hold, lining up): at most 4, so their queue never
      reaches back over the runway exits — an arrival that can't get off the runway would keep it shut, for good, for
      the very queue in front of it */
-  queueFull() { let n = 0; for (const b of AIRCRAFT) if (b.state === 'taxi_out' || b.state === 'hold_short' || b.state === 'lineup') n++; return n >= 4; },
+  queueFull() { let n = 0; for (const b of AIRCRAFT) if (b.state === 'taxi_out' || b.state === 'hold_short' || b.state === 'cross_out' || b.state === 'lineup') n++; return n >= 4; },
   /* a pushback waits until nobody is near its path or taxiing toward where it ends (it takes 10-20 s, blocking the lane /
      taxiway); after 20 s the traffic stops short of it (blocker), those holding for it a gap away don't count */
   pushbackClear(a, pts) {

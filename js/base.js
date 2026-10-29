@@ -37,7 +37,9 @@ const BASE_LAYOUT = {
 };
 const BL = BASE_LAYOUT;
 BL.crossZ = BL.rwy.z + BL.rwy.w / 2 + 1.6;   // holding line on the runway connectors in front of the north runway (crossing it)
-BL.hold2 = { x: BL.hold.x, z: BL.rwy2.z - BL.rwy2.w / 2 - 1.6 };   // holding point of 09R: departures from the south runway while the north one is closed (AIRFIELD.depR)
+// holding point of 09R: departures from the south runway while the north one is closed (AIRFIELD.depR); as far from its
+// edge as HOLD is from 09L's, so a heavy's nose stays off it (1.6 put a C-17's nose over 09R under the arrivals)
+BL.hold2 = { x: BL.hold.x, z: BL.rwy2.z - BL.rwy2.w / 2 - (BL.rwy.z - BL.rwy.w / 2 - BL.hold.z) };
 BL.channels = [...BL.chIn, ...BL.chOut];
 /* a polygon moved `d` inward: each side along its normal, neighbouring sides meet where their offset lines cross */
 function insetPoly(P, d) {

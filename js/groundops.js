@@ -337,7 +337,7 @@ function wayClear(x, z) { let b = 1e9; for (let i = 0; i < _way.length; i += 2) 
    glued to the nose) and faces the aircraft (bar from its front); towing it leads on the aircraft's own way ahead and
    faces along it (bar from its back) — as a pushed trailer it jackknifed behind the aircraft in the turn off the runway */
 function towTug(m, a, push) {
-  const nose = _tn.set(1, 0, 0).applyQuaternion(a.mesh.quaternion).setY(0).normalize(), q = a.mesh.position;
+  const nose = noseOf(a, _tn), q = a.mesh.position;
   const hx = q.x + nose.x * a.spec.len * 0.3, hz = q.z + nose.z * a.spec.len * 0.3, D = a.spec.len * 0.2 + 0.75;
   if (!push) {                                                     // (towed: its deck path is the tow route, startTow)
     const s = a.ds + a.spec.len * 0.5 + 0.75, u = Math.min(1, s / a.dlen), p = a.dcurve.getPointAt(u, _tgp), t = a.dcurve.getTangentAt(u, _tgt), over = Math.max(0, s - a.dlen);
@@ -354,6 +354,7 @@ function towTug(m, a, push) {
   bar.rotation.set(0, Math.atan2(-lp.z, bx), 0); bar.scale.set(Math.max(0.05, Math.hypot(bx, lp.z)), 1, 1);
 }
 const barOf = m => m.userData.bar ?? (m.userData.bar = m.getObjectByName('bar') || null);
+const noseOf = (a, out) => out.set(1, 0, 0).applyQuaternion(a.mesh.quaternion).setY(0).normalize();   // where its nose points (a parked pose doesn't set fwd)
 const hideBar = m => { const b = barOf(m); if (b) b.visible = false; };
 const nearAhead = (x, z, r) => Math.hypot(x - _vh.x, z - _vh.z) < r || Math.hypot(x - _vh2.x, z - _vh2.z) < r;   // the two points ahead of the vehicle (vehHold)
 /* distance from (px, pz) to the segment a-b */
@@ -495,7 +496,7 @@ const _gw = new V3();
 class UnloadScene {
   constructor(a) {
     this.a = a; a.groundBusy = true; a.rampT = 1; this.t = 0; this.phase = 'ramp';
-    const q = a.mesh.position, n = this.nose = new V3(1, 0, 0).applyQuaternion(a.mesh.quaternion).setY(0).normalize(), k = a.spec.len * 0.5 + 0.9 + 0.75;
+    const q = a.mesh.position, n = this.nose = noseOf(a, new V3()), k = a.spec.len * 0.5 + 0.9 + 0.75;
     const at = this.at = [q.x - n.x * k, q.z - n.z * k], CY = [CARGO_YARD.x, CARGO_YARD.z];
     if (a.state === 'unload') {
       const ch = BASE_LAYOUT.channels.reduce((b, c) => Math.abs(c - at[0]) < Math.abs(b - at[0]) ? c : b), sd = Math.sign(ch - at[0]) || 1;
@@ -643,9 +644,9 @@ class FireScene {
     this.car = new CrewCar('firetruck', w.inPts, w.back, w.out, 0); this.veh = [this.car]; this.tur = this.car.m.getObjectByName('turret'); this.phase = 'in';
   }
   update(dt) {
-    const a = this.a; this.t += dt;
+    const a = this.a; this.t += dt; this.age = (this.age || 0) + dt;
     if (!AIRCRAFT.includes(a)) { this.done = true; return; }
-    if (!this.handed) a.dmgT = Math.max(a.dmgT, 5);                         // damaged until the repair crew is done (MaintScene): its timer is for the ones no crew reaches
+    if (!this.handed && this.age < 150) a.dmgT = Math.max(a.dmgT, 5);       // damaged until the repair crew is done (MaintScene): its timer is for the ones no crew reaches (and a tender held up for good)
     if (this.phase === 'wait') { if (!a.groundBusy) this.start(); else if (this.t > 40) { this.done = true; this.next(); } return; }
     const c = this.car;
     if (this.phase === 'in' && c.stage === 'park') { this.phase = 'foam'; this.t = 0; }

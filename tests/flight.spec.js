@@ -211,6 +211,7 @@ test('09L closed: the departures cross its end to 09R and take off there, sharin
   const r = await wp.until(() => {
     if (__s.seq[__s.seq.length - 1] !== __a.state) __s.seq.push(__a.state);
     if (__a.state === 'takeoff_roll' && __a.rolling && !__s.roll) __s.roll = [__a.mesh.position.x, __a.mesh.position.z];
+    if (__a.state === 'hold_short' && __a.rwyL) __s.nose = Math.max(__s.nose ?? -1e9, __a.mesh.position.z + __a.spec.len / 2 - (BASE_LAYOUT.rwy2.z - BASE_LAYOUT.rwy2.w / 2));   // its nose at hold2 vs 09R's edge
     if (AIRFIELD.rwy2.has(__a) && AIRFIELD.rwy2.has(__b) && __b.state === 'rollout' && __a.state !== 'takeoff_roll') __s.both++;   // (one rolling fast may share it, as on 09L)
     return (__a.state === 'climb' || __a.state === 'orbit') && __b.state === 'parked';
   }, 600);
@@ -220,6 +221,7 @@ test('09L closed: the departures cross its end to 09R and take off there, sharin
   expect(inOrder(s.seq, ['hold_short', 'cross_out', 'hold_short', 'lineup', 'takeoff_roll', 'climb'])).toBe(true);
   expect(s.roll[1], 'rolled on 09R').toBeCloseTo(await wp.run(() => BASE_LAYOUT.rwy2.z), 0);
   expect(s.both, 'never on 09R with a landing roll').toBe(0);
+  expect(s.nose, 'held short of 09R: nose off it').toBeLessThan(0);
   expect(await wp.run(() => [__a.rwyL, __b.rwyL === BASE_LAYOUT.rwy2])).toEqual([null, true]);
 });
 

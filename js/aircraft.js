@@ -65,9 +65,10 @@ class Aircraft {
   }
   get status() {
     if (this.dmgT > 0 && this.state === 'parked') return ['DAMAGED', 'wait'];
-    if ((this.state === 'ready' || this.state === 'hold_short') && DAMAGE.closed(this.state === 'hold_short' && this.rwyL || AIRFIELD.depR())) return ['RWY CLOSED', 'wait'];   // what the departures wait for (DAMAGE; none while the other runway takes them)
+    if ((this.state === 'ready' || this.state === 'hold_short') && DAMAGE.closed(this.state === 'hold_short' ? this.runway : AIRFIELD.depR())) return ['RWY CLOSED', 'wait'];   // what the departures wait for (DAMAGE; none for those the other runway takes)
     return STATUS[this.state] || ['—', 'busy'];
   }
+  get runway() { return this.rwyL || RW; }   // the runway it uses: its landing runway, 09R for a departure across at hold2, else the north one
   get airborne() { return this.state === 'orbit' || this.state === 'climb' || this.state === 'depart'; }
   get isAwacs() { return !!this.spec.awacs; }
   get isSupport() { return !!(this.spec.awacs || this.spec.tanker); }   // AWACS / tanker: stay up in combat, scrambled first
@@ -297,9 +298,11 @@ class FixedWing extends Aircraft {
         break;
       case 'hold_short': {
         glow = 0.2; this.v = 0;
-        const R = this.rwyL || RW;                     // its runway: the north one, or 09R once across to it (hold2)
+        const R = this.runway;                         // the north one, or 09R once across to it (hold2)
         // 09L closed and 09R open: across 09L's end to 09R's holding point (AIRFIELD.depR, canCross: clear of the repair)
-        if (R === RW && !this.pairL && !this.pairW && this.t > 1.5 && AIRFIELD.depR() === RW2 && AIRFIELD.canCross(this, HOLD.x)) {
+        // — one at a time: not while another is crossing or holding there (a second one waited behind it with its tail on 09L)
+        if (R === RW && !this.pairL && !this.pairW && this.t > 1.5 && AIRFIELD.depR() === RW2 && AIRFIELD.canCross(this, HOLD.x)
+          && !AIRCRAFT.some(b => b !== this && b.rwyL === RW2 && (b.state === 'cross_out' || b.state === 'hold_short'))) {
           AIRFIELD.rwy.add(this); this.rwyL = RW2; this.startDeckPath([[HOLD.x, HOLD.z], [HOLD.x, BASE_LAYOUT.hold2.z]], S.taxiV); this.state = 'cross_out'; this.t = 0;
           this.tower('crossClear'); break;
         }
@@ -326,14 +329,14 @@ class FixedWing extends Aircraft {
         break;
       case 'takeoff_roll': {
         if (!this.rolling) {                           // brakes on, spooling up; a pair's lead waits for its wingman, who rolls a second after it
-          glow = 0.5; this.rwyPose(this.rx, this.rdz, this.rwyL || RW);
+          glow = 0.5; this.rwyPose(this.rx, this.rdz, this.runway);
           const W = this.pairW, L = this.pairL;
-          let ahead = false; for (const b of AIRFIELD.setOf(this.rwyL || RW)) if (b !== this && b !== L && b !== W && (b.state === 'takeoff_roll' || b.cross)) ahead = true;   // the one before is still rolling, or one is crossing
+          let ahead = false; for (const b of AIRFIELD.setOf(this.runway)) if (b !== this && b !== L && b !== W && (b.state === 'takeoff_roll' || b.cross)) ahead = true;   // the one before is still rolling, or one is crossing
           const go = !ahead && (L ? !(L.state === 'takeoff_roll' && !L.rolling) && (L.state !== 'takeoff_roll' || L.t > 0.9) : this.t > 1.2 && (!W || W.pairL !== this || W.state === 'takeoff_roll' || this.t > 14));
           if (go && this.t > 0.6) { this.rolling = true; this.t = 0; }
           break;
         }
-        const acc = S.vR * S.vR / (2 * S.toRoll), R = this.rwyL || RW;
+        const acc = S.vR * S.vR / (2 * S.toRoll), R = this.runway;
         glow = 1; this.v += acc * dt; this.rx += this.v * dt;   // lifts off toRoll down the runway
         const rot = smoothstep(S.vR * 0.85, S.vR, this.v);
         this.rwyPose(this.rx, this.rdz, R); this.mesh.rotateZ(rot * 0.12);
