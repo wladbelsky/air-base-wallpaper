@@ -54,6 +54,33 @@ test('emergency landing: smoke, priority approach, stop on the runway, crash ten
   expect(await wp.stuck()).toEqual([]);
 });
 
+test('unloading at a hangar: a C-130 back with cargo stops nose in its open door, the K-loader unloads it over the lane, then it rolls in', async ({ wp }) => {
+  await airborne(wp, "a.spec.key === 'c130'");
+  await wp.run(() => { window.__a = __f[0]; __a.cargo = true; __a.requestLand(); window.__u = { seq: [], at: null }; });
+  expect(await wp.run(() => AIRFIELD.sheltered(__a.spot))).toBe(true);
+  const r = await wp.until(() => {
+    if (__u.seq[__u.seq.length - 1] !== __a.state) __u.seq.push(__a.state);
+    const sc = GROUND_OPS.scenes.find(s => s instanceof UnloadScene && s.a === __a);
+    if (sc && sc.phase === 'load' && !__u.at) {
+      const s = __a.spot, q = __a.mesh.position, l = sc.loader.position;
+      __u.at = { door: s.z + s.d / 2, nose: q.z - __a.spec.len / 2, tail: q.z + __a.spec.len / 2, loader: Math.hypot(l.x - sc.at[0], l.z - sc.at[1]), ramp: __a.rampT, open: s.door };
+    }
+    return __a.state === 'parked' && !GROUND_OPS.scenes.some(s => s instanceof UnloadScene);
+  }, 900);
+  expect(r.violations).toEqual([]);
+  expect(r.done, JSON.stringify(await wp.run(() => __u.seq))).toBe(true);
+  const u = await wp.run(() => __u);
+  expect(u.seq.join('>')).toMatch(/taxi_in>unload>taxi_in>parked/);
+  expect(u.at, 'the loader at its tail').not.toBeNull();
+  expect(u.at.nose, 'nose in the door').toBeLessThan(u.at.door); expect(u.at.tail, 'tail out over the lane').toBeGreaterThan(u.at.door + 1);
+  expect(u.at.loader).toBeLessThan(0.3); expect(u.at.ramp).toBe(1); expect(u.at.open).toBeGreaterThan(0.9);
+  expect(await wp.run(() => [__a.cargo, __a.groundBusy, __a.mesh.position.distanceTo(new THREE.Vector3(__a.spot.x, 0, __a.spot.z)) < 0.2])).toEqual([false, false, true]);
+  await wp.sim(15);
+  expect(await wp.run(() => [__a.spot.door < 0.05, GROUND_OPS.scenes.length])).toEqual([true, 0]);
+  const p = await pools(wp);
+  expect(p.kloader).toBe(1); expect(p.pallet).toBe(3);
+});
+
 test('unloading: a C-17 back with cargo opens its ramp on its stand, the K-loader takes the pallets away', async ({ wp }) => {
   await airborne(wp, "a.spec.key === 'c17'");
   await wp.run(() => { window.__a = __f[0]; __a.cargo = true; __a.requestLand(); });

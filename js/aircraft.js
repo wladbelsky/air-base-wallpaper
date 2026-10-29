@@ -32,11 +32,12 @@ const STATUS = {
   parked: ['PARKED', 'deck'], ready: ['ENGINE START', 'busy'], pushback: ['PUSHBACK', 'busy'], taxi_out: ['TAXI', 'busy'], hold_short: ['HOLDING SHORT', 'wait'],
   lineup: ['LINE UP', 'busy'], takeoff_roll: ['TAKEOFF', 'busy'], climb: ['CLIMB', 'air'], orbit: ['AIRBORNE', 'air'],
   approach: ['APPROACH', 'busy'], final: ['FINAL', 'busy'], go_around: ['GO AROUND', 'busy'], rollout: ['LANDING ROLL', 'busy'], taxi_in: ['TAXI', 'busy'],
+  cross_out: ['CROSSING', 'busy'], unload: ['UNLOADING', 'busy'],
   spinup: ['SPOOL UP', 'busy'], lift: ['LIFTOFF', 'busy'], depart: ['CLIMB', 'air'], ret: ['RETURN', 'busy'], hover: ['HOVER', 'busy'], descend: ['LANDING', 'busy'], spindown: ['SHUTDOWN', 'busy'],
   cbt_out: ['ENGAGED ▶', 'air'], cbt_wait: ['ENGAGED', 'air'], cbt_pass: ['ATTACK RUN', 'air'], cbt_orbit: ['FIRE SUPPORT', 'air'], cbt_rtb: ['RTB', 'air']
 };
 const ORBIT_STATES = new Set(['climb', 'depart', 'orbit']);   // flight-mates already given an orbit
-const GROUND_STATES = new Set(['parked', 'ready', 'pushback', 'taxi_out', 'hold_short', 'lineup', 'takeoff_roll', 'rollout', 'taxi_in', 'emergency', 'towed', 'spinup', 'spindown']);
+const GROUND_STATES = new Set(['parked', 'ready', 'pushback', 'taxi_out', 'hold_short', 'cross_out', 'lineup', 'takeoff_roll', 'rollout', 'taxi_in', 'unload', 'emergency', 'towed', 'spinup', 'spindown']);
 
 /* ======================= Base class ======================= */
 class Aircraft {
@@ -64,7 +65,7 @@ class Aircraft {
   }
   get status() {
     if (this.dmgT > 0 && this.state === 'parked') return ['DAMAGED', 'wait'];
-    if ((this.state === 'ready' || this.state === 'hold_short') && DAMAGE.closed(BASE_LAYOUT.rwy)) return ['RWY CLOSED', 'wait'];   // what the departures wait for (DAMAGE)
+    if ((this.state === 'ready' || this.state === 'hold_short') && DAMAGE.closed(this.state === 'hold_short' && this.rwyL || AIRFIELD.depR())) return ['RWY CLOSED', 'wait'];   // what the departures wait for (DAMAGE; none while the other runway takes them)
     return STATUS[this.state] || ['—', 'busy'];
   }
   get airborne() { return this.state === 'orbit' || this.state === 'climb' || this.state === 'depart'; }
@@ -90,7 +91,7 @@ class Aircraft {
   /* --- ground movement along a smooth path (taxi routes); reverse = pushback (tail first) --- */
   startDeckPath(pts, speed, reverse) {
     this.dcurve = new THREE.CatmullRomCurve3(pts.map(p => new V3(p[0], 0, p[1])), false, 'centripetal');
-    this.dlen = this.dcurve.getLength(); this.ds = 0; this.dspeed = speed; this.drev = !!reverse; this.dv = 0;
+    this.dlen = this.dcurve.getLength(); this.ds = 0; this.dspeed = speed; this.drev = !!reverse; this.dv = 0; this.dstop = null;
   }
   /* returns true at the end; stops behind traffic ahead (AIRFIELD.blocked) */
   followDeck(dt, h) {
@@ -101,9 +102,9 @@ class Aircraft {
     for (let i = 0; i < 5; i++) { this.dcurve.getPointAt(Math.min(1, (this.ds + i * 1.5) / this.dlen), _gl); L[i * 2] = _gl.x; L[i * 2 + 1] = _gl.z; }
     this.lookAt = T;
     const stop = AIRFIELD.blocked(this, this.drev ? _gd.clone().negate() : _gd, dt) || AIRFIELD.holdCross(this);
-    const ease = smoothstep(0, 0.8, this.ds + 0.15) * (0.35 + 0.65 * smoothstep(0, 3, this.dlen - this.ds));
+    const end = this.dstop ?? this.dlen, ease = smoothstep(0, 0.8, this.ds + 0.15) * (0.35 + 0.65 * smoothstep(0, 3, end - this.ds));   // (dstop: a stop on the way, e.g. to unload)
     this.dv += clamp((stop ? 0 : this.dspeed * ease) - this.dv, -dt * 2.5, dt * 1.2);
-    this.ds = Math.min(this.dlen, this.ds + this.dv * dt);
+    this.ds = Math.min(end, this.ds + this.dv * dt);
     const u = this.ds / this.dlen, p = this.dcurve.getPointAt(u), t = this.dcurve.getTangentAt(u);
     this.dyaw = Math.atan2(this.drev ? t.z : -t.z, this.drev ? -t.x : t.x);
     this.fwd.set(Math.cos(this.dyaw), 0, -Math.sin(this.dyaw)); this.v = this.dv;
@@ -296,40 +297,51 @@ class FixedWing extends Aircraft {
         break;
       case 'hold_short': {
         glow = 0.2; this.v = 0;
-        // the lead of a pair lines up on the left half and waits there for its wingman (formation takeoff)
+        const R = this.rwyL || RW;                     // its runway: the north one, or 09R once across to it (hold2)
+        // 09L closed and 09R open: across 09L's end to 09R's holding point (AIRFIELD.depR, canCross: clear of the repair)
+        if (R === RW && !this.pairL && !this.pairW && this.t > 1.5 && AIRFIELD.depR() === RW2 && AIRFIELD.canCross(this, HOLD.x)) {
+          AIRFIELD.rwy.add(this); this.rwyL = RW2; this.startDeckPath([[HOLD.x, HOLD.z], [HOLD.x, BASE_LAYOUT.hold2.z]], S.taxiV); this.state = 'cross_out'; this.t = 0;
+          this.tower('crossClear'); break;
+        }
+        // the lead of a pair lines up on the left half and waits there for its wingman (formation takeoff; 09L only)
         const L = this.pairL, pairOk = L && AIRFIELD.rwy.has(L) && (L.state === 'lineup' || (L.state === 'takeoff_roll' && !L.rolling));
         if (L && !pairOk) this.pairL = L.pairW = null;
         if (this.t > 1.5 && (pairOk || (!this.pairL && AIRFIELD.canLineUp(this)))) {
-          const w = !pairOk && AIRCRAFT.find(b => b !== this && b.state === 'taxi_out' && flightOf(b) === flightOf(this) && b.spec.key === S.key && b.dlen - b.ds < 10 && b.blockT > 0.3);
+          const w = !pairOk && R === RW && AIRCRAFT.find(b => b !== this && b.state === 'taxi_out' && flightOf(b) === flightOf(this) && b.spec.key === S.key && b.dlen - b.ds < 10 && b.blockT > 0.3);
           if (w) { this.pairW = w; w.pairL = this; }
           this.rdz = pairOk ? 1.0 : w ? -1.0 : 0;
-          AIRFIELD.rwy.add(this); this.startDeckPath(AIRFIELD.lineUp(this.rdz, pairOk ? 0 : w ? 4 : 0), S.taxiV * 0.9); this.state = 'lineup';
+          AIRFIELD.setOf(R).add(this); this.startDeckPath(AIRFIELD.lineUp(this.rdz, pairOk ? 0 : w ? 4 : 0, R), S.taxiV * 0.9); this.state = 'lineup';
           if (!pairOk) { this.tower(w ? 'takeoffClearPair' : 'takeoffClear'); this.call('takeoffReady', { delay: 0.3 }); }
         }
         break;
       }
+      case 'cross_out':                                // across 09L to 09R's holding point
+        glow = 0.15;
+        if (AIRFIELD.rwy.has(this) && this.mesh.position.z - this.spec.len * 0.5 > RW.z + RW.w / 2 + 0.6) AIRFIELD.rwy.delete(this);   // its tail past 09L's edge
+        if (this.followDeck(dt)) { AIRFIELD.rwy.delete(this); this.state = 'hold_short'; this.t = 0; }
+        break;
       case 'lineup':
         glow = 0.3;
         if (this.followDeck(dt)) { this.state = 'takeoff_roll'; this.t = 0; this.v = 0; this.rx = this.mesh.position.x; this.rolling = false; }
         break;
       case 'takeoff_roll': {
         if (!this.rolling) {                           // brakes on, spooling up; a pair's lead waits for its wingman, who rolls a second after it
-          glow = 0.5; this.rwyPose(this.rx, this.rdz);
+          glow = 0.5; this.rwyPose(this.rx, this.rdz, this.rwyL || RW);
           const W = this.pairW, L = this.pairL;
-          let ahead = false; for (const b of AIRFIELD.rwy) if (b !== this && b !== L && b !== W && (b.state === 'takeoff_roll' || b.cross)) ahead = true;   // the one before is still rolling, or one is crossing
+          let ahead = false; for (const b of AIRFIELD.setOf(this.rwyL || RW)) if (b !== this && b !== L && b !== W && (b.state === 'takeoff_roll' || b.cross)) ahead = true;   // the one before is still rolling, or one is crossing
           const go = !ahead && (L ? !(L.state === 'takeoff_roll' && !L.rolling) && (L.state !== 'takeoff_roll' || L.t > 0.9) : this.t > 1.2 && (!W || W.pairL !== this || W.state === 'takeoff_roll' || this.t > 14));
           if (go && this.t > 0.6) { this.rolling = true; this.t = 0; }
           break;
         }
-        const acc = S.vR * S.vR / (2 * S.toRoll);
+        const acc = S.vR * S.vR / (2 * S.toRoll), R = this.rwyL || RW;
         glow = 1; this.v += acc * dt; this.rx += this.v * dt;   // lifts off toRoll down the runway
         const rot = smoothstep(S.vR * 0.85, S.vR, this.v);
-        this.rwyPose(this.rx, this.rdz); this.mesh.rotateZ(rot * 0.12);
-        if (Math.random() < dt * 8) FX.smoke.spawn(new V3(this.rx - 1.2, 0.2, RW.z + this.rdz), { s0: 0.5, s1: 1.8, life: 1.2, a0: 0.2, color: 0xd8d8d0, v: new V3(-1, 0.3, 0) });
+        this.rwyPose(this.rx, this.rdz, R); this.mesh.rotateZ(rot * 0.12);
+        if (Math.random() < dt * 8) FX.smoke.spawn(new V3(this.rx - 1.2, 0.2, R.z + this.rdz), { s0: 0.5, s1: 1.8, life: 1.2, a0: 0.2, color: 0xd8d8d0, v: new V3(-1, 0.3, 0) });
         if (this.v >= S.vR) {
-          AIRFIELD.rwy.delete(this); this.pairL = this.pairW = null;
+          AIRFIELD.setOf(R).delete(this); this.pairL = this.pairW = null; this.rwyL = null;   // (its landing runway is picked when it comes back)
           const p0 = this.mesh.position.clone(), f = new V3(1, 0, 0);
-          const run = Math.max(S.climbOut, RW.x1 + 10 - p0.x), p1 = p0.clone().addScaledVector(f, run); p1.y += 5;   // straight out past the runway end, then the turn
+          const run = Math.max(S.climbOut, R.x1 + 10 - p0.x), p1 = p0.clone().addScaledVector(f, run); p1.y += 5;   // straight out past the runway end, then the turn
           const P = new FlightPath().addLine(p0, p1);
           this.pickOrbit(true); this.pathToOrbit(P, p1, 0, 0.9, 5 / run); this.pitch = 0.12;   // the climb carries on into the turn; pitch from the rotation
           // keeps accelerating after lift-off (not spread over the whole way to the orbit), at least enough to be at the orbit's speed by its end
@@ -384,7 +396,10 @@ class FixedWing extends Aircraft {
         // brake to a fast taxi on the runway, down to taxi speed for the turn off
         this.v = Math.max(this.rx < this.exitX - 10 ? S.taxiV * 1.8 : S.taxiV, this.v - (this.rdec || S.decel) * dt); this.rx += this.v * dt;
         this.rwyPose(this.rx, 0, this.rwyL);
-        if (this.rx >= this.exitX - 4.5 || this.rx > this.rwyL.x1 - 2) { this.startDeckPath(AIRFIELD.homeRoute(this.spot, this.rx, this.exitX, this.rwyL), S.taxiV); this.dv = this.v; this.state = 'taxi_in'; this.crossAt(this.exitX); }
+        if (this.rx >= this.exitX - 4.5 || this.rx > this.rwyL.x1 - 2) {
+          this.startDeckPath(AIRFIELD.homeRoute(this.spot, this.rx, this.exitX, this.rwyL), S.taxiV); this.dv = this.v; this.state = 'taxi_in'; this.crossAt(this.exitX);
+          if (this.cargo && AIRFIELD.sheltered(this.spot) && !AUD.armed) this.dstop = AIRFIELD.unloadStop(this);   // a transport home with cargo: unloaded at its hangar door (UnloadScene)
+        }
         break;
       }
       case 'emergency': this.rwyPose(this.rx, 0, this.rwyL); this.v = 0; this.trail(dt); break;
@@ -392,7 +407,12 @@ class FixedWing extends Aircraft {
       case 'towed':
         glow = this.state === 'towed' ? 0 : 0.12;
         for (const L of [RW, RW2]) { const set = AIRFIELD.setOf(L); if (set.has(this) && this.mesh.position.z < L.z - L.w / 2 - 1.2) set.delete(this); }   // north of a runway's edge: clear of it
+        if (this.dstop != null && this.ds >= this.dstop - 1e-3) { this.state = 'unload'; this.t = 0; this.v = this.dv = 0; break; }
         if (this.followDeck(dt)) { AIRFIELD.rwy.delete(this); AIRFIELD.rwy2.delete(this); this.state = 'parked'; this.t = 0; this.needsService = true; this.cross = null; }   // the ground crew comes (groundops.js)
+        break;
+      case 'unload':                                   // nose in its open hangar door, the ramp down over the lane: the K-loader takes the cargo (UnloadScene)
+        glow = 0.12; this.v = 0;
+        if (!this.cargo || (AUD.armed && !this.groundBusy) || this.t > 90) { this.cargo = false; this.dstop = null; this.state = 'taxi_in'; this.t = 0; }   // done (a fight before the loader came: in at once)
         break;
     }
     this.glow = glow;

@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=29`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=30`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -138,13 +138,23 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   with two the north one takes the departures, the south one the arrivals. Every rule goes by the runway an aircraft
   actually uses: `a.rwyL`, set when its approach starts (`AIRFIELD.landR()`), so the mode can change any time.
   `AIRFIELD.rwy` / `rwy2` = aircraft on each (`setOf(L)`, `onRunway(a)`); `arrivals` = on approach / final.
-  `canLineUp` (north): empty but for one rolling fast, no arrival to it on final or within 32 s, its emergency towed off,
-  nobody waiting to cross for > 20 s. `canApproach`: per landing runway, one at a time (the next once the one ahead is
-  on final), none while a departure has waited > 25 s at the hold when they share it. `clearToLand` over the arrival's
-  runway at the start of the final and close in (strict) — else `goAround()`. `rwyPose(x, dz, L)`.
-- **Paving**: the south runway is shorter (x1 61) than the last link (64): `buildBase` paves a stub from its end to that
-  connector (a link beyond a runway's end gets one) — the last exit once ran over the grass; `units.spec` raycasts every
-  route home, both runways, every exit, onto the paving.
+  `canLineUp` (by the departure's runway, `a.rwyL || RW`): empty but for one rolling fast, no arrival to it on final or
+  within 32 s, its emergency towed off, (north) nobody waiting to cross for > 20 s. `canApproach`: per landing runway,
+  one at a time (the next once the one ahead is on final), none while a departure for it has waited > 25 s at its hold.
+  `clearToLand` over the arrival's runway at the start of the final and close in (strict) — else `goAround()`.
+  `rwyPose(x, dz, L)`.
+- **Mixed mode**: a closed runway's traffic goes to the open one. South closed: `landR()` sends the arrivals to the north
+  one. North closed (`depR()`, a crater or an emergency on it, the south one open): a departure at the north hold crosses
+  09L's end on the connector at the departure link (x −64; `canCross`) to 09R's holding point `BASE_LAYOUT.hold2`
+  (`cross_out`, held in `AIRFIELD.rwy` till its tail is past 09L), then holds short there with `a.rwyL = RW2` (cleared at
+  lift-off) and lines up / takes off on 09R (`lineUp(dz, dx, L)`, `takeoff_roll` by `a.rwyL`; pairs only on 09L).
+  Once at hold2 it goes from 09R even if 09L reopens. A closed north runway holds crossings only near the repair:
+  within 8 of `DAMAGE.rwy.zone` (the truck's entry link to the crater ± 6, set by `RepairScene`), near the truck, or
+  while it waits to go on.
+- **Paving**: the south runway is shorter (x0 −61, x1 61) than the links (−64, 64): `buildBase` paves a stub from each
+  end to that connector (a link beyond a runway's end gets one; the −64 one also across 09L's end, and a hold-short
+  line at hold2) — the last exit once ran over the grass; `units.spec` raycasts every route home, both runways, every
+  exit, and the way to 09R onto the paving.
 - **Crossing**: home from the south runway (`homeRoute(s, x0, lk, L)`, `a.cross = { ok, x, t }`, `crossAt`) an aircraft
   holds at `BASE_LAYOUT.crossZ` on the connector (`holdCross`, in `followDeck`) until `canCross` (no lineup, no roll
   toward the connector, nothing near it on the runway, no arrival to it close in); then it holds the north runway
@@ -171,7 +181,7 @@ Missions fly beyond the screen edge while there is no music. `dispatchFlight` (`
   `eligible(lead)` — all non-`optIn` types, or exactly the keys in `spec.missions` (allow-list).
   `Mission` (`patrol`, generic: CAP, strikes, CSAR, medevac, overwatch… — text by `textKey()`: `fighter`, `awacs`,
   `gunship`, `heli_attack`, `heli_transport`), `AirliftMission` (`airlift`, optIn — C-130 / C-17: farther, longer, lands
-  after with cargo: `a.cargo`, unloaded on its stand), `ParadropMission` (`paradrop`, optIn — C-130 / C-17: legs
+  after with cargo: `a.cargo`, unloaded on its stand or at its hangar door), `ParadropMission` (`paradrop`, optIn — C-130 / C-17: legs
   `[Depart, Away, DropPass, Return]`; `DropPass` (`drop_pass`) flies low across the screen over `dropZone()` and drops
   `GROUND_OPS.dropChute` jumpers or cargo).
 - **New mission type**: subclass `Mission` (or a type), override what differs — `legs(role)`, `static eligible`,
@@ -194,9 +204,13 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   path `len`·0.5 + 0.75 ahead of its centre, facing along it — trailing the hitch like the pushback tug it jackknifed
   behind the aircraft in the turn off the runway) and goes home round the wingtip to a depot (`tugWay`, reversed) or
   stays in the shelter / hangar.
-- **Unloading** (`UnloadScene`): a transport parked with `a.cargo` on a stand (not in a hangar): `a.rampT` opens the
-  ramp (C-130 / C-17 models), a K-loader comes from the cargo yard along the service road and backs up to the ramp, three pallets slide onto it
-  (each a random `PALLET_KINDS` load, `setPallet`), it drives away; `a.groundBusy` holds the aircraft's departure in `ready` meanwhile.
+- **Unloading** (`UnloadScene`): a transport with `a.cargo` parked on a stand, or (home to a hangar) stopped on its way
+  in with the nose in the open door and the tail out over the lane — `taxi_in` with `a.dstop` (`AIRFIELD.unloadStop`: a
+  stop on its route, `followDeck` eases to it) → `unload` (door held open) → `taxi_in` once the cargo is off; in a fight it
+  rolls straight in and the cargo is dropped. `a.rampT` opens the ramp (C-130 / C-17 models), a K-loader comes from the
+  cargo yard (to a stand along the service road; to a hangar door up the apron channel nearest the tail) and backs up to
+  the ramp behind the tail (from the aircraft's pose), three pallets slide onto it (each a random `PALLET_KINDS` load,
+  `setPallet`); then the aircraft is free (`cargo` false, `groundBusy` released) and the loader drives back to its shed.
 - **Ground crew** (`ServiceScene`): an aircraft that parks (`needsService`, set on landing) on an open row-a stand or
   a helicopter pad (`crewSpot`) gets a fuel truck (`fueler`, its `hose` node scaled out to the aircraft) and, if armed,
   an ammo loader (`ammo`): from the nearest `CREW_DEPOTS` along the service strip `SERVICE_Z` (between the taxiway
@@ -319,7 +333,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   opens when it is off it (`reopen`). Its routes are `AIRFIELD.round`ed (a long truck: wide turns). It drives at
   `REPAIR_V` (3.4): a closure stops the departures at the holding point, the queue fills
   (`queueFull`) and the tugs wait at the stands — a mass launch in a fight once looked stuck for a minute and more.
-  Departures waiting for a closed north runway (`ready` / `hold_short`) show RWY CLOSED on the panel (`status`).
+  Departures waiting for a closed runway (`ready` / `hold_short`, none while the other one takes them: "Mixed mode")
+  show RWY CLOSED on the panel (`status`).
 - **Fixed guns** (`gunAim` in `aircraft.js`): a jet's rounds (`gunTick`; not helicopters, nor side guns `o.side`) leave
   along `fwd`, bent toward the lead point by ≤ `GUN_CONE` (3°) sideways / up and ≤ `o.down` downward (`CAS_DIVE`, 15°,
   for the A-10's strafing); the hit only counts with the target inside that cone. Bursts start only with the target on

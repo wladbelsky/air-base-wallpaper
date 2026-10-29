@@ -73,8 +73,12 @@ const AIRFIELD = {
     pts.push([HOLD.x, TWZ], [HOLD.x, HOLD.z]);
     return this.round(pts, 2.2);
   },
-  // onto the runway; dz: side of the centreline (a pair takes off side by side), dx: further along (the lead of a pair)
-  lineUp(dz, dx) { const z = RW.z + (dz || 0), x = HOLD.x + 4.5 + (dx || 0); return [[HOLD.x, HOLD.z], [HOLD.x, Math.min(z, RW.z) - 1.6], [HOLD.x + 2.2, z - 0.15], [x, z]]; },
+  // onto the runway L from its holding point (09R: hold2); dz: side of the centreline (a pair takes off side by side), dx:
+  // further along (the lead of a pair)
+  lineUp(dz, dx, L = RW) {
+    const H = L === RW2 ? BASE_LAYOUT.hold2 : HOLD, z = L.z + (dz || 0), x = H.x + 4.5 + (dx || 0);
+    return [[H.x, H.z], [H.x, Math.min(z, L.z) - 1.6], [H.x + 2.2, z - 0.15], [x, z]];
+  },
   /* the lane is entered from the taxiway by the west or the centre channel, whichever is west of the slot */
   channelFor: s => s.x > BASE_LAYOUT.chIn[1] ? BASE_LAYOUT.chIn[1] : BASE_LAYOUT.chIn[0],
   /* and left by the first out channel east of the end of the pushback */
@@ -84,6 +88,13 @@ const AIRFIELD = {
     const min = Math.max(xStop + 3, this.onLane(s) ? this.channelFor(s) + 4 : s.x + 5);
     const links = BASE_LAYOUT.links.slice(1).filter(x => x >= min);
     return links.length ? links[0] : 64;
+  },
+  /* a transport home with cargo to a hangar stops with its nose in the open door, the tail and ramp out over the lane
+     (UnloadScene): the distance along its route home (a.dcurve) where its centre crosses that line */
+  unloadStop(a) {
+    const s = a.spot, z = s.z + s.d / 2 + 0.3, n = Math.ceil(a.dlen / 0.25), p = new V3();
+    for (let i = n; i >= 0; i--) if (a.dcurve.getPointAt(i / n, p).z >= z) return Math.min(a.dlen, (i + 1) / n * a.dlen);
+    return null;
   },
   homeRoute(s, x0, lk, L = RW) {   // from the runway L (the south one: across the north one on the connector)
     const pts = [[x0, L.z], [lk - 3.2, L.z], [lk, L.z - 2.6], [lk, TWZ]];
@@ -98,16 +109,28 @@ const AIRFIELD = {
   // the landing runway: the south one with two — but the north one (shared with departures, as with one runway) while
   // an emergency or a crater (DAMAGE) has the south one closed (they would all hold in orbit for minutes)
   landR() { if (CFG.runways < 2) return RW; const e = GROUND_OPS.emerg; return (e && e.rwyL === RW2) || DAMAGE.closed(RW2) ? RW : RW2; },
+  // the departure runway: the north one — but the south one (shared with the arrivals) while the north one is closed and
+  // it is open: across 09L's end to 09R's holding point (hold2; FixedWing hold_short)
+  depR() {
+    if (CFG.runways < 2) return RW;
+    const e = GROUND_OPS.emerg, shut = L => DAMAGE.closed(L) || (e && e.rwyL === L);
+    return shut(RW) && !shut(RW2) ? RW2 : RW;
+  },
   /* the south runway is drawn while in use, even after a switch to one runway (BASE.setRunways, from update) */
-  r2InUse() { if (this.rwy2.size) return true; for (const a of AIRCRAFT) if (a.rwyL === RW2 && (this.arrivals.has(a) || a.cross)) return true; return false; },
+  r2InUse() {
+    if (this.rwy2.size) return true;
+    for (const a of AIRCRAFT) if (a.rwyL === RW2 && (this.arrivals.has(a) || a.cross || a.state === 'cross_out' || a.state === 'hold_short')) return true;
+    return false;
+  },
   eta(a) { return a.path ? (a.path.length - a.ps) / Math.max(1, a.v) : 99; },
   // the next departure may line up behind one already rolling fast down the runway (it rolls once that one is off)
+  // (by its runway: a.rwyL is 09R for one across at hold2, else the north one)
   canLineUp(a) {
-    const e = GROUND_OPS.emerg; if (e && (e.rwyL || this.landR()) === RW) return false;   // an emergency closes its runway until it is towed clear
-    if (DAMAGE.closed(RW)) return false;                                                   // so does a crater, until it is repaired
-    for (const b of this.rwy) if (!(b.state === 'takeoff_roll' && b.rolling && b.v > b.spec.vR * 0.5)) return false;
-    for (const b of this.arrivals) if (b.rwyL === RW && (b.state === 'final' || this.eta(b) < 32)) return false;
-    for (const b of AIRCRAFT) if (b.cross && !b.cross.ok && b.cross.t != null && T - b.cross.t > 20) return false;   // one has waited to cross: its turn
+    const L = (a && a.rwyL) || RW, e = GROUND_OPS.emerg; if (e && (e.rwyL || this.landR()) === L) return false;   // an emergency closes its runway until it is towed clear
+    if (DAMAGE.closed(L)) return false;                                                    // so does a crater, until it is repaired
+    for (const b of this.setOf(L)) if (!(b.state === 'takeoff_roll' && b.rolling && b.v > b.spec.vR * 0.5)) return false;
+    for (const b of this.arrivals) if (b.rwyL === L && (b.state === 'final' || this.eta(b) < 32)) return false;
+    if (L === RW) for (const b of AIRCRAFT) if (b.cross && !b.cross.ok && b.cross.t != null && T - b.cross.t > 20) return false;   // one has waited to cross: its turn
     return true;
   },
   // one arrival at a time (the next may start its approach once the one ahead is on final); a departure kept waiting
@@ -117,7 +140,7 @@ const AIRFIELD = {
     if (DAMAGE.closed(L)) return false;
     if (a.emerg) { for (const b of this.arrivals) if (b.rwyL === L && b.state === 'final') return false; return true; }   // priority: the ones on approach will go around
     const e = GROUND_OPS.emerg; if (e && (e.rwyL || L) === L) return false;
-    if (L === RW && AIRCRAFT.some(b => b.state === 'hold_short' && b.t > 25)) return false;   // sharing the runway with departures
+    if (AIRCRAFT.some(b => b.state === 'hold_short' && (b.rwyL || RW) === L && b.t > 25)) return false;   // sharing the runway with departures (09L, or 09R while 09L is closed)
     for (const b of this.arrivals) if (b.rwyL === L) { if (b.state !== 'final') return false; n++; }
     return n < 2;
   },
@@ -143,7 +166,10 @@ const AIRFIELD = {
     return false;
   },
   canCross(a, lx) {
-    if (DAMAGE.closed(RW)) return false;                    // the repair truck on it
+    // closed for a crater: not near the repair truck's stretch (its entry link to the crater, DAMAGE.rwy.zone) or the truck,
+    // nor while the truck waits to go on (RepairScene: until the runway is empty)
+    const c = DAMAGE.rwy, sc = c && c.scene;
+    if (c && c.L === RW && (!c.zone || (lx > c.zone[0] - 8 && lx < c.zone[1] + 8) || (sc && sc.phase === 'in' && !sc.through) || GROUND_OPS.vehicleNear(lx, RW.z, 8))) return false;
     for (const b of this.rwy) {
       if (b === a) continue;
       if (b.state === 'lineup') return false;
@@ -245,6 +271,7 @@ const AIRFIELD = {
     if (a.state === 'parked') return a.t < 4 ? 1 : 0;
     if (a.state === 'ready' || a.state === 'pushback') return 1;
     if (a.state === 'taxi_in' || a.state === 'towed') return a.dlen - a.ds < 40 ? 1 : 0;
+    if (a.state === 'unload') return 1;
     return 0;
   },
   setDoor(s) {

@@ -270,7 +270,8 @@ function vehHold(d, own) {
     const inPath = wayClear(m.x, m.z) < (a.state === 'ready' ? rr : 0.6 + a.spec.span * 0.35);
     if (inPath && d.s > 0.3 && d.holdSince != null && T - d.holdSince > 1.5) {
       const pb = d.c.getPointAt(Math.max(0, d.s - 2) / d.len, _vr), back = wayClear(pb.x, pb.z), pf = d.c.getPointAt(Math.min(d.len, d.s + 2.5) / d.len, _vr), fwd = wayClear(pf.x, pf.z);
-      d.giveWay = T + 2.5; d.holdSince = null; return d.giveDir = fwd > back ? 'go' : 'back';
+      const go = fwd > back && !vehHoldAir(d, a, _vh3.copy(pf), m);   // (not on into another one's way: a tug driving on past a taxiing C-130 went under a pushback)
+      d.giveWay = T + 2.5; d.holdSince = null; return d.giveDir = go ? 'go' : 'back';
     }
   }
   // setting off from a start point (a depot) only once the last one to leave it is clear of it: one at a time
@@ -404,9 +405,9 @@ const GROUND_OPS = registerMissionWorld({
     }
     for (let i = this.scenes.length - 1; i >= 0; i--) if (this.scenes[i].done) { this.endScene(this.scenes[i]); this.scenes.splice(i, 1); }
     this.updateChutes(dt);
-    // unloading: a transport home with cargo, on a stand where it can be seen
-    for (const a of AIRCRAFT) if (a.cargo && a.state === 'parked' && a.t > 2 && !a.groundBusy && !(a.dmgT > 0)) {
-      if (AIRFIELD.sheltered(a.spot)) a.cargo = false; else this.scenes.push(new UnloadScene(a));
+    // unloading: a transport home with cargo, on its stand or at its hangar door (a hangar's skipped in a fight: in at once)
+    for (const a of AIRCRAFT) if (a.cargo && !a.groundBusy && ((a.state === 'parked' && a.t > 2 && !(a.dmgT > 0)) || (a.state === 'unload' && a.t > 0.5))) {
+      if (a.state === 'parked' && AIRFIELD.sheltered(a.spot)) a.cargo = false; else this.scenes.push(new UnloadScene(a));
     }
     // tugs for the departures; the ground crew for those back on an open stand or pad (a few at a time)
     let crews = 0; for (const s of this.scenes) if (s instanceof ServiceScene) crews++;
@@ -487,25 +488,36 @@ const GROUND_OPS = registerMissionWorld({
 });
 const _gw = new V3();
 
-/* unloading at a stand: the ramp opens, the K-loader comes from the cargo yard along the service road, three pallets
-   slide onto it, it drives back; the aircraft can't leave meanwhile (groundBusy) */
+/* unloading: the ramp opens, the K-loader comes from the cargo yard to behind the tail, three pallets slide onto it, it
+   drives back; the aircraft can't leave until the cargo is off (groundBusy). On an open stand it comes along the service
+   road; at a hangar door (a.state 'unload': nose in the door, the tail out over the lane) up the apron channel nearest
+   the tail to the lane — the aircraft rolls in as the loader pulls away */
 class UnloadScene {
   constructor(a) {
     this.a = a; a.groundBusy = true; a.rampT = 1; this.t = 0; this.phase = 'ramp';
-    const s = a.spot, tail = s.z + a.spec.len * 0.5 + 0.9;
-    this.at = [s.x, tail + 0.75];
+    const q = a.mesh.position, n = this.nose = new V3(1, 0, 0).applyQuaternion(a.mesh.quaternion).setY(0).normalize(), k = a.spec.len * 0.5 + 0.9 + 0.75;
+    const at = this.at = [q.x - n.x * k, q.z - n.z * k], CY = [CARGO_YARD.x, CARGO_YARD.z];
+    if (a.state === 'unload') {
+      const ch = BASE_LAYOUT.channels.reduce((b, c) => Math.abs(c - at[0]) < Math.abs(b - at[0]) ? c : b), sd = Math.sign(ch - at[0]) || 1;
+      const up = [[ch + (Math.sign(CY[0] - ch) || 1) * 1.6, SERVICE_Z], [ch, SERVICE_Z - 1.4], [ch, at[1] + 2.4]];
+      this.wayIn = [CARGO_YARD.in, CY, ...up, [at[0] + sd * 1.6, at[1] + 1.3]]; this.sd = sd;
+      this.wayOut = [at, [at[0] + sd * 0.6, at[1] + 0.8], ...up.reverse(), CY, CARGO_YARD.in];
+    } else {
+      this.wayIn = [CARGO_YARD.in, CY, [at[0] + 4, SERVICE_Z], [at[0] + 1.6, at[1] + 1.3]]; this.sd = 1;
+      this.wayOut = [at, [at[0] + 0.6, at[1] + 0.8], [at[0] + 4, SERVICE_Z], CY, CARGO_YARD.in];
+    }
     this.loader = takeVehicle('kloader'); this.deck = this.loader.getObjectByName('deck');
     this.loader.position.set(CARGO_YARD.in[0], 0, CARGO_YARD.in[1]); vehScale(this.loader, 0.01); this.lk = 0;   // grows in inside the yard's shed as it sets off
     this.pallets = []; this.veh = [this.loader];
   }
   update(dt) {
     const a = this.a; this.t += dt;
-    if ((a.state !== 'parked' && a.state !== 'ready') || !AIRCRAFT.includes(a)) { this.done = true; return; }   // gone meanwhile (retired, rebuilt): drop it
+    if (!AIRCRAFT.includes(a) || (this.phase !== 'out' && !['parked', 'ready', 'unload'].includes(a.state))) { this.done = true; return; }   // gone meanwhile (retired, rebuilt): drop it
     switch (this.phase) {
-      case 'ramp': if (this.t > 2.5) { this.phase = 'in'; this.drive = new Drive(this.loader, [CARGO_YARD.in, [CARGO_YARD.x, CARGO_YARD.z], [this.at[0] + 4, SERVICE_Z], [this.at[0] + 1.6, this.at[1] + 1.3]], 2.2, false, 0.5); } break;
+      case 'ramp': if (this.t > 2.5) { this.phase = 'in'; this.drive = new Drive(this.loader, this.wayIn, 2.2, false, 0.5); } break;
       case 'in': {
         if (this.lk < 1) vehScale(this.loader, this.lk = Math.min(1, this.lk + dt * 2.5));
-        if (this.drive.step(dt, vehHold(this.drive, a))) { const p = this.loader.position; this.phase = 'dock'; this.drive = new Drive(this.loader, [[p.x, p.z], [this.at[0] + 0.3, this.at[1] + 0.6], this.at], 1.0, true); }
+        if (this.drive.step(dt, vehHold(this.drive, a))) { const p = this.loader.position; this.phase = 'dock'; this.drive = new Drive(this.loader, [[p.x, p.z], [this.at[0] + this.sd * 0.3, this.at[1] + 0.6], this.at], 1.0, true); }
         break;
       }
       case 'dock': if (this.drive.step(dt, vehHold(this.drive, a))) { this.phase = 'load'; this.t = 0; } break;   // backs up to the ramp, deck first
@@ -516,23 +528,26 @@ class UnloadScene {
         for (const [i, p] of this.pallets.entries()) {
           p.t += dt; const k = smoothstep(0, 1.8, p.t);
           // from inside the hold, down the ramp, to its place on the deck (local deck x along the loader, which faces north)
-          const from = new V3(a.spot.x, 0.35, a.spot.z + a.spec.len * 0.2), to = this.loader.localToWorld(new V3(-0.2 + 0.45 - i * 0.45, this.deck.position.y + 0.05, 0));
+          const q = a.mesh.position, from = new V3(q.x - this.nose.x * a.spec.len * 0.2, 0.35, q.z - this.nose.z * a.spec.len * 0.2), to = this.loader.localToWorld(new V3(-0.2 + 0.45 - i * 0.45, this.deck.position.y + 0.05, 0));
           p.m.position.lerpVectors(from, to, k); p.m.rotation.y = this.loader.rotation.y;
         }
-        if (this.t > 1 + 3 * 2.2 + 1) { this.phase = 'out'; a.rampT = 0; this.drive = new Drive(this.loader, [this.at, [this.at[0] + 0.6, this.at[1] + 0.8], [this.at[0] + 4, SERVICE_Z], [CARGO_YARD.x, CARGO_YARD.z], CARGO_YARD.in], 2.0, false, 0.5); }   // back into the shed (dropped there)
+        if (this.t > 1 + 3 * 2.2 + 1) {                 // the cargo is off: the aircraft is free (one at a hangar door rolls in), the loader goes back into the shed (dropped there)
+          this.phase = 'out'; a.rampT = 0; a.cargo = false; a.groundBusy = false; this.drive = new Drive(this.loader, this.wayOut, 2.0, false, 0.5);
+        }
         break;
       }
       case 'out': {
         const end = this.drive.step(dt, vehHold(this.drive, a));
         this.pallets.forEach((p, i) => p.m.position.copy(this.loader.localToWorld(new V3(-0.2 + 0.45 - i * 0.45, this.deck.position.y + 0.05, 0))));
         this.pallets.forEach(p => p.m.rotation.y = this.loader.rotation.y);
-        if (end) { this.done = true; a.cargo = false; if (Math.random() < 0.5) a.say(radioLine(LINES.unload), { prio: 0 }); }
+        if (end) { this.done = true; if (Math.random() < 0.5) a.say(radioLine(LINES.unload), { prio: 0 }); }
         break;
       }
     }
   }
   end() {
-    this.a.groundBusy = false; this.a.rampT = 0; this.deck.position.y = 0.5;
+    if (this.phase !== 'out') { this.a.groundBusy = false; this.a.rampT = 0; }   // (from then on another crew may hold it)
+    this.deck.position.y = 0.5;
     vehScale(this.loader, 1); dropVehicle('kloader', this.loader); for (const p of this.pallets) dropVehicle('pallet', p.m);
   }
 }
@@ -710,6 +725,7 @@ class RepairScene {
     const lead = south ? [D.in, [D.x, D.z], [D.x, ROAD_S], [ex, ROAD_S]] : [D.in, [D.x, D.z], [ex, SERVICE_Z], [ex, BASE_LAYOUT.twy.z]];
     this.entry = wayPts([...lead, [ex, L.z + sz * (L.w / 2 + 0.6)], [ex + dir * 2.6, L.z]]);
     this.park = [c.x - dir * (R + 1.6), L.z]; this.dir = dir; this.sz = sz; this.offT = this.offTime();
+    c.zone = [Math.min(ex, c.x) - 6, Math.max(ex, c.x) + 6];   // the stretch of runway it works on (AIRFIELD.canCross keeps crossings clear of it)
     this.m = takeVehicle('repair'); this.k = 0; vehScale(this.m, 0.01); this.veh = [this.m];
     this.crane = new Crane(this.m);
     this.mats = []; this.m.traverse(o => { if (o.name === 'mat') this.mats.push(o); }); this.mats.sort((a, b) => b.position.y - a.position.y);   // top one first

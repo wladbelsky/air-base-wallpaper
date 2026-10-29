@@ -199,6 +199,42 @@ test('a pair from one flight takes off side by side', async ({ wp }) => {
   expect(pairs.every(z => z === 0) || (pairs.includes(1) && pairs.includes(-1)), JSON.stringify(pairs)).toBe(true);
 });
 
+test('09L closed: the departures cross its end to 09R and take off there, sharing it with the arrivals', async ({ wp }) => {
+  await quietBase(wp);
+  // one up to land meanwhile, one to depart; 09L closed (a crater far east) once the departure holds short of it
+  await wp.run(() => { CFG.runways = 2; window.__b = AIRCRAFT.find(a => a.spec.key === 'f22'); __b.requestLaunch(); });
+  expect((await wp.until(() => __b.state === 'orbit', 400)).done).toBe(true);
+  await wp.run(() => { window.__a = AIRCRAFT.find(a => a.spec.key === 'f16'); __a.requestLaunch(); });
+  expect((await wp.until(() => __a.state === 'hold_short', 400)).done).toBe(true);
+  await wp.run(() => { DAMAGE.close(BASE_LAYOUT.rwy, new THREE.Vector3(30, 0, BASE_LAYOUT.rwy.z)); __b.requestLand(); window.__s = { seq: [], roll: null, both: 0 }; });
+  expect(await wp.run(() => AIRFIELD.depR() === BASE_LAYOUT.rwy2)).toBe(true);
+  const r = await wp.until(() => {
+    if (__s.seq[__s.seq.length - 1] !== __a.state) __s.seq.push(__a.state);
+    if (__a.state === 'takeoff_roll' && __a.rolling && !__s.roll) __s.roll = [__a.mesh.position.x, __a.mesh.position.z];
+    if (AIRFIELD.rwy2.has(__a) && AIRFIELD.rwy2.has(__b) && __b.state === 'rollout' && __a.state !== 'takeoff_roll') __s.both++;   // (one rolling fast may share it, as on 09L)
+    return (__a.state === 'climb' || __a.state === 'orbit') && __b.state === 'parked';
+  }, 600);
+  expect(r.violations).toEqual([]);
+  expect(r.done, JSON.stringify(await wp.run(() => [__s.seq, __a.state, __b.state]))).toBe(true);
+  const s = await wp.run(() => __s);
+  expect(inOrder(s.seq, ['hold_short', 'cross_out', 'hold_short', 'lineup', 'takeoff_roll', 'climb'])).toBe(true);
+  expect(s.roll[1], 'rolled on 09R').toBeCloseTo(await wp.run(() => BASE_LAYOUT.rwy2.z), 0);
+  expect(s.both, 'never on 09R with a landing roll').toBe(0);
+  expect(await wp.run(() => [__a.rwyL, __b.rwyL === BASE_LAYOUT.rwy2])).toEqual([null, true]);
+});
+
+test('09L closed near its end: the departure waits at the hold (not across the repair), then goes from 09L', async ({ wp }) => {
+  await quietBase(wp);
+  await wp.run(() => { CFG.runways = 2; window.__a = AIRCRAFT.find(a => a.spec.key === 'f16'); __a.requestLaunch(); });
+  expect((await wp.until(() => __a.state === 'hold_short', 400)).done).toBe(true);
+  await wp.run(() => { DAMAGE.close(BASE_LAYOUT.rwy, new THREE.Vector3(-52, 0, BASE_LAYOUT.rwy.z)); window.__x = 0; });
+  const r = await wp.until(() => { if (__a.state === 'cross_out') __x++; return __a.state === 'climb'; }, 300);
+  expect(r.violations).toEqual([]);
+  expect(r.done).toBe(true);
+  expect(await wp.run(() => __x), 'never crossed by the repair').toBe(0);
+  expect(await wp.run(() => !DAMAGE.rwy)).toBe(true);
+});
+
 test('an arrival finding the runway occupied goes around and lands afterwards', async ({ wp }) => {
   await quietBase(wp);
   await wp.run(() => { window.__a = AIRCRAFT.find(a => a.spec.key === 'f22'); __a.requestLaunch(); });

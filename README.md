@@ -124,7 +124,8 @@ controls how often this happens (0 = off).
 - **Emergency landings:** now and then a jet comes back with an engine fire, trailing smoke. The runway is cleared
   for it, it stops on the runway, the crash tenders race out of the fire station and foam it, and a tug tows it home.
 - **Unloading:** a C-17 or C-130 back from an airlift run with cargo opens its ramp on its stand, a K-loader comes from
-  the cargo yard and takes the pallets away.
+  the cargo yard and takes the pallets away. One that lives in a hangar stops with its nose in the open door, is
+  unloaded over the taxi lane, then rolls in.
 - **Paradrops:** a C-130 or C-17 flies low across the screen over a drop zone and paratroopers (or cargo bundles)
   come down under their canopies, drift with the wind and land.
 - **Ground crew:** an aircraft back on an open stand, or a helicopter on its pad, gets a fuel truck (hose out) and,
@@ -161,7 +162,8 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
   with a workshop body) sets a spare engine down beside it with its crane while the crew works on it — repaired, it
   gets the usual fuel truck (in a shelter or hangar it is repaired out of sight, in up to two minutes). A crater on a runway closes it: a green 10x10 repair truck drives out, its crane lowers repair mats into
   the crater, and the runway opens again (within about a minute, and stays open at least three minutes; the departures
-  waiting for it show RWY CLOSED); with two runways the arrivals use the other one meanwhile. The
+  waiting for it show RWY CLOSED); with two runways the other one takes both the arrivals and the departures meanwhile
+  (with 09L closed they cross its end on a taxiway down to 09R and take off from there). The
   base never goes down completely: at most 40 % of the air defence, one runway and a quarter of the aircraft are out at
   once (the Patriot and the NASAMS never both); a hit beyond that only burns and craters. The panel shows DAMAGED /
   RUNWAY CLOSED.

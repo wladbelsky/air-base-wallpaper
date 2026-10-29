@@ -10,11 +10,11 @@
   H.MISSION_STATES = new Set(['mission_out', 'mission', 'mission_back', 'drop_pass']);
   H.TANK_STATES = new Set(['tank_out', 'tank_wait', 'tank_pass', 'tank_back']);
   // who may be on the runway (lining up, rolling, landing roll until clear) / on approach
-  H.RUNWAY_STATES = new Set(['lineup', 'takeoff_roll', 'rollout', 'taxi_in', 'emergency', 'towed']);
+  H.RUNWAY_STATES = new Set(['lineup', 'takeoff_roll', 'rollout', 'taxi_in', 'emergency', 'towed', 'cross_out']);
   H.ARRIVAL_STATES = new Set(['approach', 'final']);
   // per-state limits for the stuck detector (s); states missing here use DEFAULT_LIMIT, EXEMPT ones are never stuck
   H.STATE_LIMITS = { ready: 600, pushback: 90, taxi_out: 600, hold_short: 300, lineup: 40, takeoff_roll: 90, climb: 240, approach: 240, final: 60,
-    go_around: 120, rollout: 90, taxi_in: 360, emergency: 200, towed: 360, drop_pass: 120, spinup: 60, lift: 30, depart: 240, ret: 300, hover: 30, descend: 30, spindown: 30,
+    go_around: 120, rollout: 90, taxi_in: 360, cross_out: 60, unload: 120, emergency: 200, towed: 360, drop_pass: 120, spinup: 60, lift: 30, depart: 240, ret: 300, hover: 30, descend: 30, spindown: 30,
     cbt_out: 180, cbt_rtb: 300, cbt_pass: 240, tank_out: 240, tank_back: 300, tank_pass: 240, mission_out: 400, mission_back: 600 };
   H.DEFAULT_LIMIT = 600;
   H.EXEMPT = new Set(['parked', 'orbit', 'cbt_wait', 'cbt_orbit', 'mission', 'tank_wait']);   // waiting states depend on traffic: checked by "eventually" tests instead
@@ -152,7 +152,7 @@
       const t0 = T - C.t + 0.2;
       for (const a of AIRCRAFT) {
         const s = H.stateT.get(keyOf(a)); if (!s || s.since < t0) continue;
-        if (a.state === 'lineup' && C.L === BASE_LAYOUT.rwy && !a.pairL) v.push(`${who(a)} lined up on the closed runway`);   // (a pair's wingman joins its lead)
+        if (a.state === 'lineup' && (a.rwyL || BASE_LAYOUT.rwy) === C.L && !a.pairL) v.push(`${who(a)} lined up on the closed runway`);   // (a pair's wingman joins its lead)
         if (a.state === 'final' && a.rwyL === C.L) v.push(`${who(a)} on final to the closed runway`);
       }
     }

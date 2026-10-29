@@ -167,11 +167,14 @@ test('airfield: the routes home from both runways, every exit, keep to the pavin
     const ms = []; BASE.group.traverseVisible(o => { if (o.isMesh && !o.isInstancedMesh) ms.push(o); }); BASE.rwy2.traverseVisible(o => { if (o.isMesh && !o.isInstancedMesh) ms.push(o); });
     const rc = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0), out = [];
     const paved = (x, z) => { rc.set(new THREE.Vector3(x, 0.5, z), down); const h = rc.intersectObjects(ms, false)[0]; return !!h && h.point.y > 0.02; };
-    const s = PARKING.stands[0];
-    for (const L of [BASE_LAYOUT.rwy, BASE_LAYOUT.rwy2]) for (const lk of BASE_LAYOUT.links.slice(1)) {
-      const c = new THREE.CatmullRomCurve3(AIRFIELD.homeRoute(s, lk - 10, lk, L).map(p => new THREE.Vector3(p[0], 0, p[1])), false, 'centripetal'), n = Math.ceil(c.getLength() / 0.5);
-      for (let i = 0; i <= n; i++) { const p = c.getPointAt(i / n); if (!paved(p.x, p.z)) { out.push(`${L === BASE_LAYOUT.rwy ? 'north' : 'south'} runway, exit ${lk}: grass at ${p.x.toFixed(1)},${p.z.toFixed(1)}`); break; } }
-    }
+    const s = PARKING.stands[0], H = HOLD, H2 = BASE_LAYOUT.hold2;
+    const walk = (pts, what) => {
+      const c = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(p[0], 0, p[1])), false, 'centripetal'), n = Math.ceil(c.getLength() / 0.5);
+      for (let i = 0; i <= n; i++) { const p = c.getPointAt(i / n); if (!paved(p.x, p.z)) { out.push(`${what}: grass at ${p.x.toFixed(1)},${p.z.toFixed(1)}`); break; } }
+    };
+    for (const L of [BASE_LAYOUT.rwy, BASE_LAYOUT.rwy2]) for (const lk of BASE_LAYOUT.links.slice(1)) walk(AIRFIELD.homeRoute(s, lk - 10, lk, L), `${L === BASE_LAYOUT.rwy ? 'north' : 'south'} runway, exit ${lk}`);
+    // the departures to 09R while 09L is closed: across 09L's end to hold2, then lining up
+    walk([[H.x, H.z], [H.x, H2.z]], 'across to 09R'); walk(AIRFIELD.lineUp(0, 0, BASE_LAYOUT.rwy2), 'lining up on 09R');
     return out;
   });
   expect(r).toEqual([]);

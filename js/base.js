@@ -37,6 +37,7 @@ const BASE_LAYOUT = {
 };
 const BL = BASE_LAYOUT;
 BL.crossZ = BL.rwy.z + BL.rwy.w / 2 + 1.6;   // holding line on the runway connectors in front of the north runway (crossing it)
+BL.hold2 = { x: BL.hold.x, z: BL.rwy2.z - BL.rwy2.w / 2 - 1.6 };   // holding point of 09R: departures from the south runway while the north one is closed (AIRFIELD.depR)
 BL.channels = [...BL.chIn, ...BL.chOut];
 /* a polygon moved `d` inward: each side along its normal, neighbouring sides meet where their offset lines cross */
 function insetPoly(P, d) {
@@ -330,13 +331,15 @@ function buildBase() {
   const lines = [];   // light lists for navLights
   const rabbit = [], my = 0.046;
   // --- runways: the north one (designators 09/27, or 09L/27R with two); the south one in its own group (shown with two
-  // runways, see setRunways), with the connectors on from the links and a holding line in front of the north runway
+  // runways, see setRunways), with the connectors on from the links and a holding line in front of the north runway; the
+  // one at the departure link (x −64, past 09L's end) takes the departures down to 09R while 09L is closed
   const desig1 = buildRunway(g, R, [['09', '27'], ['09L', '27R']], lines, rabbit, -1);
   dyn.push(...desig1.flat());
   const g2 = new THREE.Group(), R2 = BL.rwy2, lines2 = [];
   buildRunway(g2, R2, [['09R', '27L']], lines2, rabbit, 1);
-  for (const lx of BL.links.slice(1)) {
+  for (const lx of BL.links) {
     slab(g2, lx - TW.w / 2, R.z + R.w / 2, lx + TW.w / 2, R2.z - R2.w / 2, 0.035, ASPH2);
+    if (lx - TW.w / 2 < R.x0) slab(g2, lx - TW.w / 2, R.z - R.w / 2, R.x0, R.z + R.w / 2, 0.035, ASPH2);   // across the north runway's end
     deckLine(g2, lx, R.z + R.w / 2, lx, R2.z - R2.w / 2, 0.08, 0xd8b030, my - 0.006);
     for (const dz of [0, 0.3]) deckLine(g2, lx - TW.w / 2 + 0.15, BL.crossZ + dz, lx + TW.w / 2 - 0.15, BL.crossZ + dz, 0.07, 0xd8b030, my);   // hold short of the north runway
     for (const sx of [-1, 1]) for (let z = R.z + R.w / 2 + 1.6; z < R2.z - R2.w / 2 - 1; z += 3) lines2.push([lx + sx * (TW.w / 2 + 0.2), 0.1, z, 0x4a7cff]);
@@ -345,6 +348,11 @@ function buildBase() {
     if (lx + TW.w / 2 > R2.x1) {
       slab(g2, R2.x1, R2.z - R2.w / 2, lx + TW.w / 2, R2.z + R2.w / 2, 0.035, ASPH2);
       deckLine(g2, R2.x1, R2.z, lx - 1, R2.z - 0.6, 0.08, 0xd8b030, my - 0.006); deckLine(g2, lx - 1, R2.z - 0.6, lx, R2.z - R2.w / 2, 0.08, 0xd8b030, my - 0.006);
+    }
+    if (lx - TW.w / 2 < R2.x0) {                                     // and before its west end: onto it for a takeoff
+      slab(g2, lx - TW.w / 2, R2.z - R2.w / 2, R2.x0, R2.z + R2.w / 2, 0.035, ASPH2);
+      deckLine(g2, lx, R2.z - R2.w / 2, lx + 1, R2.z - 0.6, 0.08, 0xd8b030, my - 0.006); deckLine(g2, lx + 1, R2.z - 0.6, R2.x0, R2.z, 0.08, 0xd8b030, my - 0.006);
+      for (const sz of [-0.15, 0.15]) deckLine(g2, lx - TW.w / 2 + 0.15, BL.hold2.z + sz, lx + TW.w / 2 - 0.15, BL.hold2.z + sz, 0.07, 0xd8b030, my);   // hold short of 09R
     }
   }
   slab(g2, -7.5, R2.z + R2.w / 2 + 0.9, -0.5, 29.7, 0.03, CONC);   // the fire station's apron out onto it
