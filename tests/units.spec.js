@@ -163,7 +163,7 @@ test('airfield: every home is reachable — taxi routes start at the home and en
 test('airfield: the routes home from both runways, every exit, keep to the paving (the last exit off the shorter south runway once crossed the grass)', async ({ wp }) => {
   await wp.boot();
   const r = await wp.run(() => {
-    CFG.runways = 2; BASE.setRunways(2); scene.updateMatrixWorld(true);
+    scene.updateMatrixWorld(true);
     const ms = []; BASE.group.traverseVisible(o => { if (o.isMesh && !o.isInstancedMesh) ms.push(o); }); BASE.rwy2.traverseVisible(o => { if (o.isMesh && !o.isInstancedMesh) ms.push(o); });
     const rc = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0), out = [];
     const paved = (x, z) => { rc.set(new THREE.Vector3(x, 0.5, z), down); const h = rc.intersectObjects(ms, false)[0]; return !!h && h.point.y > 0.02; };
@@ -364,7 +364,7 @@ test('no tree grows through a gun, tank, launcher or light tower', async ({ wp }
   const r = await wp.run(() => {
     const out = [], m = new THREE.Matrix4(), p = new THREE.Vector3(), w = new THREE.Vector3();
     const keep = [...Object.values(BASE.mounts).flat().map(o => o.yawG), BASE.patriotRadar, ...BASE.skyLights.map(s => s.holder)].map(o => o.getWorldPosition(w.clone()));
-    for (const v of [...TERRAIN.veg, ...TERRAIN.fill]) for (let i = 0; i < v.count; i++) {
+    for (const v of TERRAIN.veg) for (let i = 0; i < v.count; i++) {
       v.getMatrixAt(i, m); p.setFromMatrixPosition(m);
       for (const k of keep) if (Math.hypot(p.x - k.x, p.z - k.z) < 2) out.push(`tree at ${p.x.toFixed(0)},${p.z.toFixed(0)}`);
     }

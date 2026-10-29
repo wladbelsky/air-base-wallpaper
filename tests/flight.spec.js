@@ -141,7 +141,7 @@ test('helicopters never fly through a roof: one sent home low across the big han
   expect(await wp.run(() => __over), 'it went over the roof').toBeGreaterThan(5.5);
 });
 
-test('two runways: departures from the north one while arrivals land on the south one and cross back', async ({ wp }) => {
+test('departures from the north one while arrivals land on the south one and cross back', async ({ wp }) => {
   await quietBase(wp);
   await wp.run(() => { window.__in = AIRCRAFT.filter(a => ['f16', 'f15'].includes(a.spec.key)).slice(0, 3); __in.forEach(a => a.requestLaunch()); });
   expect((await wp.until(() => __in.every(a => a.state === 'orbit'), 600)).done).toBe(true);
@@ -166,28 +166,6 @@ test('two runways: departures from the north one while arrivals land on the sout
   expect(await wp.stuck()).toEqual([]);
 });
 
-test('one runway: everything on the north one; switching to one mid-approach to the south one still lands there', async ({ wp }) => {
-  await quietBase(wp);
-  await wp.run(() => { CFG.runways = 1; window.__a = AIRCRAFT.find(a => a.spec.key === 'f16'); __a.requestLaunch(); });
-  expect((await wp.until(() => __a.state === 'orbit', 400)).done).toBe(true);
-  await wp.run(() => __a.requestLand());
-  expect((await wp.until(() => __a.state === 'parked', 600)).done).toBe(true);
-  expect(await wp.run(() => [__a.rwyL === BASE_LAYOUT.rwy, BASE.rwy2.visible, BASE.fill.visible])).toEqual([true, false, true]);
-  // two runways, an approach to the south one, then back to one: it lands there all the same, the runway is drawn till it is home
-  await wp.run(() => { CFG.runways = 2; __a.requestLaunch(); });
-  expect((await wp.until(() => __a.state === 'orbit', 400)).done).toBe(true);
-  await wp.run(() => __a.requestLand());
-  expect((await wp.until(() => __a.state === 'approach', 200)).done).toBe(true);
-  await wp.run(() => { CFG.runways = 1; });
-  await wp.sim(2);
-  expect(await wp.run(() => [__a.rwyL === BASE_LAYOUT.rwy2, BASE.rwy2.visible])).toEqual([true, true]);
-  const home = await wp.until(() => __a.state === 'parked', 600);
-  expect(home.violations).toEqual([]);
-  expect(home.done).toBe(true);
-  await wp.sim(1);
-  expect(await wp.run(() => [BASE.rwy2.visible, BASE.fill.visible])).toEqual([false, true]);
-});
-
 test('a pair from one flight takes off side by side', async ({ wp }) => {
   await quietBase(wp);
   await wp.run(() => { const f = AIRCRAFT.filter(a => a.spec.key === 'f16').slice(0, 2); window.__f = f; f.forEach(a => a.requestLaunch()); __t.track(); });
@@ -202,7 +180,7 @@ test('a pair from one flight takes off side by side', async ({ wp }) => {
 test('09L closed: the departures cross its end to 09R and take off there, sharing it with the arrivals', async ({ wp }) => {
   await quietBase(wp);
   // one up to land meanwhile, one to depart; 09L closed (a crater far east) once the departure holds short of it
-  await wp.run(() => { CFG.runways = 2; window.__b = AIRCRAFT.find(a => a.spec.key === 'f22'); __b.requestLaunch(); });
+  await wp.run(() => { window.__b = AIRCRAFT.find(a => a.spec.key === 'f22'); __b.requestLaunch(); });
   expect((await wp.until(() => __b.state === 'orbit', 400)).done).toBe(true);
   await wp.run(() => { window.__a = AIRCRAFT.find(a => a.spec.key === 'f16'); __a.requestLaunch(); });
   expect((await wp.until(() => __a.state === 'hold_short', 400)).done).toBe(true);
@@ -227,7 +205,7 @@ test('09L closed: the departures cross its end to 09R and take off there, sharin
 
 test('09L closed near its end: the departure waits at the hold (not across the repair), then goes from 09L', async ({ wp }) => {
   await quietBase(wp);
-  await wp.run(() => { CFG.runways = 2; window.__a = AIRCRAFT.find(a => a.spec.key === 'f16'); __a.requestLaunch(); });
+  await wp.run(() => { window.__a = AIRCRAFT.find(a => a.spec.key === 'f16'); __a.requestLaunch(); });
   expect((await wp.until(() => __a.state === 'hold_short', 400)).done).toBe(true);
   await wp.run(() => { DAMAGE.close(BASE_LAYOUT.rwy, new THREE.Vector3(-52, 0, BASE_LAYOUT.rwy.z)); window.__x = 0; });
   const r = await wp.until(() => { if (__a.state === 'cross_out') __x++; return __a.state === 'climb'; }, 300);

@@ -75,12 +75,17 @@ function spawnBandits(n) {
   const h = rand(0, TAU), perp = new V3(-Math.sin(h), 0, Math.cos(h));
   const tgt = ty.bombs ? baseTarget().p : null;
   const pass = tgt ? new V3(tgt.x, 0, tgt.z) : new V3(rand(-22, 22), 0, rand(-26, 18)), alt = rand(ty.alt[0], ty.alt[1]), speed = rand(ty.speed[0], ty.speed[1]);
+  // the formation by the airframe's size (length x, span z): abreast at least 0.6 span apart, each one a length and a third
+  // behind the one before (fixed 3 / 5 had two Tu-95s flying through each other)
+  const D = enemyDims(type), side = Math.max(ty.bombs ? 3 : 6, D.z * 0.6), back = Math.max(5, D.x * 1.3);
+  // a bomber wave's aim error, shared (they bomb in formation; their own errors crossed their tracks): about a third put
+  // the stick on the target, the rest wide (grass, open concrete) — they fly at that point
+  const md = !ty.bombs ? 0 : Math.random() < 0.35 ? rand(0, 2.5) : rand(5, 14), ma = rand(0, TAU);
   for (let i = 0; i < n; i++) {
-    const p = new V3(Math.cos(h) * 135, alt + rand(-1.5, 1.5), Math.sin(h) * 135).addScaledVector(perp, (i - (n - 1) / 2) * 6);
-    p.addScaledVector(new V3(Math.cos(h), 0, Math.sin(h)), i * 5);
-    const target = pass.clone().addScaledVector(perp, (i - (n - 1) / 2) * (ty.bombs ? 3 : 6)); target.y = p.y;
-    // a bomber's aim error: about a third put their stick on the target, the rest wide (grass, open concrete) — it flies at that point
-    const md = !ty.bombs ? 0 : Math.random() < 0.35 ? rand(0, 2.5) : rand(5, 14), ma = rand(0, TAU), miss = new V3(Math.cos(ma) * md, 0, Math.sin(ma) * md);
+    const p = new V3(Math.cos(h) * 135, alt + rand(-1.5, 1.5), Math.sin(h) * 135).addScaledVector(perp, (i - (n - 1) / 2) * Math.max(6, side));
+    p.addScaledVector(new V3(Math.cos(h), 0, Math.sin(h)), i * back);
+    const target = pass.clone().addScaledVector(perp, (i - (n - 1) / 2) * side); target.y = p.y;
+    const miss = new V3(Math.cos(ma) * md + rand(-1, 1), 0, Math.sin(ma) * md + rand(-1, 1));
     target.add(miss);
     const v = target.clone().sub(p).normalize().multiplyScalar(speed);
     const mesh = enemyMesh(type); mesh.scale.setScalar(1.25 * (ty.scale || 1)); scene.add(mesh);
@@ -90,6 +95,12 @@ function spawnBandits(n) {
   const [who, role] = hq(), vars = { B: bearingWords(h), D: compassWord(h), T: ty.name, N: n === 1 ? 'a single bandit' : n === 2 ? 'two bandits' : n === 3 ? 'three bandits' : 'multiple bandits' };
   RADIO.say(who, radioLine(ty.bomber ? COMBAT.bombers : COMBAT.newBandits, vars), { role, cat: 'combat', prio: 2 });
   if (Math.random() < 0.55) enemySay(`${sq} 1`, ty.bomber ? ENEMY_LINES.bombRun : ENEMY_LINES.attack, { Q: sq }, { delay: 1.5 });
+}
+/* an enemy type's size as it flies (x: length, z: span; the model's nose is +x), measured once on its template */
+const ENEMY_DIMS = {};
+function enemyDims(type) {
+  if (!ENEMY_DIMS[type]) { if (!ENEMY_MODELS[type]) enemyMesh(type); ENEMY_DIMS[type] = new THREE.Box3().setFromObject(ENEMY_MODELS[type]).getSize(new V3()).multiplyScalar(1.25 * (ENEMY_TYPES[type].scale || 1)); }
+  return ENEMY_DIMS[type];
 }
 /* dogfight bandit: flies a screen pass (js/airwar.js) ahead of or behind our fighters; never attacks the base */
 function spawnDuelBandit(type, path, ps, speed) {
@@ -258,10 +269,12 @@ function damageEnemy(e, dmg, src) {
     if (Math.random() < 0.6) sayKill(src, radioLine(e.kind === 'ballistic' ? COMBAT.ballisticDown : COMBAT.missileDown));
   }
 }
-/* something got through: an impact on the base — explosion, scorch, a fire on the structure for a while */
+/* something got through: an impact on the base — explosion, scorch, a fire on the structure for a while (r: how far
+   over its roof the flames spread) */
 function baseImpact(p, s, name) {
-  explosion(p, s); FX.scorch.spawn(p, 2.2 * s, 90);
-  BASE_FIRES.push({ p: p.clone(), t: 14 + s * 6, name: name || 'BASE' });
+  explosion(p, s * 1.4); FX.scorch.spawn(p, 2.2 * s, 90);
+  const q = p.clone(); q.y = Math.max(q.y, obstacleTop(q.x, q.z));   // the fire on its roof (the aim point is inside: the roof hid the flames)
+  BASE_FIRES.push({ p: q, t: 30 + s * 10, r: 0.6 + 0.6 * s, name: name || 'BASE' });
   sayOnce('hit', 5, () => RADIO.say(RADIO_NAMES.tower, radioLine(COMBAT.baseHit), { role: 'tower', cat: 'combat', prio: 4 }));
   if (Math.random() < 0.6) { const b = ENEMIES.find(o => o.kind === 'bandit' && !o.duel && enemyAlive(o)); enemySay(b ? b.cs : ENEMY_NAMES.hq, ENEMY_LINES.baseHit, null, { delay: 1.4 }); }
   if (CFG.shake) camShake = 1;
@@ -419,13 +432,19 @@ function updateCombat(dt) {
   for (let i = ENEMIES.length - 1; i >= 0; i--) if (ENEMIES[i].dead) ENEMIES.splice(i, 1);
   resolveHits(false);
   DAMAGE.update(dt);
+  // a structure on fire: tongues of flame licking up all over its roof, a tall column of thick black smoke leaning with
+  // the wind; it dies down over its last 8 s (one point and a thin smoke once looked like a campfire on a hangar)
   for (let i = BASE_FIRES.length - 1; i >= 0; i--) {
     const f = BASE_FIRES[i]; f.t -= dt;
     if (f.t <= 0) { BASE_FIRES.splice(i, 1); continue; }
-    if (Math.random() < dt * 14) FX.smoke.spawn(f.p.clone(), { s0: 0.8, s1: 3.6, life: 3, a0: 0.6 * Math.min(1, f.t / 4), color: 0x262626, v: drift(1.2, rand(0.8, 1.6)) });
-    if (Math.random() < dt * 10) FX.flash.spawn(f.p, { s0: 0.9, s1: 1.4, life: 0.12, a0: 0.9 * Math.min(1, f.t / 4), color: 0xff7a20 });
+    const k = Math.min(1, f.t / 8), r = f.r || 1;
+    if (Math.random() < dt * 26) FX.flash.spawn(_bf.set(f.p.x + rand(-r, r), f.p.y + rand(0.1, 0.5), f.p.z + rand(-r, r)),
+      { s0: rand(1.4, 2.2) * k, s1: rand(2.6, 3.6) * k, life: rand(0.25, 0.45), a0: k, color: pick(FIRE_COLS), v: _bv.set(WIND.x * 0.3, rand(1.8, 3), WIND.z * 0.3) });
+    if (Math.random() < dt * 12) FX.smoke.spawn(_bf.set(f.p.x + rand(-r, r) * 0.6, f.p.y + 1.2, f.p.z + rand(-r, r) * 0.6),
+      { s0: 1.6, s1: 7, life: rand(4, 5.5), a0: 0.85 * k, color: 0x1a1a1a, v: drift(1.4, rand(1.8, 2.8)), drag: 0.15 });
   }
 }
+const _bf = new V3(), _bv = new V3(), FIRE_COLS = [0xff6a18, 0xff8a28, 0xffa838];
 function fallStep(e, dt) {          // shot-down aircraft: spinning down in smoke until it hits the ground
   e.v.y -= 9 * dt; e.v.multiplyScalar(1 - 0.15 * dt); e.p.addScaledVector(e.v, dt);
   e.mesh.position.copy(e.p); e.mesh.rotateX(e.spin * dt);

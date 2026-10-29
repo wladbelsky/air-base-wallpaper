@@ -96,13 +96,14 @@ test('only a few aircraft are damaged at once (a quarter of the air wing)', asyn
   expect(r[0]).toBeLessThanOrEqual(r[1]);
 });
 
-for (const runways of [1, 2])
-test(`a bomb on the runway closes it: the repair truck mats the crater, the runway opens within 75 s (${runways} runway${runways > 1 ? 's' : ''})`, async ({ wp }) => {
+// the south one (the arrivals go to the north one meanwhile) and the north one (the departures go from 09R)
+for (const which of ['rwy2', 'rwy'])
+test(`a bomb on the runway closes it: the repair truck mats the crater, the runway opens within 75 s (${which === 'rwy' ? 'north' : 'south'})`, async ({ wp }) => {
   await wp.boot();
-  await wp.run((n) => { CFG.runways = n; __t.reset(); }, runways);
+  await wp.run(() => __t.reset());
   await wp.sim(30);
-  await wp.run(() => { window.__L = CFG.runways > 1 ? BASE_LAYOUT.rwy2 : BASE_LAYOUT.rwy; window.__ph = new Set(); window.__drops = []; enemyBomb(new THREE.Vector3(14, 0, __L.z)); });
-  expect(await wp.run(() => [!!DAMAGE.rwy, DAMAGE.closed(__L), AIRFIELD.landR() === BASE_LAYOUT.rwy])).toEqual([true, true, true]);
+  await wp.run((which) => { window.__L = BASE_LAYOUT[which]; window.__ph = new Set(); window.__drops = []; enemyBomb(new THREE.Vector3(14, 0, __L.z)); }, which);
+  expect(await wp.run(() => [!!DAMAGE.rwy, DAMAGE.closed(__L), (__L === BASE_LAYOUT.rwy2 ? AIRFIELD.landR() : AIRFIELD.depR()) !== __L])).toEqual([true, true, true]);
   // every mat is let go with the hook right over the crater, down at the bottom (the boom swung all the way round)
   const r = await wp.until(() => {
     const sc = GROUND_OPS.scenes.find(s => s instanceof RepairScene); if (!sc) return !DAMAGE.rwy;
@@ -130,7 +131,7 @@ test(`a bomb on the runway closes it: the repair truck mats the crater, the runw
 
 test('a second runway hit while one is closed only craters (patched soon): never both closed', async ({ wp }) => {
   await wp.boot();
-  await wp.run(() => { CFG.runways = 2; enemyBomb(new THREE.Vector3(14, 0, BASE_LAYOUT.rwy2.z)); enemyBomb(new THREE.Vector3(-20, 0, BASE_LAYOUT.rwy.z)); });
+  await wp.run(() => { enemyBomb(new THREE.Vector3(14, 0, BASE_LAYOUT.rwy2.z)); enemyBomb(new THREE.Vector3(-20, 0, BASE_LAYOUT.rwy.z)); });
   expect(await wp.run(() => [DAMAGE.closed(BASE_LAYOUT.rwy2), DAMAGE.closed(BASE_LAYOUT.rwy)])).toEqual([true, false]);
   await wp.sim(12);
   expect(await wp.run(() => FX.scorch.items.some(i => i.on && runwayAt(i.p.x, i.p.z) === BASE_LAYOUT.rwy && i.t > 3))).toBe(false);

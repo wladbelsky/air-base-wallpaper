@@ -6,8 +6,8 @@
    shelters, hangars, tower), south of it the helicopter pad, the fire station, air defence and the tank line.
    BASE_LAYOUT is the one source of positions: the models below and the ground traffic (airfield.js) both read it. */
 const BASE_LAYOUT = {
-  rwy: { x0: -64, x1: 64, z: 8, w: 4.4, td: -54 },          // td: touchdown point (x); 09L/27R with two runways: takeoffs
-  rwy2: { x0: -61, x1: 61, z: 22, w: 4.4, td: -51 },        // 09R/27L, south of it: landings (CFG.runways = 2); a little shorter (the perimeter road)
+  rwy: { x0: -64, x1: 64, z: 8, w: 4.4, td: -54 },          // td: touchdown point (x); 09L/27R: takeoffs
+  rwy2: { x0: -61, x1: 61, z: 22, w: 4.4, td: -51 },        // 09R/27L, south of it: landings; a little shorter (the perimeter road)
   twy: { z: -2, x0: -66, x1: 68, w: 2.2 },                  // parallel taxiway (westbound)
   links: [-64, -30, 0, 32, 64],                             // runway <-> taxiway links (x); -64 = departure end
   hold: { x: -64, z: 2.6 },                                 // holding point of the departure link
@@ -30,10 +30,7 @@ const BASE_LAYOUT = {
   // floodlight masts [x, z, aim x, aim z, a real SpotLight]: clear of every taxiing wingtip (units.spec checks it)
   masts: [[-30.1, -12.6, -32, -4, true], [30.9, -12.6, 28, -4, true],   // (behind the front row, in the gaps between stands: on the taxiway's edge a heavy's wing hit them)
     [-48, -12, -54, -14, false], [62.3, -12, 56, -8, false], [34.5, 31, 22, 38, false]],
-  fireStation: [-4, 32, 6, 4.5],                            // x, z, w, d: three roll-up doors on its north side
-  // with one runway the south strip is a storage yard and scrub: these footprints [x, z, r] (and the fire station's way
-  // up to the runway, x −9…1) are kept free of the trees there (TERRAIN.fill)
-  fillYard: [[-38, 19, 6.5], [-22, 18, 6.5], [22, 18.5, 3.5], [30, 20, 3.5], [48, 18.5, 3], [59, 15, 3]]   // … and the AA gun
+  fireStation: [-4, 32, 6, 4.5]                             // x, z, w, d: three roll-up doors on its north side
 };
 const BL = BASE_LAYOUT;
 BL.crossZ = BL.rwy.z + BL.rwy.w / 2 + 1.6;   // holding line on the runway connectors in front of the north runway (crossing it)
@@ -76,9 +73,9 @@ function roadDist(x, z) {
   }
   return best;
 }
-/* the runway (in use) at (x, z), within margin m — null off it; and paved ground (a runway, the taxiway, the apron) */
+/* the runway at (x, z), within margin m — null off it; and paved ground (a runway, the taxiway, the apron) */
 function runwayAt(x, z, m = 0) {
-  for (const R of CFG.runways > 1 ? [BL.rwy, BL.rwy2] : [BL.rwy]) if (x > R.x0 - m && x < R.x1 + m && Math.abs(z - R.z) < R.w / 2 + m) return R;
+  for (const R of [BL.rwy, BL.rwy2]) if (x > R.x0 - m && x < R.x1 + m && Math.abs(z - R.z) < R.w / 2 + m) return R;
   return null;
 }
 function pavedAt(x, z) { const T = BL.twy, A = BL.apron; return !!runwayAt(x, z) || (x > T.x0 && x < T.x1 && Math.abs(z - T.z) < T.w / 2) || (x > A.x0 && x < A.x1 && z < A.z0 && z > A.z1); }
@@ -112,7 +109,7 @@ function textDecal(p, text, w, h, x, y, z, rotY) {
   m.rotation.set(-Math.PI / 2, 0, rotY || 0); m.position.set(x, y, z); m.receiveShadow = true; p.add(m); return m;
 }
 /* what an aircraft in flight keeps clear of (Aircraft.clearRoofs): the buildings' boxes [x0, x1, z0, z1, top, group] —
-   collected by the builders below; one in a hidden group (the storage yard with two runways) doesn't count */
+   collected by the builders below; one in a hidden group doesn't count */
 const OBSTACLES = [];
 function obstacle(p, x, z, w, d, top, rotY = 0) {
   const c = Math.abs(Math.cos(rotY)), s = Math.abs(Math.sin(rotY)), hw = (w * c + d * s) / 2, hd = (w * s + d * c) / 2;
@@ -332,11 +329,10 @@ function buildBase() {
   const g = new THREE.Group(), dyn = [], win = windowMat(), R = BL.rwy, TW = BL.twy, A = BL.apron;
   const lines = [];   // light lists for navLights
   const rabbit = [], my = 0.046;
-  // --- runways: the north one (designators 09/27, or 09L/27R with two); the south one in its own group (shown with two
-  // runways, see setRunways), with the connectors on from the links and a holding line in front of the north runway; the
-  // one at the departure link (x −64, past 09L's end) takes the departures down to 09R while 09L is closed
-  const desig1 = buildRunway(g, R, [['09', '27'], ['09L', '27R']], lines, rabbit, -1);
-  dyn.push(...desig1.flat());
+  // --- runways: the north one (09L/27R); the south one (09R/27L) in its own group, with the connectors on from the links
+  // and a holding line in front of the north runway; the one at the departure link (x −64, past 09L's end) takes the
+  // departures down to 09R while 09L is closed
+  buildRunway(g, R, [['09L', '27R']], lines, rabbit, -1);
   const g2 = new THREE.Group(), R2 = BL.rwy2, lines2 = [];
   buildRunway(g2, R2, [['09R', '27L']], lines2, rabbit, 1);
   for (const lx of BL.links) {
@@ -418,23 +414,5 @@ function buildBase() {
     { p: new V3(-7, 4.5, -31), name: 'TOWER' }, { p: new V3(-24, 1.4, -35), name: 'OPS' }, { p: new V3(-41, 1.5, -41.5), name: 'FUEL' },
     { p: new V3(-40, 1.2, 32), name: 'PATRIOT' }, { p: new V3(-4, 1.2, 32), name: 'FIRE STN' }, { p: new V3(20, 0.5, R.z), name: 'RUNWAY' }, { p: new V3(-20, 0.5, R.z), name: 'RUNWAY' }
   ];
-  // --- with one runway: a storage yard on the south strip (containers, a warehouse, sheds, a sandbag position) and the
-  // fire station's apron all the way up to the runway; trees around them come from TERRAIN.fill
-  const gF = new THREE.Group();
-  slab(gF, -7.5, R.z + R.w / 2 + 0.9, -0.5, 29.7, 0.03, CONC);
-  buildBuilding(gF, -38, 19, 9, 4, 2.2, win, 0, 0x8a8370);                                   // warehouse
-  const CONT = [0x7a4a32, 0x3f5a6a, 0x5a6a3a, 0x8a7a4a, 0x6a3a3a];
-  for (let i = 0; i < 4; i++) for (const [dz, k] of [[-0.7, 0], [0.7, 1]]) for (let j = 0; j < (i + k) % 3 + 1 && j < 2; j++) {   // container stacks
-    box(gF, 2.4, 0.95, 1.1, CONT[(i * 2 + k + j) % CONT.length], -25.5 + i * 2.6, 0.48 + j * 0.97, 18 + dz);
-  }
-  buildBuilding(gF, 22, 18.5, 4, 3, 1.6, win, 0.2, WALL2); buildBuilding(gF, 30, 20, 4, 3, 1.6, win, -0.3, WALL2);   // sheds
-  for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; taper(gF, 1.1, 0.5, 0.6, 0x9a8a62, 48 + Math.cos(a) * 1.8, 0.25, 18.5 + Math.sin(a) * 1.8, 0.8, 0.8).rotation.y = -a; }   // sandbag ring
-  mergeStatic(gF, []);
-  g.add(gF);
-  const setRunways = n => {
-    g2.visible = n > 1; gF.visible = n < 2; desig1[0].forEach(m => m.visible = n < 2); desig1[1].forEach(m => m.visible = n > 1);
-    if (typeof TERRAIN !== 'undefined') TERRAIN.setFill(n < 2);
-  };
-  setRunways(CFG.runways);
-  return { group: g, rwy2: g2, fill: gF, setRunways, winMat: win, deckY: 0, mounts, radars: [radar], navs, rabbit, floods, guards, skyLights, targets, patriotRadar: pr, name: 'base' };
+  return { group: g, rwy2: g2, winMat: win, deckY: 0, mounts, radars: [radar], navs, rabbit, floods, guards, skyLights, targets, patriotRadar: pr, name: 'base' };
 }

@@ -501,7 +501,7 @@ class UnloadScene {
     if (a.state === 'unload') {
       const ch = BASE_LAYOUT.channels.reduce((b, c) => Math.abs(c - at[0]) < Math.abs(b - at[0]) ? c : b), sd = Math.sign(ch - at[0]) || 1;
       const up = [[ch + (Math.sign(CY[0] - ch) || 1) * 1.6, SERVICE_Z], [ch, SERVICE_Z - 1.4], [ch, at[1] + 2.4]];
-      this.wayIn = [CARGO_YARD.in, CY, ...up, [at[0] + sd * 1.6, at[1] + 1.3]]; this.sd = sd;
+      this.wayIn = [CARGO_YARD.in, CY, ...up, [at[0] + sd * 1.6, at[1] + 1.3]]; this.sd = sd; this.ch = ch; this.gate = up[0];
       this.wayOut = [at, [at[0] + sd * 0.6, at[1] + 0.8], ...up.reverse(), CY, CARGO_YARD.in];
     } else {
       this.wayIn = [CARGO_YARD.in, CY, [at[0] + 4, SERVICE_Z], [at[0] + 1.6, at[1] + 1.3]]; this.sd = 1;
@@ -518,7 +518,10 @@ class UnloadScene {
       case 'ramp': if (this.t > 2.5) { this.phase = 'in'; this.drive = new Drive(this.loader, this.wayIn, 2.2, false, 0.5); } break;
       case 'in': {
         if (this.lk < 1) vehScale(this.loader, this.lk = Math.min(1, this.lk + dt * 2.5));
-        if (this.drive.step(dt, vehHold(this.drive, a))) { const p = this.loader.position; this.phase = 'dock'; this.drive = new Drive(this.loader, [[p.x, p.z], [this.at[0] + this.sd * 0.3, this.at[1] + 0.6], this.at], 1.0, true); }
+        // up an aircraft channel (hangar door) only while it's clear: aircraft run it toward the taxiway (one met the loader)
+        const l = this.loader.position, wait = this.gate && !this.up && Math.hypot(l.x - this.gate[0], l.z - this.gate[1]) < 1.2 && channelBusy(this.ch, a);
+        if (this.gate && !this.up && l.z < SERVICE_Z - 0.8) this.up = true;
+        if (this.drive.step(dt, wait || vehHold(this.drive, a))) { const p = this.loader.position; this.phase = 'dock'; this.drive = new Drive(this.loader, [[p.x, p.z], [this.at[0] + this.sd * 0.3, this.at[1] + 0.6], this.at], 1.0, true); }
         break;
       }
       case 'dock': if (this.drive.step(dt, vehHold(this.drive, a))) { this.phase = 'load'; this.t = 0; } break;   // backs up to the ramp, deck first
@@ -532,13 +535,15 @@ class UnloadScene {
           const q = a.mesh.position, from = new V3(q.x - this.nose.x * a.spec.len * 0.2, 0.35, q.z - this.nose.z * a.spec.len * 0.2), to = this.loader.localToWorld(new V3(-0.2 + 0.45 - i * 0.45, this.deck.position.y + 0.05, 0));
           p.m.position.lerpVectors(from, to, k); p.m.rotation.y = this.loader.rotation.y;
         }
-        if (this.t > 1 + 3 * 2.2 + 1) {                 // the cargo is off: the aircraft is free (one at a hangar door rolls in), the loader goes back into the shed (dropped there)
-          this.phase = 'out'; a.rampT = 0; a.cargo = false; a.groundBusy = false; this.drive = new Drive(this.loader, this.wayOut, 2.0, false, 0.5);
+        if (this.t > 1 + 3 * 2.2 + 1) {                 // the cargo is off: the loader goes back into the shed (dropped there), the aircraft is free
+          this.phase = 'out'; a.rampT = 0; this.drive = new Drive(this.loader, this.wayOut, 2.0, false, 0.5);
+          if (a.state !== 'unload') this.free();
         }
         break;
       }
       case 'out': {
         const end = this.drive.step(dt, vehHold(this.drive, a));
+        if (!this.freed && (end || this.loader.position.z > SERVICE_Z - 0.5)) this.free();   // at a hangar door: once the loader is out of the channel (it rolls in, the lane traffic goes on, down the channel too)
         this.pallets.forEach((p, i) => p.m.position.copy(this.loader.localToWorld(new V3(-0.2 + 0.45 - i * 0.45, this.deck.position.y + 0.05, 0))));
         this.pallets.forEach(p => p.m.rotation.y = this.loader.rotation.y);
         if (end) { this.done = true; if (Math.random() < 0.5) a.say(radioLine(LINES.unload), { prio: 0 }); }
@@ -546,11 +551,20 @@ class UnloadScene {
       }
     }
   }
+  free() { this.freed = true; this.a.cargo = false; this.a.groundBusy = false; }
   end() {
-    if (this.phase !== 'out') { this.a.groundBusy = false; this.a.rampT = 0; }   // (from then on another crew may hold it)
+    if (!this.freed) { this.a.groundBusy = false; this.a.rampT = 0; }   // (once free, another crew may hold it)
     this.deck.position.y = 0.5;
     vehScale(this.loader, 1); dropVehicle('kloader', this.loader); for (const p of this.pallets) dropVehicle('pallet', p.m);
   }
+}
+/* an aircraft in the apron channel at x ch (between the lane and the taxiway) or about to turn into it */
+function channelBusy(ch, own) {
+  for (const b of AIRCRAFT) {
+    if (b === own || !b.onGround || !b.mesh.visible || b.state === 'parked' || b.state === 'unload') continue;
+    const q = b.mesh.position; if (Math.abs(q.x - ch) < 4 && q.z > BASE_LAYOUT.lane - 3 && q.z < BASE_LAYOUT.twy.z + 2) return true;
+  }
+  return false;
 }
 
 /* emergency on the runway: two crash tenders race out, park either side and foam the aircraft, then a tug tows it home */
@@ -629,7 +643,7 @@ function besideWay(a, off) {
   if (a instanceof Helicopter) {
     const D = HELI_DEPOT, x = s.x + 3, zc = s.z + 3, sg = Math.sign(D.z - zc) || 1;
     return { inPts: [D.in, [D.x, D.z], [D.x, zc + sg * 1.2], [D.x + 1.4, zc], [x - 1.4, zc], [x, zc - 1.2], [x, s.z + 1.1]],
-      back: [[x, zc - 0.5], [x + 1.4, zc]], out: [[D.x + 1.4, zc], [D.x, zc + sg * 1.2], [D.x, D.z], D.in] };
+      back: [[x, zc - 0.5], [x + 1.4, zc - 0.5]], out: [[D.x + 1.4, zc], [D.x, zc + sg * 1.2], [D.x, D.z], D.in] };
   }
   const D = nearestDepot(s.x), sx = s.x + a.spec.span / 2 + 0.6 + off, dir = Math.sign(D.x - sx) || 1;
   return { inPts: [D.in, [D.x, D.z], [sx + dir * 1.6, SERVICE_Z], [sx, SERVICE_Z - 1.2], [sx, s.z + a.spec.len * 0.12]],
@@ -830,11 +844,12 @@ class ServiceScene {
     this.a = a; a.groundBusy = true; this.t = 0; this.phase = 'in'; this.work = combatOn() ? rand(8, 12) : rand(15, 20);
     const s = a.spot, kinds = a.spec.armed ? ['fueler', 'ammo'] : ['fueler'];
     if (a instanceof Helicopter) {
-      // up the corridor east of the pad to beside it: the ammo loader further in, the fuel truck behind it
+      // up the corridor east of the pad to beside it: the ammo loader further in, the fuel truck behind it; out backing onto
+      // its own (north) half of the row, so one coming in along it passes (on the middle of the row they met head-on)
       const D = HELI_DEPOT, x = s.x + 3, zc = s.z + 3, sg = Math.sign(D.z - zc) || 1;
       const inPts = z => [D.in, [D.x, D.z], [D.x, zc + sg * 1.2], [D.x + 1.4, zc], [x - 1.4, zc], [x, zc - 1.2], [x, z]];
       const out = [[D.x + 1.4, zc], [D.x, zc + sg * 1.2], [D.x, D.z], D.in];
-      this.crew = kinds.map(k => new CrewCar(k, inPts(k === 'ammo' ? s.z - 1.2 : s.z + 1.1), [[x, zc - 0.5], [x + 1.4, zc]], out, k === 'fueler' && kinds.length > 1 ? 1.4 : 0));
+      this.crew = kinds.map(k => new CrewCar(k, inPts(k === 'ammo' ? s.z - 1.2 : s.z + 1.1), [[x, zc - 0.5], [x + 1.4, zc - 0.5]], out, k === 'fueler' && kinds.length > 1 ? 1.4 : 0));
       for (const c of this.crew) c.outDelay = c.kind === 'ammo' ? 5 : 0;   // the one behind backs out first, the loader once it has cleared the corridor
       const fu = this.crew.find(c => c.kind === 'fueler'), am = this.crew.find(c => c.kind === 'ammo'); if (fu && am) { am.after = fu; fu.inAfter = am; }   // in: loader first (it goes further), out: fuel truck first
     } else {

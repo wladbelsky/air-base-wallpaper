@@ -26,8 +26,7 @@ function densify(pts, step = 3) {
 }
 const AIRFIELD = {
   rwy: new Set(),            // aircraft on the north runway (lining up, rolling, landing roll until clear, crossing it)
-  rwy2: new Set(),           // on the south one (landing roll until clear) — used with CFG.runways = 2
-  shown: 0,                  // runways drawn (BASE.setRunways): 2 while the south one is in use, even in one-runway mode
+  rwy2: new Set(),           // on the south one (landing roll until clear; a departure from it while the north one is closed)
   arrivals: new Set(),       // on approach or final (to a.rwyL)
   reset() {
     this.rwy.clear(); this.rwy2.clear(); this.arrivals.clear();
@@ -102,25 +101,19 @@ const AIRFIELD = {
     else pts.push([s.x + 5, TWZ], [s.x, TWZ - 3.2], [s.x, s.z]);
     return this.round(pts, 2.4);
   },
-  /* ---- runways: with two the north one (RW) takes the departures, the south one (RW2) the arrivals; every rule goes by
-     the runway an aircraft actually uses (a.rwyL, fixed when its approach starts), so the mode may change any time ---- */
+  /* ---- runways: the north one (RW) takes the departures, the south one (RW2) the arrivals; every rule goes by the
+     runway an aircraft actually uses (a.rwyL, fixed when its approach starts / its crossing to 09R), so a closure may
+     move the traffic any time ---- */
   setOf(L) { return L === RW2 ? this.rwy2 : this.rwy; },
   onRunway(a) { return this.rwy.has(a) || this.rwy2.has(a); },
-  // the landing runway: the south one with two — but the north one (shared with departures, as with one runway) while
-  // an emergency or a crater (DAMAGE) has the south one closed (they would all hold in orbit for minutes)
-  landR() { if (CFG.runways < 2) return RW; const e = GROUND_OPS.emerg; return (e && e.rwyL === RW2) || DAMAGE.closed(RW2) ? RW : RW2; },
+  // the landing runway: the south one — but the north one (shared with the departures) while an emergency or a crater
+  // (DAMAGE) has the south one closed (they would all hold in orbit for minutes)
+  landR() { const e = GROUND_OPS.emerg; return (e && e.rwyL === RW2) || DAMAGE.closed(RW2) ? RW : RW2; },
   // the departure runway: the north one — but the south one (shared with the arrivals) while the north one is closed and
   // it is open: across 09L's end to 09R's holding point (hold2; FixedWing hold_short)
   depR() {
-    if (CFG.runways < 2) return RW;
     const e = GROUND_OPS.emerg, shut = L => DAMAGE.closed(L) || (e && e.rwyL === L);
     return shut(RW) && !shut(RW2) ? RW2 : RW;
-  },
-  /* the south runway is drawn while in use, even after a switch to one runway (BASE.setRunways, from update) */
-  r2InUse() {
-    if (this.rwy2.size) return true;
-    for (const a of AIRCRAFT) if (a.rwyL === RW2 && (this.arrivals.has(a) || a.cross || a.state === 'cross_out' || a.state === 'hold_short')) return true;
-    return false;
   },
   eta(a) { return a.path ? (a.path.length - a.ps) / Math.max(1, a.v) : 99; },
   // the next departure may line up behind one already rolling fast down the runway (it rolls once that one is off)
@@ -197,6 +190,8 @@ const AIRFIELD = {
       // one waiting to push back for a while: stop short of where its pushback ends and let it out (unless already there)
       if (b.state === 'ready') { if (a.state !== 'pushback' && this.wantsOut(b) && ahead(b, ...b.pb[b.pb.length - 1], a.blockBy === b ? 0.1 : this.gap(a, b))) return b; continue; }
       const q = b.mesh.position; if (ahead(b, q.x, q.z)) return b;
+      // unloading at its hangar door (UnloadScene): its tail and the K-loader behind it are out on the lane
+      if (b.state === 'unload') { const k = b.spec.len * 0.5 + 1.65; if (ahead(b, q.x - b.fwd.x * k, q.z - b.fwd.z * k)) return b; }
       // where one on the move will be in a moment: don't nose into a lane / taxiway in front of traffic coming along it
       if (b.v > 0.1 && b.state !== 'pushback') { const k = Math.min(3, b.v * 1.5); if (ahead(b, q.x + b.fwd.x * k, q.z + b.fwd.z * k)) return b; }
       if (b.state === 'pushback' && ahead(b, ...b.pb[b.pb.length - 1])) return b;   // keep clear of where a pushback ends
@@ -280,8 +275,6 @@ const AIRFIELD = {
     if (s.panels) for (const q of s.panels) q.g.position.x = lerp(q.x0, q.x1, k);
   },
   update(dt) {
-    const n = CFG.runways > 1 || this.r2InUse() ? 2 : 1;                       // the south runway drawn while needed
-    if (n !== this.shown && BASE.setRunways) { this.shown = n; BASE.setRunways(n); }
     for (const s of [...PARKING.shelters, ...PARKING.hangars]) {
       const t = this.doorWanted(s); if (t === s.door) continue;
       s.door += clamp(t - s.door, -dt * 0.4, dt * 0.4); this.setDoor(s);

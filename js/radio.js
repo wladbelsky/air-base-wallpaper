@@ -370,13 +370,10 @@ const OPS_UNARMED = {
 function opsLine(key, a) {
   const v = OPS_VOICE[a.spec.voice] && OPS_VOICE[a.spec.voice][key], armed = AUD.armed;
   const pool = (v && (armed || v.peace) && v) || (armed && !a.spec.armed && OPS_UNARMED[key]) || OPS[key];
-  return [radioLine(pool, { c: a.callsign, R: rwyName(key === 'landClear' ? a.rwyL : BASE_LAYOUT.rwy) }), armed];   // {R}: departures / crossings the north runway
+  return [radioLine(pool, { c: a.callsign, R: rwyName(key === 'landClear' || key.startsWith('takeoff') ? a.runway : BASE_LAYOUT.rwy) }), armed];   // {R}: its runway (a departure's: 09R across at hold2); crossings the north one
 }
-/* {R}: the runway's name for the radio — zero-niner, or with two runways zero-niner left (north) / right (south) */
-function rwyName(L) {
-  const two = (AIRFIELD.shown || CFG.runways) > 1 || L === BASE_LAYOUT.rwy2;   // as painted (the south one stays while in use)
-  return !two ? 'zero-niner' : L === BASE_LAYOUT.rwy2 ? 'zero-niner right' : 'zero-niner left';
-}
+/* {R}: the runway's name for the radio — zero-niner left (north) / right (south) */
+const rwyName = L => L === BASE_LAYOUT.rwy2 ? 'zero-niner right' : 'zero-niner left';
 
 /* ===== Combat chatter by stress tier ===== */
 const COMBAT = {

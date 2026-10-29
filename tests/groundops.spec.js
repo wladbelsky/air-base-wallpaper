@@ -15,16 +15,16 @@ async function airborne(wp, pick) {
 }
 const pools = wp => wp.run(() => Object.fromEntries(Object.entries(VEH_POOL).map(([k, l]) => [k, l.length])));
 
-// an F-15 (a shelter: the tug stays in it) with two runways; one for an open stand with one runway (the tug drives off)
-for (const [name, pick, runways] of [['', "a.spec.key === 'f15' && /\\s1$/.test(a.callsign)", 2],
-  [', open stand, one runway', "a === AIRCRAFT.find(b => b instanceof FixedWing && !AIRFIELD.sheltered(b.spot))", 1]])
+// an F-15 (a shelter: the tug stays in it); one on an open stand (the tug drives off)
+for (const [name, pick, inside] of [['', "a.spec.key === 'f15' && /\\s1$/.test(a.callsign)", true],
+  [', open stand', "a === AIRCRAFT.find(b => b instanceof FixedWing && !AIRFIELD.sheltered(b.spot))", false]])
 test('emergency landing: smoke, priority approach, stop on the runway, crash tenders, tow home, runway open again' + name, async ({ wp }) => {
   await airborne(wp, pick);
-  await wp.run((n) => { CFG.runways = n; window.__a = __f[0]; GROUND_OPS.startEmergency(__a); }, runways);
+  await wp.run(() => { window.__a = __f[0]; GROUND_OPS.startEmergency(__a); });
   const stop = await wp.until(() => __a.state === 'emergency', 400);
   expect(stop.violations).toEqual([]);
   expect(stop.done, (await wp.run(() => __t.log.get(__a.callsign))).join(' > ')).toBe(true);
-  // its runway is closed (the south one with two runways: the north one keeps taking departures)
+  // its runway is closed (the south one: the north one keeps taking departures)
   expect(await wp.run(() => [AIRFIELD.setOf(__a.rwyL).has(__a), AIRFIELD.canLineUp({}) === (__a.rwyL === BASE_LAYOUT.rwy2)])).toEqual([true, true]);
   const trucks = await wp.until(() => GROUND_OPS.scenes.some(s => s.phase === 'foam'), 120);
   expect(trucks.done, 'the crash tenders reach it and foam it').toBe(true);
@@ -43,7 +43,7 @@ test('emergency landing: smoke, priority approach, stop on the runway, crash ten
   expect(await wp.run(() => __tugOn), 'the tug on a runway on its way back').toBe(null);
   const lead = await wp.run(() => __lead);
   expect(lead, 'the tow was seen').toBeLessThan(1e9); expect(lead, 'the tug ahead of the nose all the way').toBeGreaterThan(0.45);
-  expect(await wp.run(() => [__tugBack, AIRFIELD.sheltered(__a.spot)])).toEqual([runways === 1, runways !== 1]);
+  expect(await wp.run(() => [__tugBack, AIRFIELD.sheltered(__a.spot)])).toEqual([!inside, inside]);
   const r = await wp.run(() => ({ log: __t.log.get(__a.callsign), emerg: !!GROUND_OPS.emerg || __a.emerg, rwy: AIRFIELD.rwy.size + AIRFIELD.rwy2.size, home: __a.mesh.position.distanceTo(new THREE.Vector3(__a.spot.x, 0, __a.spot.z)) }));
   expect(r.log.join('>')).toMatch(/approach>final>rollout>emergency>towed>parked/);
   expect(r.emerg).toBe(false);
@@ -232,9 +232,9 @@ for (const [name, pick] of [['an open stand', "a.spec.key === 'f16' && PARKING.s
   });
 }
 
-test('with two runways, an emergency closing the south one sends the other arrivals to the north one (no holding for minutes)', async ({ wp }) => {
+test('an emergency closing the south one sends the other arrivals to the north one (no holding for minutes)', async ({ wp }) => {
   await airborne(wp, "a.spec.key === 'f15' && /\\s[12]$/.test(a.callsign)");
-  await wp.run(() => { CFG.runways = 2; window.__a = __f[0]; window.__b = __f[1]; GROUND_OPS.startEmergency(__a); });
+  await wp.run(() => { window.__a = __f[0]; window.__b = __f[1]; GROUND_OPS.startEmergency(__a); });
   expect((await wp.until(() => __a.state === 'emergency', 400)).done).toBe(true);
   expect(await wp.run(() => __a.rwyL === BASE_LAYOUT.rwy2)).toBe(true);
   await wp.run(() => __b.requestLand());

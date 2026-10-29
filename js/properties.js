@@ -347,15 +347,5 @@ const WE_PROPERTIES = {
   "text": "Base name (radio, panel)",
   "type": "textinput",
   "value": "SAND ISLAND"
- },
- "runways": {
-  "order": 51,
-  "text": "Runways (2: one for takeoffs, one for landings)",
-  "type": "slider",
-  "min": 1,
-  "max": 2,
-  "step": 1,
-  "precision": 0,
-  "value": 2
  }
 };

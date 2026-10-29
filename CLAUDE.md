@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=31`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=38`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -86,7 +86,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 ## Airfield (`js/airfield.js`, `js/aircraft.js`)
 - **Rooftops**: the builders in `base.js` list the buildings' boxes in `OBSTACLES` (`obstacle(p, x, z, w, d, top)`:
   hangars to the barrel roof's crown, shelters, the tower to its cab roof, buildings, sheds, the radar, the floodlight
-  masts; one in a hidden group — the storage yard with two runways — doesn't count); `obstacleTop(x, z)`. In flight
+  masts; one in a hidden group doesn't count); `obstacleTop(x, z)`. In flight
   (`followPath`, `orbitStep`) `clearRoofs` looks ahead along the way (≥ 6, ~1.5 s) and eases the aircraft up to
   `ROOF_CLEAR` (1.6) above a roof under it (up 4/s, down 1.5/s; nothing below `OBSTACLES.top` + 1.6 is checked) —
   a helicopter coming home low once flew through the big hangar. The harness flags anything in flight lower than a roof
@@ -134,9 +134,9 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   `approach` → `final` → `rollout` → `taxi_in` → `parked`; `go_around` (→ `orbit`, `landReq` kept); an emergency:
   `rollout` → `emergency` (stopped on the runway) → `towed` → `parked` (groundops.js).
   A pair of one flight lines up side by side (`rdz` ±1) and rolls a second apart.
-- **Runways** (`BASE_LAYOUT.rwy` north, `rwy2` south, property **Runways** `CFG.runways` 1–2, URL `?runways=`):
-  with two the north one takes the departures, the south one the arrivals. Every rule goes by the runway an aircraft
-  actually uses: `a.rwyL`, set when its approach starts (`AIRFIELD.landR()`), so the mode can change any time.
+- **Runways** (`BASE_LAYOUT.rwy` north 09L/27R, `rwy2` south 09R/27L — always two; the one-runway mode and its property
+  are gone): the north one takes the departures, the south one the arrivals. Every rule goes by the runway an aircraft
+  actually uses: `a.rwyL`, set when its approach starts (`AIRFIELD.landR()`), so a closure can move traffic any time.
   `AIRFIELD.rwy` / `rwy2` = aircraft on each (`setOf(L)`, `onRunway(a)`); `arrivals` = on approach / final.
   `canLineUp` (by the departure's runway, `a.rwyL || RW`): empty but for one rolling fast, no arrival to it on final or
   within 32 s, its emergency towed off, (north) nobody waiting to cross for > 20 s. `canApproach`: per landing runway,
@@ -159,9 +159,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   holds at `BASE_LAYOUT.crossZ` on the connector (`holdCross`, in `followDeck`) until `canCross` (no lineup, no roll
   toward the connector, nothing near it on the runway, no arrival to it close in); then it holds the north runway
   (`rwy`) until across (the tower: `OPS.crossClear`). A departure waiting on the runway doesn't roll while one crosses.
-  A runway set drops an aircraft once it is north of that runway's edge. `AIRFIELD.update` shows the south runway while
-  in use even after a switch to one (`r2InUse`, `BASE.setRunways`): with one runway the strip is a yard and scrub
-  (`BASE.fill` + `TERRAIN.fill`, `BASE_LAYOUT.fillYard`), the north designators read 09/27 instead of 09L/27R.
+  A runway set drops an aircraft once it is north of that runway's edge.
 - **Helicopters**: `parked` → `spinup` → `lift` → `depart` → `orbit` → `ret` → `hover` → `descend` → `spindown` → `parked`, on their own pad.
 - **Doors**: shelters and hangars open while their aircraft moves in or out (`doorWanted`), an aircraft parked
   behind a closed door is hidden.
@@ -196,7 +194,7 @@ Missions fly beyond the screen edge while there is no music. `dispatchFlight` (`
 clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / returned to `VEH_POOL` (`takeVehicle` /
 `dropVehicle`, never disposed); `Drive` moves one along a smooth path. Scenes are objects with `update(dt)`, `done`, `end()`.
 - **Emergency landing**: every 8–15 min in peace (`emTimer`) a jet in orbit declares one (`a.emerg`, smoke `trail`);
-  `canApproach` gives it priority, its runway (`a.rwyL`: the south one with two) is closed while `GROUND_OPS.emerg` — meanwhile `AIRFIELD.landR()` sends the other arrivals to the north one (shared with departures, as with one runway); it stops on the runway
+  `canApproach` gives it priority, its runway (`a.rwyL`: the south one) is closed while `GROUND_OPS.emerg` — meanwhile `AIRFIELD.landR()` sends the other arrivals to the north one (shared with the departures); it stops on the runway
   (`emergency`), `EmergencyScene`: two crash tenders from the fire station foam it, a tug tows it home (`towed`, via
   `AIRFIELD.homeRoute`), the runway opens as soon as it is towed off it (`GROUND_OPS.emerg` cleared: the tow may
   queue behind departures). The tenders and the tug fade in at the station; the tenders keep to their own lanes; the
@@ -210,7 +208,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   rolls straight in and the cargo is dropped. `a.rampT` opens the ramp (C-130 / C-17 models), a K-loader comes from the
   cargo yard (to a stand along the service road; to a hangar door up the apron channel nearest the tail) and backs up to
   the ramp behind the tail (from the aircraft's pose), three pallets slide onto it (each a random `PALLET_KINDS` load,
-  `setPallet`); then the aircraft is free (`cargo` false, `groundBusy` released) and the loader drives back to its shed.
+  `setPallet`); then the loader drives back to its shed and the aircraft is free (`cargo` false, `groundBusy` released) —
+  at a hangar door only once the loader is off the lane; till then lane traffic waits behind its tail and the loader
+  (`AIRFIELD.blocker`: an `unload` aircraft blocks the point behind its tail too; it once ran over the loader).
 - **Ground crew** (`ServiceScene`): an aircraft that parks (`needsService`, set on landing) on an open row-a stand or
   a helicopter pad (`crewSpot`) gets a fuel truck (`fueler`, its `hose` node scaled out to the aircraft) and, if armed,
   an ammo loader (`ammo`): from the nearest `CREW_DEPOTS` along the service strip `SERVICE_Z` (between the taxiway
@@ -293,13 +293,16 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   radius is now never below the stop's). Dogfight bandits (`duel`)
   fly a pass path and are left to the fighters.
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
-  site rows show DAMAGED). Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
+  site rows show DAMAGED; 30–40 s: flame tongues over `r` of its roof, a tall black smoke column, dying down over the last
+  8 s; the smoke pool is 420 for it). Craters (`Scorch`) sit `Scorch.LIFT` (0.055) up: above the paving and its painted lines. Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
   tracers with gravity (`dropBomb`, `FixedWing.dropBombs`), resolved in `FX.tracers.onSplash` (splash ≥ 2.3 = an enemy
   bomb → `enemyBomb`: a structure within 3 of where it fell takes the hit, else a crater; then `DAMAGE.hit`).
   **Threat (`STRESS`) goes by time only** (10 min up while `AUD.fighting`, 3 min down): hits used to bump it +0.03 per
   bomb, and as bombers come more often with stress that fed itself (a Tu-22 stick was +0.3).
-- **Bombing accuracy**: each bomber gets an aim error at spawn (`miss`: ~35 % within 2.5 of its structure, the rest 5–14
-  wide) and flies at that point; one hit on the run in widens it by half. The stick is released one bomb every
+- **Bombing accuracy**: a wave gets one aim error at spawn (`miss`: ~35 % within 2.5 of its structure, the rest 5–14
+  wide; ±1 each) and each bomber flies at its point in the formation; the formation is spaced by the airframe
+  (`enemyDims`: abreast ≥ 0.6 span, each 1.3 lengths behind the one before — fixed 3 / 5 and an error each had two
+  Tu-95s flying through each other); one hit on the run in widens it by half. The stick is released one bomb every
   `STICK_DT` (0.15 s), its middle on the aim point (a row of craters, not a pile). Ballistic missiles spread ±3.
 - **Damage** (`DAMAGE`, `combat.js`; `update` from `updateCombat`): `hit(p, R)` for every enemy bomb (2.6), cruise (3),
   ballistic (3.5) and a bandit / helicopter crashing (2). Air-defence units (`units()`: AA, Avengers, C-RAM, tanks,
@@ -396,7 +399,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   they are. In use: `{c}` tower-call callsign, `{C}` callsign, `{T}` enemy type, `{B}` bearing words, `{D}` compass
   direction, `{N}` bandit count, `{Q}` enemy squadron, `{K}` enemy callsign just lost; missions also use `{S}` sector,
   `{G}` grid, `{P}` passengers, `{W}` pounds; refuelling passes `{F}` the flight, `{A}` the tanker; tower calls,
-  emergencies and runway damage `{R}` the runway (`rwyName`: zero-niner, or zero-niner left / right with two); `{M}`
+  emergencies and runway damage `{R}` the runway (`rwyName`: zero-niner left / right); `{M}`
   an air-defence unit knocked out (`DMG_NAMES`).
 - **Roles** (`ROLE_COLOR`): `pilot`, `awacs`, `tower`, `ground` (air defence, tanks, C-RAM: `RADIO_NAMES.patriot` /
   `armor` / `cram`), `heli`, `ace`, `enemy`.

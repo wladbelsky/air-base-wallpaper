@@ -30,8 +30,8 @@ From source:
 
 ## The base
 
-- One runway (09/27) with a parallel taxiway, an apron, hardened aircraft shelters with sliding blast doors, a big and
-  a medium hangar for the heavies, two small hangars for the drones, a heliport with twelve pads, a control tower with
+- Two parallel runways (09L/27R for takeoffs, 09R/27L for landings) with a parallel taxiway, an apron, hardened
+  aircraft shelters with sliding blast doors, a big and a medium hangar for the heavies, two small hangars for the drones, a heliport with twelve pads, a control tower with
   a beacon, an airport surveillance radar, ops and squadron buildings, a fuel farm, a fire station, vehicle sheds with
   roll-up doors (tugs, fuel trucks and loaders drive out of them and back in), barracks, service
   roads and a fenced perimeter with a perimeter road, guard towers and a gate.
@@ -46,10 +46,8 @@ From source:
   spring — green grass and trees; summer — desert, saguaro cacti, rocks and dry shrubs; autumn — golden and red trees,
   falling leaves. **Snowfall / falling leaves** can be switched off.
 - **Base name** property: the tower's radio callsign and the panel title (default SAND ISLAND).
-- **Runways** property (1–2, default 2): with two, the north runway (09L) takes the departures and the south one (09R)
-  the arrivals, which then hold short of the north runway on the connector and cross it when the tower clears them;
-  with one, everything uses the north runway and the south strip is a storage yard among trees. It can be switched
-  live: an aircraft already on its way to the south runway still lands there.
+- **Runways:** the north runway (09L) takes the departures and the south one (09R) the arrivals, which then hold short
+  of the north runway on the connector and cross it when the tower clears them.
 
 ## Air wing
 
@@ -153,7 +151,8 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
 - **Our fighters** fly passes across the screen: chasing a bandit, chased by one (flares, the wingman saves them), or
   sweeping; the A-10 (and now and then an F-15E with bombs) on close air support runs.
 - **Hits:** a projectile that reaches its target scores on the **next beat** of the music. What gets through hits the
-  base: explosions, fires and craters in the ground (a second hit on a crater widens it rather than piling on; every
+  base: explosions, a structure hit burns for half a minute (flames over its roof, a tall column of black smoke) and
+  craters in the ground (a second hit on a crater widens it rather than piling on; every
   crater shrinks away in the end). Aircraft in flight always pass above the buildings' roofs.
   Knocked-out armour burns black, smokes, then settles into the ground.
 - **Damage:** whatever a bomb or missile lands on is out for a while. An AA gun, C-RAM, Avenger, tank, launcher or the
@@ -162,7 +161,7 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
   with a workshop body) sets a spare engine down beside it with its crane while the crew works on it — repaired, it
   gets the usual fuel truck (in a shelter or hangar it is repaired out of sight, in up to two minutes). A crater on a runway closes it: a green 10x10 repair truck drives out, its crane lowers repair mats into
   the crater, and the runway opens again (within about a minute, and stays open at least three minutes; the departures
-  waiting for it show RWY CLOSED); with two runways the other one takes both the arrivals and the departures meanwhile
+  waiting for it show RWY CLOSED); the other runway takes both the arrivals and the departures meanwhile
   (with 09L closed they cross its end on a taxiway down to 09R and take off from there). The
   base never goes down completely: at most 40 % of the air defence, one runway and a quarter of the aircraft are out at
   once (the Patriot and the NASAMS never both); a hit beyond that only burns and craters. The panel shows DAMAGED /

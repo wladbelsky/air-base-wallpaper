@@ -14,7 +14,6 @@ const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 /* Settings (overridden by Wallpaper Engine user properties) */
 const CFG = {
   zoom: 90,           // %
-  runways: 2,         // 1: one for everything; 2: the north one for takeoffs, the south one for landings
   camAngle: 135,      // initial camera azimuth, degrees
   camRotate: false,   // slow automatic orbit (no mouse control)
   camSpeed: 2,        // degrees per second

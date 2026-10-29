@@ -141,6 +141,7 @@ function craterGeometry() {
 class Scorch {
   static MERGE = 0.6;                                // two craters closer than MERGE × (r1 + r2) become one
   static CROWD = 30;                                 // slots kept free (crowd): a 3 s fade frees them at ~10/s
+  static LIFT = 0.055;                               // its base over the ground: above the paving and its painted lines (≤ 0.048; lower, the taxiway lines showed through)
   constructor(scene, n) {
     const geo = craterGeometry();
     // no depth write: its faded ejecta would cut holes in ground decals drawn after it (runway lettering); nearly flat, so it doesn't need it
@@ -166,7 +167,7 @@ class Scorch {
     }
     // a free slot (crowding keeps some); with none at all this one isn't made — rather than cut a showing one short
     it = this.items.find(o => !o.on); if (!it) return null;
-    it.on = true; it.fade = false; it.k = 1; it.p.set(p.x, groundH(p.x, p.z) + 0.01, p.z); it.r = it.base = r; it.t = it.max = life; it.rot = rand(0, TAU);
+    it.on = true; it.fade = false; it.k = 1; it.p.set(p.x, groundH(p.x, p.z) + Scorch.LIFT, p.z); it.r = it.base = r; it.t = it.max = life; it.rot = rand(0, TAU);
     this.crowd();
     return it;
   }

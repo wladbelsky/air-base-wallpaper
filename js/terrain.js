@@ -80,19 +80,8 @@ function vegKinds(season) {
 /* the leafy part of a deciduous geometry is white in the vertex colours: only it takes the tint; trunks stay brown —
    done by tinting per instance and letting the trunk colour be dark enough not to show the tint much */
 
-/* the south runway's strip with one runway: scrub and trees (TERRAIN.fill), clear of the yard there and the fire
-   station's way up to the runway */
-function fillSpot(x, z) {
-  const R = BASE_LAYOUT.rwy, R2 = BASE_LAYOUT.rwy2;
-  if (x < R2.x0 - 1 || x > R2.x1 + 1 || z < R.z + R.w / 2 + 2.2 || z > 25.6) return false;
-  if (x > -9.5 && x < 1.5) return false;
-  for (const [cx, cz, r] of BASE_LAYOUT.fillYard) if (Math.hypot(x - cx, z - cz) < r) return false;
-  return true;
-}
 const TERRAIN = {
-  season: null, ground: null, veg: [], fill: [], fillOn: false, tex: null, weather: null,
-  /* the fill shows with one runway only (BASE.setRunways) */
-  setFill(on) { this.fillOn = on; for (const f of this.fill) f.visible = on; },
+  season: null, ground: null, veg: [], tex: null, weather: null,
   /* build or rebuild for a season */
   build(season) {
     this.season = season;
@@ -131,8 +120,7 @@ const TERRAIN = {
   },
   buildVeg(season) {
     for (const v of this.veg) { scene.remove(v); v.geometry.dispose(); v.dispose(); }   // the mesh too: its instance buffers
-    for (const f of this.fill) { scene.remove(f); f.dispose(); }                         // shares the geometry of its kind
-    this.veg = []; this.fill = [];
+    this.veg = [];
     VEG_KEEP.length = 0;
     if (typeof BASE !== 'undefined' && BASE) for (const o of [...Object.values(BASE.mounts).flat().map(m => m.yawG), BASE.patriotRadar, ...BASE.skyLights.map(s => s.holder), ...BASE.floods.map(f => f.holder)]) if (o) { const w = o.getWorldPosition(new V3()); VEG_KEEP.push([w.x, w.z]); }
     let seed = { spring: 11, summer: 23, autumn: 37, winter: 41 }[season];
@@ -154,21 +142,6 @@ const TERRAIN = {
       inst.count = n; inst.castShadow = true; inst.receiveShadow = true;
       if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
       scene.add(inst); this.veg.push(inst);
-      // the fill on the south runway's strip: denser, in groves (snow drifts / rocks stay scattered)
-      const nF = Math.round(K.n * 0.09), fill = new THREE.InstancedMesh(K.geo, VEG_MAT, nF);
-      let m = 0; tries = 0;
-      while (m < nF && tries++ < nF * 40) {
-        const x = lerp(-66, 66, rnd()), z = lerp(10, 26, rnd());
-        if (!fillSpot(x, z) || VEG_KEEP.some(([kx, kz]) => Math.abs(x - kx) < 2.6 && Math.abs(z - kz) < 2.6) || (K.clump && vnoise(x / 14, z / 14, 9 + K.n) < 0.45)) continue;
-        const s = lerp(K.size[0], K.size[1], rnd());
-        _tq.setFromAxisAngle(WUP_T, rnd() * TAU); _ts.set(s, s * lerp(0.85, 1.2, rnd()), s);
-        fill.setMatrixAt(m, _tm.compose(_tp.set(x, 0, z), _tq, _ts));
-        fill.setColorAt(m, _tc.setHex(K.tint[Math.floor(rnd() * K.tint.length)]));
-        m++;
-      }
-      fill.count = m; fill.castShadow = true; fill.receiveShadow = true; fill.visible = this.fillOn;
-      if (fill.instanceColor) fill.instanceColor.needsUpdate = true;
-      scene.add(fill); this.fill.push(fill);
     }
   },
   /* snowflakes / leaves: a pool of points falling through a box around the screen centre; spawn by time, not by frame */

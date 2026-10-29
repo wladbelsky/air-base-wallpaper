@@ -12,7 +12,6 @@ const QS = new URLSearchParams(location.search);
 if (QS.has('hour')) { CFG.timeMode = 'fixed'; CFG.fixedHour = parseFloat(QS.get('hour')); }
 if (QS.has('zoom')) CFG.zoom = parseFloat(QS.get('zoom'));
 if (QS.has('season')) CFG.season = QS.get('season');
-if (QS.has('runways')) CFG.runways = clamp(parseInt(QS.get('runways'), 10) || 2, 1, 2);
 
 /* ---- Wallpaper Engine properties ---- */
 function rgbFromWE(str) { return str.split(' ').map(c => Math.round(clamp(parseFloat(c), 0, 1) * 255)).join(','); }
@@ -41,7 +40,6 @@ window.wallpaperPropertyListener = {
     if (has('missionfrequency')) CFG.missions = p.missionfrequency.value;
     if (has('camerashake')) CFG.shake = p.camerashake.value;
     if (has('enemies')) CFG.enemies = p.enemies.value;
-    if (has('runways')) CFG.runways = clamp(Math.round(p.runways.value), 1, 2);   // switched live: AIRFIELD.update shows / hides the south runway
     if (has('basename')) CFG.baseName = String(p.basename.value || '').trim().toUpperCase().slice(0, 20) || 'SAND ISLAND';
     for (const k of Object.keys(AIRCRAFT_TYPES)) if (has(k + 'count')) { const v = Math.round(p[k + 'count'].value); if (CFG.counts[k] !== v) { CFG.counts[k] = v; airWingDirty = true; } }
     applySettings();
@@ -94,7 +92,7 @@ function init() {
 
   FX.tracers = new Tracers(scene, 1200);
   FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);
-  FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 320, true);
+  FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 420, true);   // (a burning structure keeps ~50 up)
   FX.scorch = new Scorch(scene, 120);
   FX.lights = new FlashLights(scene, 4);
   // shells, rockets and bombs that reach the ground: dust, or a bomb hitting a structure

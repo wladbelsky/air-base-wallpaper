@@ -178,6 +178,18 @@ test('air-defence radars: AA search antennas spin in a fight, the Patriot radar 
   expect(calm.done, 'after the fight: antennas stopped, the radar back to its sector').toBe(true);
 });
 
+for (const type of ['tu95', 'tu22'])
+test(`a pair of ${type} bombers flies in formation, never through each other`, async ({ wp }) => {
+  await wp.boot();
+  await wp.run((type) => { __t.forceFight(); const w = ENEMY_TYPES[type].w; ENEMY_TYPES[type].w = () => 1e6; spawnBandits(2); ENEMY_TYPES[type].w = w;
+    window.__p = ENEMIES.filter(e => e.type === type); __p.forEach(e => e.hp = 1e6); window.__d = 1e9; }, type);
+  expect(await wp.run(() => __p.length)).toBe(2);
+  const r = await wp.until(() => { if (__p.every(e => ENEMIES.includes(e) && !e.falling)) __d = Math.min(__d, __p[0].p.distanceTo(__p[1].p)); return __p.some(e => !ENEMIES.includes(e)); }, 90, { audio: true });
+  expect(r.violations).toEqual([]);
+  const [d, len] = await wp.run((type) => [__d, enemyDims(type).x], type);
+  expect(d, 'closest the two came').toBeGreaterThan(len);
+});
+
 test('a Tu-95 wave: four turning propeller pairs (contra-rotating), and it bombs like the Tu-22', async ({ wp }) => {
   await wp.boot();
   await wp.run(() => { __t.forceFight(); window.__bombs = 0; const f = window.enemyBomb; window.enemyBomb = p => { __bombs++; return f(p); };
