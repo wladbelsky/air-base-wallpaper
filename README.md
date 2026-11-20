@@ -61,7 +61,10 @@ From source:
   and the fight go on as usual.
 - **Lighting:** colours are lit in linear space and tone mapped, so floodlights, fires and flashes no longer clip to
   white; shadows are crisp under a high sun, long and soft at dusk, faint by moonlight. **Glow (bloom)** puts a halo
-  around the lights, fires, explosions, tracers and lightning (on by default).
+  around the lights, fires, explosions, tracers and lightning (on by default). With WebGPU (Wallpaper Engine has it)
+  every searchlight is a real light, fires and explosions light up their surroundings, and with **Volumetric light
+  beams** the searchlights cut shafts through the night haze, thick in fog and rain; without WebGPU the wallpaper runs
+  on WebGL 2 with the meshed beams.
 - **Base name** property: the tower's radio callsign and the panel title (default SAND ISLAND).
 - **Runways:** the north runway (09L) takes the departures and the south one (09R) the arrivals, which then hold short
   of the north runway on the connector and cross it when the tower clears them.
@@ -201,15 +204,15 @@ changes the radio tone (calm → tense → panic), enemy wave size and spawn rat
 
 ## Properties
 
-Camera zoom and rotation, time of day (PC clock or fixed hour), glow (bloom), audio sensitivity, fire intensity,
+Camera zoom and rotation, time of day (PC clock or fixed hour), glow (bloom), volumetric beams, audio sensitivity, fire intensity,
 fly-by frequency, automatic flight ops, missions, camera shake, enemies, season, weather, snowfall / leaves, shadows, the
 control panel (show, position, size, colour), the counts of every aircraft type, session memory, subtitles and the base
 name.
 
 ## Development
 
-Plain JavaScript, no build step: three.js r187 is vendored as one bundle (`js/three.r187.min.js`, rebuilt from npm with
-`npm run vendor:three`). See `CLAUDE.md` for the code layout. Browser preview:
+Plain JavaScript, no build step: three.js r187 (WebGPURenderer, WebGL 2 fallback) is vendored as one bundle
+(`js/three.r187.webgpu.min.js`, rebuilt from npm with `npm run vendor:three`). See `CLAUDE.md` for the code layout. Browser preview:
 
 ```bash
 python -m http.server 8765

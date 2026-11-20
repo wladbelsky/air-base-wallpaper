@@ -188,10 +188,23 @@ class Scorch {
   }
 }
 
+/* the burning structures (BASE_FIRES) light their surroundings with a flicker: a fixed pool of point lights given to the
+   biggest fires (clustered lighting only, WebGPU: GPU.clustered) */
+class FireLights {
+  constructor(scene, n) { this.items = []; for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xff8a3a, 0, 16, 2); l.layers.enable(2); scene.add(l); this.items.push(l); } this.ph = 0; }
+  update(dt, nightBoost) {
+    this.ph += dt; const fires = BASE_FIRES.slice().sort((a, b) => b.r * Math.min(1, b.t / 8) - a.r * Math.min(1, a.t / 8));
+    this.items.forEach((l, i) => {
+      const f = fires[i]; if (!f) { l.intensity = 0; return; }
+      const k = Math.min(1, f.t / 8) * f.r, fl = 0.75 + 0.25 * Math.sin(this.ph * 13 + i * 2.1) * Math.sin(this.ph * 7.3 + i);
+      l.position.set(f.p.x, f.p.y + 1.2, f.p.z); l.intensity = 2.2 * FLASH_K * k * fl * nightBoost * CFG.fire / 100;
+    });
+  }
+}
 class FlashLights {
   constructor(scene, n) {
     this.items = [];
-    for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xffb060, 0, 22, 2); scene.add(l); this.items.push({ l, t: 0, max: 0.1, I: 0 }); }
+    for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xffb060, 0, 22, 2); l.layers.enable(2); scene.add(l); this.items.push({ l, t: 0, max: 0.1, I: 0 }); }
     this.next = 0;
   }
   flash(p, I, dur) {

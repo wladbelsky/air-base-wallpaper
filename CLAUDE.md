@@ -8,9 +8,16 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Stack & layout
 - Plain JS, no build step for the wallpaper. `'use strict'` classic scripts sharing **global** scope
-  (no modules). three.js **r187** is vendored as `js/three.r187.min.js` — never edit it. three.js ships only ES modules
-  since r160: `tools/vendor_three.js` (`npm run vendor:three`; npm only for this and the tests) bundles the npm package +
-  the post-processing addons listed in `tools/three-entry.js` with esbuild into one IIFE that sets the global `THREE`.
+  (no modules). three.js **r187** is vendored as `js/three.r187.webgpu.min.js` — never edit it. three.js ships only ES
+  modules since r160: `tools/vendor_three.js` (`npm run vendor:three`; npm only for this and the tests) bundles
+  `three/webgpu` (all of three.js + WebGPURenderer + node materials), TSL as `THREE.TSL` and the addons listed in
+  `tools/three-entry.js` (`bloom`, `ClusteredLighting`) with esbuild into one IIFE that sets the global `THREE`.
+- **Renderer**: `WebGPURenderer` — WebGPU where the browser has it (Wallpaper Engine's CEF does), else its WebGL 2
+  backend (`?gl=webgl2` forces it; `GPU.webgpu`). `init()` is async (`await renderer.init()`; `ready` after it). No
+  `ShaderMaterial` / `onBeforeCompile` / `PointsMaterial` with a size: own shading is TSL node materials (`SpriteFX`, the
+  beams), sized points are instanced `Sprite`s with a `PointsNodeMaterial` (WebGPU draws Points 1 px wide: nav lights,
+  seasonal particles). Toggling a light's `castShadow` rebuilds materials: shadows switch by `shadow.intensity` /
+  `shadow.autoUpdate`. The renderer advances its node frame in its own rAF loop (a pass renders once per frame).
   A new release gets a new file name (CEF caches the vendored file: it has no `?v=`; `repo.spec.js` checks the name
   against `package.json`).
 - `index.html` loads scripts in dependency order (later files use globals of earlier ones):
@@ -47,7 +54,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=46`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=47`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -92,25 +99,36 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 ## Light & colour (three.js r187)
 - **Colour management** is on: hex colours are sRGB and become linear (`Color.setHex`), canvas textures say so
   (`srgbTex`, core.js), vertex colours are linear (terrain patches `k^2.2`; `mergeStatic` bakes `material.color`, already
-  linear). Output: sRGB, **Neutral tone mapping** (colours below ~0.8 untouched, bright ones roll off). Own shaders end
-  with `#include <tonemapping_fragment>` / `<colorspace_fragment>` (`SPRITE_FS`).
+  linear). Output: sRGB, **Neutral tone mapping** (colours below ~0.8 untouched, bright ones roll off), applied by the
+  RenderPipeline to everything.
 - **Lights are physical** (legacy lights are gone since r165). The sky palette (`SKY_KEYS`) keeps its old sRGB meaning:
   `skyLight(hi)` / `sunLightK(si, hi)` (core.js) turn it into intensities that give the old shade / lit contrast
   (L in sRGB = L^2.2 lit linearly, × π). Spot / point lights fall off with the square of the distance (`decay` 2):
   their old intensities × `SPOT_K` / `FLASH_K`. Shadows: `shadow.radius` (PCF, soft at a low sun or overcast) and
   `shadow.intensity` (faint by moonlight / overcast) set in `updateEnvironment`. `PCFSoftShadowMap` is gone (r186).
-- **Bloom** (`CFG.bloom`, `renderFrame`): the scene goes into a half-float multisampled target, `UnrealBloomPass`
-  adds the glow of everything brighter than its threshold, `OutputPass` tone maps / encodes. HDR emitters (colour > 1)
-  only with bloom on (`updateBloom`: `HDR`): nav / runway lights, lit windows, `FX.flash` (`uK`), tracers, the lightning
-  bolt. In the linear target sprites and beams add up differently than on the sRGB screen: `SPRITE_AG` (smoke alpha),
-  `SPRITE_CP` (additive sprite colour), `BEAM_G` (searchlight beams) bend them back to the old look. `renderer.info`
-  is reset per frame (`autoReset` off): a test or measurement counts the whole frame. Render through `renderFrame()`
-  (the harness's `__t.render` does), not `renderer.render`.
-- **Shader warm-up** (`warmShaders`, end of `init`, under the splash): `compileAsync` (KHR_parallel_shader_compile;
-  without it, synchronous) of the scene and every enemy template; `compile()` takes visible objects only (r158+), so
-  `compileVisible` shows the hidden ones for the call; both states of the night-only spot lights; with bloom the
-  programs are made for the HDR target (`setRenderTarget`): a program's key includes where it draws. Frames under the
-  splash make the shadow-pass and bloom programs. The loop draws nothing until `SHADERS_READY` (15 s fallback), the
+- **Frames** (`renderFrame`): a `RenderPipeline` — the scene `pass()` (half-float, 4× MSAA), + the volume (below),
+  + `bloom()` of everything brighter than its threshold when `CFG.bloom` (`updateBloom` swaps the output node; BloomNode's
+  scale is weaker than the old UnrealBloomPass's). HDR emitters (colour > 1) only with bloom on (`HDR`): nav / runway
+  lights, lit windows, `FX.flash` (`uK`), tracers, the lightning bolt. The scene is always drawn in the linear target,
+  where sprites and beams add up differently than on the old sRGB screen: `SPRITE_AG` (smoke alpha), `SPRITE_CP`
+  (additive sprite colour), `BEAM_G` (beams) keep the old look. `renderer.info` is reset per frame (`autoReset` off;
+  draw calls `info.render.drawCalls`, programs `info.memory.programs`). Render through `renderFrame()` (the harness's
+  `__t.render` does), never `renderer.render`.
+- **Clustered lighting** (`GPU.clustered`: WebGPU only, `?clustered=0` off; `renderer.lighting = ClusteredLighting`,
+  ceiling `LIGHT_MAX` 128): point / spot lights are binned per screen tile and depth, so many are cheap — every
+  searchlight is a real light (sky, guard towers, all helicopters), 24 flash lights, 12 `FireLights` on the burning
+  structures, spot lights stay shown by day (intensity 0). On the WebGL 2 backend: 4 flash lights, 4 helicopter lights,
+  2 apron floodlights, spot lights hidden by day.
+- **Volumetric light** (`VOLUME`, main.js; `CFG.volumetric`, WebGPU, `?vol=1` forces it on WebGL 2): a box over the base
+  on `VOL_LAYER` with a `VolumeNodeMaterial`, drawn by its own quarter-resolution pass and added to the scene: the rays
+  are marched and every light on `VOL_LAYER` (spot / flash / fire lights enable it; not the sun or the sky) scatters by
+  the haze's density (night × weather: thick in fog and rain). The meshed beams of real lights are hidden meanwhile.
+- **Shader warm-up** (`warmShaders`, end of `init`, under the splash): `compileAsync` (async pipelines on WebGPU,
+  KHR_parallel_shader_compile on WebGL 2), one call at a time (it isn't re-entrant), of the scene, every enemy template,
+  the ground vehicles and a wreck; `compile()` takes visible objects only (r158+), so `compileVisible` shows the hidden
+  ones for the call; both states of the night-only spot lights; the programs are made for the scene pass's target
+  (`setRenderTarget(scenePass.renderTarget)`): a program's key includes where it draws. Frames under the splash make the
+  shadow-pass and post-processing programs and the batches for the templates. The loop draws nothing until `SHADERS_READY` (15 s fallback), the
   splash waits for it. A new kind of object that first appears in a fight must be in the scene (hidden is fine) or in
   the template group. Turning a light's `visible` (or adding a light) recompiles every program. `?warm=0` skips it
   (the harness does, unless `boot({ warm: true })`: SwiftShader compiles synchronously, ~4 s a boot).
@@ -174,7 +192,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   `v0` to `v1` over the *whole* path — on a long path (takeoff → orbit is 100+ units) that is almost no change over
   the first stretch (it looked like the jet stopped accelerating and rolled on at lift-off speed).
   `canLineUp` lets the next departure line up behind one rolling fast; it rolls once that one is off the runway.
-- **Aircraft lights**: an airframe's nav lights / beacons (its `Points` nodes) are shown only while `lightsOn` (not
+- **Aircraft lights**: an airframe's nav lights / beacons (its `userData.nav` sprites) are shown only while `lightsOn` (not
   `parked` or `towed`: engines running, or stopped on the runway in an emergency) — `Aircraft.update`.
 - **FixedWing states**: `parked` → `ready` (engines, the tug hooks up (`tugReady`), waits for the door and `pushbackClear`) → `pushback` →
   `taxi_out` → `hold_short` → `lineup` → `takeoff_roll` (brakes, roll, rotate at `vR`) → `climb` → `orbit` →
@@ -491,9 +509,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   writes them; give the callee its own scratch. Top-level names are global across all files: no duplicates.
 - Pools are ring buffers (`SpriteFX`, `Tracers`, weather; `Scorch` takes a free slot and makes none when full): spawn rates must not scale with FPS
   (use time accumulators, see missile glow in `updateFlybys`).
-- `SpriteFX` (flash / smoke) is one instanced mesh per pool with its own billboard shader that
-  reproduces `SpriteMaterial` (color × texture, opacity, scene fog). Normal-blended pools sort live
-  particles back to front on the CPU each update (needs the camera: `FX.smoke.update(dt, tint, camera)`).
+- `SpriteFX` (flash / smoke / mist) is one instanced `Sprite` per pool with a `SpriteNodeMaterial` (position, colour +
+  alpha, size + rotation per instance; colour × texture, scene fog). Normal-blended pools sort live particles back to
+  front on the CPU each update (needs the camera: `FX.smoke.update(dt, tint, camera)`).
 - The sun's shadow camera is fitted to the visible ground every frame (`fitShadow`, `main.js`; one 2048² map):
   don't set fixed shadow bounds.
 - Searchlight `SpotLight`s are hidden by day (`updateLights`): every visible light costs every lit
@@ -505,8 +523,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   hundreds of ms each in WE's ANGLE / D3D).
 - **The panel's DOM** is written only where a value changed (`setTxt` / `setCls`, the clock once a minute, nothing
   while `showPanel` is off; the meter in whole percent): it was ~28% of the simulation's time.
-- Measured 2026-11 (peace, 27 aircraft, r187): ~137 main-pass draw calls, ~149 with the shadow pass, +14 for bloom
-  (before the batching: ~342 / ~511; ~450 / ~660 before the plain-colour merge); `BATCH.sync` ~0.15 ms a frame, a
+- Measured 2026-11 (peace, 27 aircraft, r187, WebGPURenderer on WebGL 2 in the test container): ~164 draw calls for
+  the scene pass and the output, ~176 with the shadow pass, ~188 with bloom (WebGLRenderer + batching: ~137 / ~149;
+  before the batching ~342 / ~511; ~450 / ~660 before the plain-colour merge); `BATCH.sync` ~0.15 ms a frame, a
   simulation step ~0.25–0.4 ms in the test container. `vehHoldAir` skips aircraft too far for
   their next 8 units to matter (the route sampling is the costly part).
 
@@ -514,14 +533,17 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - WE: "Open from File" → `project.json` (audio listener + properties come from WE).
 - Browser preview: serve the folder, e.g. `python -m http.server 8765`, open `http://localhost:8765/`.
   The ⚙ SETTINGS drawer mirrors all WE properties (stored in `localStorage`); URL params `?hour=22`,
-  `?zoom=150`, `?season=winter`, `?weather=storm`, `?demo=1`, `?ts=N` (time scale), `?warm=0` (no shader warm-up).
-- **Automated tests** (`tests/`, Playwright Test in headless Chromium + SwiftShader WebGL): run them in Docker —
+  `?zoom=150`, `?season=winter`, `?weather=storm`, `?demo=1`, `?ts=N` (time scale), `?warm=0` (no shader warm-up),
+  `?gl=webgl2` (the WebGL 2 backend), `?clustered=0`, `?vol=1` (the volume on WebGL 2).
+- **Automated tests** (`tests/`, Playwright Test in headless Chromium + SwiftShader, WebGPURenderer's WebGL 2 backend:
+  WebGPU in the headless container drops its instance, even for a bare clear — the WebGPU path, clustered lighting and
+  the volume by default are checked by hand in Wallpaper Engine; `?vol=1` tests the volume on WebGL 2): run them in Docker —
   `powershell -ExecutionPolicy Bypass -File tools/test.ps1 [file / -g pattern]` (no local Node; `$env:SEED = N` for
   another seed); CI runs the same image on every push / PR (`.github/workflows/tests.yml`). Run them after a change.
   - The harness (`tests/support/harness.js`) boots the page deterministically: seeded `Math.random` (`SEED`), fixed
     date in UTC, no `requestAnimationFrame` (time only advances through `__t.sim(sec)` = `step(0.05)` per tick),
     `RT()` on simulated time, Wallpaper Engine mode (audio fed by `__t.sim(sec, { audio: true/false })`), no shader
-    warm-up (`?warm=0`; `boot({ warm: true })` for it). Three.js draws UUIDs from `Math.random`: a three.js update
+    warm-up (`?warm=0`; `boot({ warm: true })` for it), the WebGL 2 backend (`?gl=webgl2`). Three.js draws UUIDs from `Math.random`: a three.js update
     or new objects at start-up shift the seeded timelines (see "Debugging").
   - `tests/support/inpage.js` (`window.__t`): `sim` runs `checkInvariants()` after every step (runway / arrivals,
     homes and their markings, known states; NaN; under ground; mission / tanker consistency; bounded pools) and the
@@ -537,8 +559,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   a world point on screen: `new THREE.Vector3(x, 0, z).project(camera)`. The Browser pane's screenshot can show the frame
   from before the last JS call (or older): take it in a call of its own after the change, and wait ~1 s if it still shows the old view.
 - **When the Browser pane's screenshots stay stale** (the splash, an old frame): a throw-away spec that boots the page,
-  sets the camera, calls `renderer.render(scene, camera)` and `wp.page.screenshot({ path: 'test-results/x.png' })`, then
-  Read the png (the harness has no rAF: render by hand).
+  sets the camera, calls `__t.render()` and `wp.page.screenshot({ path: 'test-results/x.png' })`, then Read the png (the
+  harness has no rAF: render by hand; `__t.render` advances the renderer's node frame too).
 - **Debugging an invariant failure**: re-run the failing test with the same seed (deterministic), then a throw-away
   spec (`tests/zz-debug.spec.js`, deleted afterwards) whose `wp.until(pred)` predicate runs every step and pushes a log
   line per step (positions, `drive.s`, phases, the aircraft's state) — print the last lines around the first violation.
@@ -546,7 +568,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   latent ground-traffic bug in an untouched file: treat it as real. `test.ps1 … | Select-Object -First N` may end with
   exit code 255 (the pipe was cut), not a failure: read the "passed / failed" line.
 - Console checks by hand: all globals are reachable; set `paused = true` and drive the sim with `step(0.05)` +
-  `renderer.render(scene, camera)`; check `renderer.info.render.calls` (main-pass draw calls, shadow pass excluded)
+  `__t.render()`; check `renderer.info.render.drawCalls` (the whole frame: set `CFG.shadows` / `CFG.bloom` off for the main pass)
   and `renderer.info.memory.geometries`. To force a fight: `AUD.combat` alone gives `armed` but not `fighting` (no
   waves / passes / beats); use `Object.defineProperty(AUD, 'active', { get: () => true }); AUD.soundStart = RT() - 10;
   AUD.combat = true;` (what `__t.forceFight()` does), then `onBeat('low', 2)`.

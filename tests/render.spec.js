@@ -136,6 +136,22 @@ test('batching: the merged meshes draw through a few BatchedMeshes that follow t
   expect(g.leaked, g.leakedTypes.join()).toBe(0);
 });
 
+test('volumetric light (forced on the WebGL 2 backend): the searchlights light the night haze, the meshed beams of real lights hide', async ({ wp }) => {
+  await wp.boot({ query: '?hour=23&season=winter&vol=1&weather=fog' });
+  await wp.run(() => __t.render());   // (the pipeline and the volume are built by the first frame)
+  await wp.sim(200);
+  const r = await wp.run(() => {
+    const on = __t.bright(0, 0, 1280, 720, 40), err = renderer.getContext().getError();
+    const d = VOLUME.density.value; VOLUME.density.value = 0; const off = __t.bright(0, 0, 1280, 720, 40); VOLUME.density.value = d;
+    return { on, off, err, active: VOLUME.active, d, hidden: SEARCHLIGHTS.filter(s => s.light && s.cone).every(s => !s.cone.visible) };
+  });
+  expect(r.active).toBe(true);
+  expect(r.err).toBe(0);
+  expect(r.d).toBeGreaterThan(0);
+  expect(r.on, `lit haze ${r.on} vs none ${r.off}`).toBeGreaterThan(r.off);
+  expect(r.hidden).toBe(true);
+});
+
 test('shadows darken the ground, and the shadow camera covers the whole screen', async ({ wp }) => {
   await wp.boot();
   await wp.sim(3);

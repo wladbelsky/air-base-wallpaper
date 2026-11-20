@@ -31,6 +31,7 @@ window.wallpaperPropertyListener = {
     if (has('autoflight')) CFG.auto = p.autoflight.value;
     if (has('shadows')) CFG.shadows = p.shadows.value;
     if (has('bloom')) CFG.bloom = p.bloom.value;
+    if (has('volumetric')) CFG.volumetric = p.volumetric.value;
     if (has('showpanel')) CFG.showPanel = p.showpanel.value;
     if (has('panelposition')) CFG.panelPos = p.panelposition.value;
     if (has('panelscale')) CFG.panelScale = p.panelscale.value;
@@ -75,6 +76,11 @@ async function init() {
   renderer = new THREE.WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', forceWebGL: QS.get('gl') === 'webgl2' });
   await renderer.init();
   GPU.webgpu = !!renderer.backend.isWebGPUBackend;
+  // Forward+ clustered lighting (WebGPU only: a compute pass bins the point / spot lights per screen tile and depth slice,
+  // a fragment loops over its cluster's): many real lights are cheap — every searchlight, more flashes, the fires. On
+  // the WebGL 2 backend the lights stay rationed (4 flash lights, 4 helicopter lights, spot lights hidden by day).
+  GPU.clustered = GPU.webgpu && QS.get('clustered') !== '0';
+  if (GPU.clustered) renderer.lighting = new THREE.ClusteredLighting(LIGHT_MAX);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.NeutralToneMapping;   // bright lights / flashes roll off instead of clipping; colours below ~0.8 untouched
@@ -103,7 +109,8 @@ async function init() {
   FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);   // (HDR with bloom: updateBloom, uK)
   FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 420, true);   // (a burning structure keeps ~50 up)
   FX.scorch = new Scorch(scene, 120);
-  FX.lights = new FlashLights(scene, 4);
+  FX.lights = new FlashLights(scene, GPU.clustered ? 24 : 4);
+  if (GPU.clustered) FX.fireLights = new FireLights(scene, 12);
   WEATHER.build();
   // shells, rockets and bombs that reach the ground: dust, or a bomb hitting a structure
   FX.tracers.onSplash = (p, big) => {
@@ -128,7 +135,8 @@ async function init() {
    loop draws nothing until SHADERS_READY (a draw with a program still compiling would wait for it); frames under the
    splash make the shadow pass's programs (compile() doesn't) and the post-processing passes (bloom). */
 let SHADERS_READY = false;
-const GPU = { webgpu: false };   // which backend WebGPURenderer runs on (renderer.backend)
+const GPU = { webgpu: false, clustered: false };   // which backend WebGPURenderer runs on (renderer.backend), clustered lights
+const LIGHT_MAX = 128;   // the clustered lighting's ceiling (point + spot lights in the scene)
 function compileVisible(root, target) {
   const hid = [], bat = []; root.traverse(o => { if (!o.visible && !o.isLight) { hid.push(o); o.visible = true; } if (o.userData.batched && o.visible) bat.push(o); });
   for (const o of bat) o.visible = false;   // (drawn by their batches: no program of their own)
@@ -218,9 +226,38 @@ let pipeline = null, bloomNode = null, sceneOut = null, pipeBloom = null, sceneP
 function buildPipeline() {
   pipeline = new THREE.RenderPipeline(renderer);
   const sp = scenePass = THREE.TSL.pass(scene, camera, { samples: 4 });
-  sceneOut = sp.getTextureNode('output'); bloomNode = THREE.bloom(sceneOut, 0.5, 0.45, 1);
+  sceneOut = sp.getTextureNode('output');
+  if (VOLUME.on()) sceneOut = sceneOut.add(VOLUME.build());   // light shafts in the haze, added before the bloom
+  bloomNode = THREE.bloom(sceneOut, 0.5, 0.45, 1);
   updateBloom();
 }
+/* ---- volumetric light (WebGPU; ?vol=1 forces it on the WebGL 2 backend): the searchlights' beams lit in the haze ----
+   A box over the base (VOL_LAYER: only its own low-res pass draws it) with a VolumeNodeMaterial: the ray through it is
+   marched in steps and every light (clustered, WebGPU: cheap) scatters into it by the haze's density — beams from the
+   real spot lights, glow around flashes and fires. Density by the hour and the weather (thick in fog and rain, none by a
+   clear day); the meshed beams (coneMaterial) are hidden meanwhile. Rendered at a quarter of the resolution. */
+const VOL_LAYER = 2;
+const VOLUME = {
+  mesh: null, density: null, active: false,
+  on() { return CFG.volumetric && (GPU.webgpu || QS.get('vol') === '1'); },
+  build() {
+    const { uniform, Fn, vec3, smoothstep, screenCoordinate, interleavedGradientNoise } = THREE.TSL;
+    this.density = uniform(0);
+    const m = new THREE.VolumeNodeMaterial({ steps: GPU.webgpu ? 20 : 12 });
+    m.offsetNode = interleavedGradientNoise(screenCoordinate);   // (dithered start: no banding)
+    m.scatteringNode = Fn(({ positionRay }) => vec3(this.density.mul(smoothstep(42, 2, positionRay.y))));   // thinner with height
+    this.mesh = new THREE.Mesh(new THREE.BoxGeometry(240, 44, 170), m); this.mesh.position.set(0, 22, -4);
+    this.mesh.layers.set(VOL_LAYER); this.mesh.frustumCulled = false; scene.add(this.mesh);
+    const vp = THREE.TSL.pass(scene, camera, { depthBuffer: false }); vp.setLayers(new THREE.Layers()); vp.getLayers().set(VOL_LAYER); vp.setResolutionScale(0.25);
+    this.active = true;
+    return vp.getTextureNode('output');
+  },
+  update() {
+    if (!this.active) return;
+    const d = (0.025 + 0.09 * WEATHER.fog + 0.03 * WEATHER.rain) * Math.max(ENV.lamps, ENV.lightsOn);
+    this.density.value = d; this.mesh.visible = d > 1e-4;
+  }
+};
 /* the glow follows the light: stronger at night (the lamps, the windows, a flash in the dark), a high threshold by day
    (sunlit snow / white roofs stay out of it). The emitters are HDR (colours > 1: what glows) only with bloom on — without
    it they would just be brighter than they always were. */
@@ -729,10 +766,12 @@ function updateLights() {
   }
   for (const s of SEARCHLIGHTS) {
     const on = ENV.lightsOn * s.enabled, beam = Math.max(ENV.lamps, ENV.lightsOn) * s.enabled * (1 + 1.2 * WEATHER.fog + 0.5 * WEATHER.rain);   // (beams thicker in fog and rain)
-    // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn)
-    if (s.light) { s.light.intensity = s.o.intensity * on * SPOT_K; s.light.visible = ENV.lightsOn > 0; }
-    if (s.cone) s.cone.material.uOpacity.value = s.o.coneOpacity * beam * (0.45 + 0.55 * Math.max(ENV.night, WEATHER.fog * 0.6));
+    // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn);
+    // clustered (WebGPU): always shown — a light out of its cluster costs nothing, and no toggle rebuilds the lights
+    if (s.light) { s.light.intensity = s.o.intensity * on * SPOT_K; s.light.visible = GPU.clustered || ENV.lightsOn > 0; }
+    if (s.cone) { s.cone.material.uOpacity.value = s.o.coneOpacity * beam * (0.45 + 0.55 * Math.max(ENV.night, WEATHER.fog * 0.6)); s.cone.visible = !(VOLUME.active && s.light); }   // (a real light's beam: the volume draws it)
   }
+  VOLUME.update();
 }
 
 /* ---- missions beyond the screen edge (only while there is no music) ---- */
@@ -995,6 +1034,7 @@ function step(dt) {
   FX.smoke.update(dt, ENV.smokeTint, camera);
   FX.scorch.update(dt);
   FX.lights.update(dt, 0.6 + ENV.night * 0.8);
+  if (FX.fireLights) FX.fireLights.update(dt, 0.6 + ENV.night * 0.8);
   WEATHER.update(dt);
   TERRAIN.update(dt);
   STRESS.update(dt);

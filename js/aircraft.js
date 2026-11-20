@@ -467,7 +467,7 @@ class Helicopter extends Aircraft {
   constructor(o) {
     super(o);
     const sp = this.model.searchPos || new V3(0.7, 0.2, 0);
-    this.lit = HELI_LIGHTS.n < 4; if (this.lit) HELI_LIGHTS.n++;
+    this.lit = GPU.clustered || HELI_LIGHTS.n < 4; if (this.lit) HELI_LIGHTS.n++;   // (clustered lighting: every one)
     const sl = makeSearchlight(this.mesh, sp.x, sp.y, sp.z, { angle: 0.2, len: 14, intensity: 2.4, coneOpacity: 0.32, housing: false, noLight: !this.lit });
     sl.holder.quaternion.setFromUnitVectors(new V3(0, 0, 1), new V3(1, -1.1, 0).normalize());
     sl.fixed = true; sl.enabled = 0; this.searchlights.push(sl);

@@ -82,6 +82,12 @@ const WE_PROPERTIES = {
   "type": "bool",
   "value": true
  },
+ "volumetric": {
+  "order": 8,
+  "text": "Volumetric light beams (WebGPU)",
+  "type": "bool",
+  "value": true
+ },
  "audiosensitivity": {
   "order": 10,
   "text": "Audio sensitivity, %",
