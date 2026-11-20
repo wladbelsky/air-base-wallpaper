@@ -28,21 +28,26 @@ class Wallpaper {
   constructor(page, errors) { this.page = page; this.errors = errors; this.installed = false; }
   /* load the wallpaper; query e.g. '?hour=0' */
   /* splash: keep the start-up splash (it covers the page until T > 3.2 — or 8 s of real time — and blocks clicks) */
-  async boot({ seed = SEED, we = true, query = '', time = '2026-06-21T12:00:00Z', splash = false } = {}) {
+  /* warm: the shader warm-up under the splash (warmShaders; skipped by default: SwiftShader compiles synchronously, ~4 s a boot) */
+  async boot({ seed = SEED, we = true, query = '', time = '2026-06-21T12:00:00Z', splash = false, warm = false } = {}) {
     if (!this.installed) {
       await this.page.clock.setFixedTime(new Date(time));
       await this.page.addInitScript(initScript, { seed, we });
       await this.page.addInitScript({ path: INPAGE });
       this.installed = true;
     }
+    if (!warm) query += (query.includes('?') ? '&' : '?') + 'warm=0';
     await this.page.goto('/index.html' + query);
     const ok = await this.page.evaluate(() => typeof ready !== 'undefined' && ready && AIRCRAFT.length > 0);
     if (!ok) throw new Error('wallpaper did not initialise');
+    // the shaders compile asynchronously under the splash (warmShaders, compileAsync): wait for them
+    await this.page.waitForFunction(() => SHADERS_READY === true, null, { timeout: 30000 });
     await this.page.evaluate((splash) => { __t.setup(); if (!splash) document.getElementById('splash').style.display = 'none'; }, splash);
     return this;
   }
   async reload() {
     await this.page.reload();
+    await this.page.waitForFunction(() => typeof SHADERS_READY !== 'undefined' && SHADERS_READY === true, null, { timeout: 30000 });
     await this.page.evaluate(() => __t.setup());
   }
   /* run fn(arg) in the page */

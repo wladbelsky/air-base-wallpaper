@@ -109,14 +109,41 @@ function init() {
   warmShaders();
   requestAnimationFrame(frame);
 }
-/* compile now, under the start-up splash, every shader a fight needs (enemy models, tracers, flashes, smoke…): the first
-   fight would otherwise stall on ~a dozen compiles (tens to hundreds of ms each in Wallpaper Engine's ANGLE / D3D) right
-   as the music starts. renderer.compile covers invisible objects too (the idle FX pools); the enemy templates are built
-   here (enemyMesh caches them) and their clones only borrowed for it — no GPU buffers are made, nothing to dispose. */
-function warmShaders() {
+/* compile now, under the start-up splash, every shader the scene and a fight need (enemy models, tracers, flashes,
+   smoke…): the first frame and the first fight would otherwise stall on dozens of compiles (tens to hundreds of ms each in
+   Wallpaper Engine's ANGLE / D3D). compileAsync hands them to the driver at once and waits for them off the main thread
+   (KHR_parallel_shader_compile; without it they compile as before, one by one): the splash keeps moving meanwhile.
+   compile() only takes visible objects (since r158): the idle FX pools, the hidden aircraft and the rest are shown for
+   the call (compileVisible). The programs depend on the lights in view: the spot lights shown by night only are flipped
+   for a second round (no stall at dusk / dawn). A program is made for where it draws: the bloom's HDR target or the
+   screen — the active path only (toggling bloom compiles the other once). The enemy templates are built here (enemyMesh caches them) and only
+   borrowed (targetScene: lit like the scene, not added to it) — no GPU buffers are made, nothing to dispose. The frame
+   loop draws nothing until SHADERS_READY (a draw with a program still compiling would wait for it); frames under the
+   splash make the shadow pass's programs (compile() doesn't) and the post-processing passes (bloom). */
+let SHADERS_READY = false;
+function compileVisible(root, target) {
+  const hid = []; root.traverse(o => { if (!o.visible && !o.isLight) { hid.push(o); o.visible = true; } });
+  // the programs are made for where the scene is drawn: with bloom the linear HDR target (no tone mapping, linear output)
+  if (CFG.bloom) { if (!composer) buildComposer(); renderer.setRenderTarget(composer.renderTarget1); }
+  const p = renderer.compileAsync(root, camera, target);   // (its compile() runs now: the objects can hide again)
+  renderer.setRenderTarget(null);
+  for (const o of hid) o.visible = false;
+  return p;
+}
+async function warmShaders() {
+  if (QS.get('warm') === '0') { SHADERS_READY = true; return; }   // (the tests skip it: SwiftShader compiles synchronously, ~4 s a boot)
   const g = new THREE.Group();
   for (const k of ['cruise', 'ballistic', ...Object.keys(ENEMY_TYPES), ...Object.keys(HELI_TYPES), ...Object.keys(ARMOR_TYPES)]) g.add(enemyMesh(k));
-  scene.add(g); renderer.compile(scene, camera); scene.remove(g);
+  const spots = SEARCHLIGHTS.filter(s => s.light).map(s => s.light), flip = () => spots.forEach(l => { l.visible = !l.visible; });
+  try {
+    const a = compileVisible(scene), b = compileVisible(g, scene); flip(); const c = compileVisible(scene), d = compileVisible(g, scene); flip();
+    await Promise.all([a, b, c, d]);
+  } catch (e) { console.warn('shader warm-up', e); }
+  // one frame with the enemies in view (the camera's middle): their shadow-pass (depth) programs, which compile() doesn't
+  // make, and the post-processing passes
+  g.position.copy(CAM_TGT); g.children.forEach((m, i) => m.position.set((i % 6 - 2.5) * 4, 6, Math.floor(i / 6) * 4 - 4));
+  scene.add(g); renderFrame(); scene.remove(g); renderFrame();
+  SHADERS_READY = true;
 }
 
 /* ---- air wing from the per-type counts (a fresh build: everything starts at its home) ---- */
@@ -904,6 +931,7 @@ let frameDue = 0;
 function frame(ms) {
   requestAnimationFrame(frame);
   if (paused) { lastMs = ms; return; }
+  if (!SHADERS_READY) { if (RT() > 15) SHADERS_READY = true; else { lastMs = ms; return; } }   // (compiling under the splash; never stuck behind it)
   if (fpsLimit > 0) {
     // due times advance in whole intervals, so the limit holds on any refresh rate (75 / 144 Hz…)
     if (ms < frameDue - 2) return;
@@ -937,7 +965,7 @@ const TIME_SCALE = Math.max(1, Math.round(parseFloat(QS.get('ts') || '1')));
 let splash = document.getElementById('splash');
 function step(dt) {
   T += dt;
-  if (splash && T > 3.2) { const s = splash; splash = null; s.classList.add('off'); setTimeout(() => s.remove(), 700); }
+  if (splash && T > 3.2 && SHADERS_READY) { const s = splash; splash = null; s.classList.add('off'); setTimeout(() => s.remove(), 700); }
   updateArming();
   updateSite(dt);
   updateMounts(dt);

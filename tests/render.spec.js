@@ -90,6 +90,19 @@ test('bloom: the night lights glow; toggling it renders without GL errors, count
   expect(r.true.tex, 'the bloom targets are kept, not rebuilt').toBe(await wp.run(() => { __t.props({ bloom: false }); __t.props({ bloom: true }); __t.render(); return renderer.info.memory.textures; }));
 });
 
+test('the shaders are compiled under the splash: the first frame and a fight add no programs', async ({ wp }) => {
+  await wp.boot({ warm: true });
+  const p0 = await wp.run(() => renderer.info.programs.length);
+  await wp.run(() => __t.render());
+  expect(await wp.run(() => renderer.info.programs.length), 'the first frame').toBe(p0);
+  // a fight: waves, armour, helicopters, missiles, tracers, flashes, smoke, craters, fires (as at night, the lamps on)
+  await wp.run(() => { __t.forceFight(); STRESS.level = 0.8; });
+  for (let i = 0; i < 12; i++) { await wp.sim(5, { audio: true }); await wp.run(() => __t.render()); }
+  const r = await wp.run(() => ({ p: renderer.info.programs.length, kinds: [...new Set(ENEMIES.map(e => e.kind))] }));
+  expect(r.kinds.length, 'the fight is on').toBeGreaterThan(0);
+  expect(r.p, `programs after a fight (${r.kinds})`).toBeLessThanOrEqual(p0 + 2);
+});
+
 test('shadows darken the ground, and the shadow camera covers the whole screen', async ({ wp }) => {
   await wp.boot();
   await wp.sim(3);
