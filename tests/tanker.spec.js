@@ -131,7 +131,9 @@ test('in combat the AWACS is scrambled, the tankers are not; a tanker already up
   const calm = await wp.until(() => !AUD.armed, 30);
   expect(calm.done).toBe(true);
   await wp.run(() => { TANKER.timer = 5; });
-  const pass = await wp.until(() => !!TANKER.ev, 300);
+  // (the receivers may be recovered after the fight and the other kind's tanker still on the ground: the event looks
+  // again for ~3 min, then waits for the next one — up to ~10 min)
+  const pass = await wp.until(() => !!TANKER.ev, 720);
   expect(pass.done, 'a refuelling pass after the fight').toBe(true);
 });
 

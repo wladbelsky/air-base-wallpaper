@@ -97,7 +97,7 @@ const TERRAIN = {
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i), n = vnoise(x / 38, z / 38, 3) * 0.6 + vnoise(x / 11, z / 11, 7) * 0.4;
       const k = 0.82 + n * 0.32 - (insideFence(x, z) && S.veg !== 'fir' ? 0.06 : 0);
-      col.setXYZ(i, k, k, k);
+      const kl = Math.pow(k, 2.2); col.setXYZ(i, kl, kl, kl);   // (vertex colours are linear: the same patches as an sRGB k)
     }
     col.needsUpdate = true;
     if (this.tex) this.tex.dispose();
@@ -115,7 +115,7 @@ const TERRAIN = {
       g.fillRect(x, y, w, h); if (x + w > 256) g.fillRect(x - 256, y, w, h); if (y + h > 256) g.fillRect(x, y - 256, w, h);
     }
     g.globalAlpha = 1;
-    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(60, 60); t.anisotropy = 4;
+    const t = srgbTex(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(60, 60); t.anisotropy = 4;
     return t;
   },
   buildVeg(season) {

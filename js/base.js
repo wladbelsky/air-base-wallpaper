@@ -105,7 +105,7 @@ function slab(p, x0, z0, x1, z1, y, c) { const m = box(p, x1 - x0, 0.06, z1 - z0
 function textDecal(p, text, w, h, x, y, z, rotY) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 128;
   const g = c.getContext('2d'); g.font = 'bold 100px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#e6e6de'; g.fillText(text, 128, 70);
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshPhongMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 }));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshPhongMaterial({ map: srgbTex(c), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 }));
   m.rotation.set(-Math.PI / 2, 0, rotY || 0); m.position.set(x, y, z); m.receiveShadow = true; p.add(m); return m;
 }
 /* what an aircraft in flight keeps clear of (Aircraft.clearRoofs): the buildings' boxes [x0, x1, z0, z1, top, group] —

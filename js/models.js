@@ -121,13 +121,13 @@ function navLights(parent, list, blink, scale) {
 const SEARCHLIGHTS = [];
 function coneMaterial(color, len) {
   return new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: 0 }, uLen: { value: len } },
+    uniforms: { uColor: { value: new THREE.Color(color).convertLinearToSRGB() /* an additive glow written straight to the sRGB screen */ }, uOpacity: { value: 0 }, uLen: { value: len } },
     vertexShader: `uniform float uLen; varying float vD; varying float vRim;
       void main(){ vD = position.z/uLen; vec3 n = normalize(normalMatrix*normal); vRim = abs(n.z);
       gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
     fragmentShader: `uniform vec3 uColor; uniform float uOpacity; varying float vD; varying float vRim;
       void main(){ float d = clamp(vD,0.0,1.0); float a = uOpacity*pow(1.0-d,1.7)*(0.25+0.75*pow(vRim,1.3)); gl_FragColor = vec4(uColor*a,1.0); }`,
-    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false
   });
 }
 function makeSearchlight(parent, x, y, z, opts) {
@@ -135,7 +135,7 @@ function makeSearchlight(parent, x, y, z, opts) {
   const holder = new THREE.Object3D(); holder.position.set(x, y, z); parent.add(holder);
   let light = null;
   if (!o.noLight) {   // real light is optional: many spotlights get expensive on the GPU
-    light = new THREE.SpotLight(o.color, 0, o.len * 2.2, o.angle, 0.45, 1.0);
+    light = new THREE.SpotLight(o.color, 0, o.len * 2.2, o.angle, 0.45, 2);   // (intensity × SPOT_K: updateLights)
     holder.add(light);
     const target = new THREE.Object3D(); target.position.set(0, 0, 10); holder.add(target); light.target = target;
   }

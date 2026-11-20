@@ -63,6 +63,8 @@ const SPRITE_FS = `uniform sampler2D map; varying vec2 vUv; varying vec4 vCol;
   #include <fog_pars_fragment>
   void main() {
     gl_FragColor = vCol * texture2D(map, vUv);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
     #include <fog_fragment>
   }`;
 const _sfxFwd = new V3(), farFirst = (a, b) => b.depth - a.depth;
@@ -209,6 +211,6 @@ class FlashLights {
     it.l.position.copy(p); it.t = it.max = dur; it.I = I;
   }
   update(dt, nightBoost) {
-    for (const it of this.items) { it.t = Math.max(0, it.t - dt); it.l.intensity = it.t > 0 ? it.I * (it.t / it.max) * nightBoost : 0; }
+    for (const it of this.items) { it.t = Math.max(0, it.t - dt); it.l.intensity = it.t > 0 ? it.I * FLASH_K * (it.t / it.max) * nightBoost : 0; }
   }
 }

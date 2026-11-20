@@ -70,6 +70,7 @@ function init() {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, precision: 'highp', powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.toneMapping = THREE.NeutralToneMapping;   // bright lights / flashes roll off instead of clipping; colours below ~0.8 untouched
   scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x9fc0da, 300, 800);
   camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 700);
 
@@ -201,10 +202,13 @@ function updateEnvironment() {
   const sunDir = dirOf(sp.az, Math.max(sp.elev, 7)), moonDir = dirOf(sp.az + 160, 42);
   const dir = sunDir.lerp(moonDir, smoothstep(-2, -7, sp.elev)).normalize();
   sunLight.position.copy(dir).multiplyScalar(150); sunLight.target.position.set(0, 0, 0);
-  sunLight.color.copy(k.sun); sunLight.intensity = k.si;
+  sunLight.color.copy(k.sun); sunLight.intensity = sunLightK(k.si, k.hi);
   // the ground's bounce light takes the season's colour (snow: bright), as dark as the hour wants
   _hg.setHex(S.hg).multiplyScalar(lerp(0.35, 1, smoothstep(-8, 12, sp.elev)));
-  hemi.color.copy(k.hs); hemi.groundColor.copy(k.hg).lerp(_hg, 0.6); hemi.intensity = k.hi;
+  hemi.color.copy(k.hs); hemi.groundColor.copy(k.hg).lerp(_hg, 0.6); hemi.intensity = skyLight(k.hi);
+  // shadows: crisp under a high sun, soft and long at dusk; fainter by moonlight
+  sunLight.shadow.radius = lerp(3.5, 1.3, smoothstep(4, 35, sp.elev));
+  sunLight.shadow.intensity = lerp(0.8, 1, smoothstep(-7, 2, sp.elev));
   scene.fog.color.copy(k.fog); renderer.setClearColor(k.fog);
   ENV.smokeTint.copy(k.smoke);
   ENV.dustTint.setHex(S.ground).lerp(k.smoke, 0.45);
@@ -653,7 +657,7 @@ function updateLights() {
   for (const s of SEARCHLIGHTS) {
     const on = ENV.lightsOn * s.enabled;
     // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn)
-    if (s.light) { s.light.intensity = s.o.intensity * on; s.light.visible = ENV.lightsOn > 0; }
+    if (s.light) { s.light.intensity = s.o.intensity * on * SPOT_K; s.light.visible = ENV.lightsOn > 0; }
     if (s.cone) s.cone.material.uniforms.uOpacity.value = s.o.coneOpacity * on * (0.45 + 0.55 * ENV.night);
   }
 }

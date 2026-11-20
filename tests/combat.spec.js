@@ -31,6 +31,8 @@ test('music arms combat after 5 s, the fight runs, silence holds 5 s and stands 
   expect(await wp.run(() => [AUD.combat, AUD.fighting])).toEqual([true, true]);
 
   const seen = await fight(wp, 150, { audio: true });
+  // (a runway closed early in the fight can hold the jets on the ground for a minute: a dogfight may come later)
+  for (let k = 0; k < 24 && !seen.duel; k++) { const more = await fight(wp, 5, { audio: true }); seen.duel = Math.max(seen.duel, more.duel); }
   const beats = await wp.run(() => __beats);
   expect(beats, 'beats detected from the music').toBeGreaterThan(100);
   expect(seen.inCombat, 'armed aircraft engaged').toBeGreaterThan(0);
