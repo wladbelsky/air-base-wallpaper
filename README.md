@@ -5,7 +5,7 @@
 Isometric forward air base: a runway, hardened aircraft shelters, hangars, a control tower, air defence and tanks on
 the perimeter, and a configurable air wing that taxis, takes off and lands. Everything reacts to the music playing on
 your PC: air defence, tanks and aircraft fire to the beat, Ace Combat style radio subtitles run at the top of the
-screen, the time of day follows your PC clock and the ground follows the seasons.
+screen, the time of day follows your PC clock, the ground follows the seasons and the weather changes.
 The sequel to [Carrier Strike Group](https://github.com/wladbelsky/carrier-wallpaper).
 
 ![Autumn afternoon air raid: jets fighting low over the shelters, the fuel farm burning](screenshots/dogfight.jpg)
@@ -13,9 +13,13 @@ The sequel to [Carrier Strike Group](https://github.com/wladbelsky/carrier-wallp
 - **Steam Workshop:** https://steamcommunity.com/sharedfiles/filedetails/?id=3829499782
 - **Live demo** (runs in the browser): https://wladbelsky.github.io/air-base-wallpaper/
 
-| Winter night under attack | Refuelling pass (KC-46 and F-16s) | Emergency on 09R while 09L keeps launching |
-|---|---|---|
-| ![Night attack](screenshots/night.jpg) | ![Refuelling pass](screenshots/refuel.jpg) | ![Emergency landing](screenshots/emergency.jpg) |
+| Winter night under attack | Summer night thunderstorm |
+|---|---|
+| ![Night attack](screenshots/night.jpg) | ![Thunderstorm: rain, wet paving and a lightning strike](screenshots/storm.jpg) |
+
+| Refuelling pass (KC-46 and F-16s) | Emergency on 09R while 09L keeps launching |
+|---|---|
+| ![Refuelling pass](screenshots/refuel.jpg) | ![Emergency landing](screenshots/emergency.jpg) |
 
 ## Install
 
@@ -47,7 +51,17 @@ From source:
   and big sky searchlights sweeping the sky (in a fight they follow the enemy aircraft).
 - **Seasons** (property **Season**: by the PC date, or fixed): winter — snow, snowy firs and roofs, snowfall;
   spring — green grass and trees; summer — desert, saguaro cacti, rocks and dry shrubs; autumn — golden and red trees,
-  falling leaves. **Snowfall / falling leaves** can be switched off.
+  falling leaves. **Seasonal snowfall / falling leaves** can be switched off.
+- **Weather** (property **Weather**): *Default* is a clear sky as always; *Rain*, *Fog* or *Thunderstorm* fixed; or
+  *Changing*: a new kind every 15–40 minutes, by the season (mostly clear in the desert summer, rain and fog in
+  autumn). Rain falls in streaks slanted by the wind and splashes on the concrete, which turns dark and glossy (and dries
+  off slowly afterwards); fog closes in, banks of mist drift low over the ground and the runway and approach lights come
+  on by day; a thunderstorm brings driving rain, gusts that push the smoke around and lightning strikes around the base.
+  Overcast skies dim the sun and soften the shadows. In winter rain falls as heavy snow. Only the look changes: flights
+  and the fight go on as usual.
+- **Lighting:** colours are lit in linear space and tone mapped, so floodlights, fires and flashes no longer clip to
+  white; shadows are crisp under a high sun, long and soft at dusk, faint by moonlight. **Glow (bloom)** puts a halo
+  around the lights, fires, explosions, tracers and lightning (on by default).
 - **Base name** property: the tower's radio callsign and the panel title (default SAND ISLAND).
 - **Runways:** the north runway (09L) takes the departures and the south one (09R) the arrivals, which then hold short
   of the north runway on the connector and cross it when the tower clears them.
@@ -187,19 +201,21 @@ changes the radio tone (calm → tense → panic), enemy wave size and spawn rat
 
 ## Properties
 
-Camera zoom and rotation, time of day (PC clock or fixed hour), audio sensitivity, fire intensity, fly-by frequency,
-automatic flight ops, missions, camera shake, enemies, season, snowfall / leaves, shadows, the control panel (show,
-position, size, colour), the counts of every aircraft type, session memory, subtitles and the base name.
+Camera zoom and rotation, time of day (PC clock or fixed hour), glow (bloom), audio sensitivity, fire intensity,
+fly-by frequency, automatic flight ops, missions, camera shake, enemies, season, weather, snowfall / leaves, shadows, the
+control panel (show, position, size, colour), the counts of every aircraft type, session memory, subtitles and the base
+name.
 
 ## Development
 
-Plain JavaScript, no build step: three.js r149 is vendored. See `CLAUDE.md` for the code layout. Browser preview:
+Plain JavaScript, no build step: three.js r187 is vendored as one bundle (`js/three.r187.min.js`, rebuilt from npm with
+`npm run vendor:three`). See `CLAUDE.md` for the code layout. Browser preview:
 
 ```bash
 python -m http.server 8765
 ```
 
-then open `http://localhost:8765/` (`?hour=22`, `?season=winter`, `?zoom=60`, `?demo=1`). The automated tests run in
+then open `http://localhost:8765/` (`?hour=22`, `?season=winter`, `?weather=storm`, `?zoom=60`, `?demo=1`). The automated tests run in
 Docker (Playwright):
 
 ```bash
