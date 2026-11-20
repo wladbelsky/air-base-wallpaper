@@ -162,9 +162,41 @@ const WE_PROPERTIES = {
  },
  "weather": {
   "order": 21,
-  "text": "Snowfall / falling leaves",
+  "text": "Seasonal snowfall / falling leaves",
   "type": "bool",
   "value": true
+ },
+ "weathermode": {
+  "order": 21,
+  "text": "Weather",
+  "type": "combo",
+  "value": "default",
+  "options": [
+   {
+    "label": "Default (clear, as always)",
+    "value": "default"
+   },
+   {
+    "label": "Changing (auto cycle)",
+    "value": "auto"
+   },
+   {
+    "label": "Clear",
+    "value": "clear"
+   },
+   {
+    "label": "Rain",
+    "value": "rain"
+   },
+   {
+    "label": "Fog",
+    "value": "fog"
+   },
+   {
+    "label": "Thunderstorm",
+    "value": "storm"
+   }
+  ]
  },
  "shadows": {
   "order": 22,

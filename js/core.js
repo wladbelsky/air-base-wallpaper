@@ -31,6 +31,7 @@ const CFG = {
   baseName: 'SAND ISLAND',   // the base's radio name (tower, panel)
   season: 'auto',     // auto (PC date) / spring / summer / autumn / winter
   weather: true,      // snowfall in winter, falling leaves in autumn
+  weatherMode: 'default',   // 'default' (clear, as always) / 'auto' (a cycle) / 'clear' / 'rain' / 'fog' / 'storm' (weather.js)
   enemies: true,      // enemy aircraft, missiles and armour during combat
   shake: true,        // subtle camera shake on heavy hits
   missions: 5,        // how often flights leave on missions (0 = never)

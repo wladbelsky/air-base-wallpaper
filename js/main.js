@@ -5,13 +5,14 @@ let AIRCRAFT = [], FLYBYS = [], ALL_CIWS = [], ALL_AA = [], ALL_TANKS = [], ALL_
 const FX = {};
 let airWingDirty = false;
 let T = 0, paused = false, fpsLimit = 0, lastMs = 0, ready = false;
-const ENV = { elev: 30, lightsOn: 0, night: 0, ppu: 10, smokeTint: new THREE.Color(0xbbbbbb), dustTint: new THREE.Color(0xa89878) };
+const ENV = { elev: 30, lightsOn: 0, lamps: 0, night: 0, hemiI: 1, ppu: 10, fogTint: new THREE.Color(0x9fc0da), smokeTint: new THREE.Color(0xbbbbbb), dustTint: new THREE.Color(0xa89878) };
 
 /* ---- URL test parameters (for browser preview) ---- */
 const QS = new URLSearchParams(location.search);
 if (QS.has('hour')) { CFG.timeMode = 'fixed'; CFG.fixedHour = parseFloat(QS.get('hour')); }
 if (QS.has('zoom')) CFG.zoom = parseFloat(QS.get('zoom'));
 if (QS.has('season')) CFG.season = QS.get('season');
+if (QS.has('weather')) CFG.weatherMode = QS.get('weather');
 
 /* ---- Wallpaper Engine properties ---- */
 function rgbFromWE(str) { return str.split(' ').map(c => Math.round(clamp(parseFloat(c), 0, 1) * 255)).join(','); }
@@ -35,6 +36,7 @@ window.wallpaperPropertyListener = {
     if (has('panelscale')) CFG.panelScale = p.panelscale.value;
     if (has('season') && !QS.has('season')) CFG.season = p.season.value;
     if (has('weather')) CFG.weather = p.weather.value;
+    if (has('weathermode') && !QS.has('weather')) CFG.weatherMode = p.weathermode.value;
     if (has('uicolor')) CFG.uiColor = rgbFromWE(p.uicolor.value);
     if (has('subtitles')) CFG.subtitles = p.subtitles.value;
     if (has('savestate')) { CFG.saveState = p.savestate.value; if (!CFG.saveState) PERSIST.clear(); }
@@ -98,6 +100,7 @@ function init() {
   FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 420, true);   // (a burning structure keeps ~50 up)
   FX.scorch = new Scorch(scene, 120);
   FX.lights = new FlashLights(scene, 4);
+  WEATHER.build();
   // shells, rockets and bombs that reach the ground: dust, or a bomb hitting a structure
   FX.tracers.onSplash = (p, big) => {
     if (big >= 2.3) enemyBomb(p); else groundHit(p, big);
@@ -236,7 +239,7 @@ function updateCamera() {
   camera.left = -viewH * aspect / 2; camera.right = viewH * aspect / 2; camera.top = viewH / 2; camera.bottom = -viewH / 2;
   camera.updateProjectionMatrix();
   ENV.ppu = h / viewH;
-  scene.fog.near = CAM_D - 30; scene.fog.far = CAM_D + 260;
+  WEATHER.applyFog();
   updateCameraPose();
 }
 const CAM_D = 160, CAM_TGT = new V3(0, 2.5, -4);
@@ -258,7 +261,7 @@ function updateEnvironment() {
   const S = SEASONS[season];
   const sp = sunPosition(getNow(), CFG.lat, CFG.lon);
   ENV.elev = sp.elev;
-  const k = skyAt(sp.elev);
+  const k = skyAt(sp.elev); WEATHER.apply(k, sp.elev);
   const dirOf = (az, el) => new V3(Math.sin(az * DEG) * Math.cos(el * DEG), Math.sin(el * DEG), -Math.cos(az * DEG) * Math.cos(el * DEG));
   const sunDir = dirOf(sp.az, Math.max(sp.elev, 7)), moonDir = dirOf(sp.az + 160, 42);
   const dir = sunDir.lerp(moonDir, smoothstep(-2, -7, sp.elev)).normalize();
@@ -266,17 +269,18 @@ function updateEnvironment() {
   sunLight.color.copy(k.sun); sunLight.intensity = sunLightK(k.si, k.hi);
   // the ground's bounce light takes the season's colour (snow: bright), as dark as the hour wants
   _hg.setHex(S.hg).multiplyScalar(lerp(0.35, 1, smoothstep(-8, 12, sp.elev)));
-  hemi.color.copy(k.hs); hemi.groundColor.copy(k.hg).lerp(_hg, 0.6); hemi.intensity = skyLight(k.hi);
+  hemi.color.copy(k.hs); hemi.groundColor.copy(k.hg).lerp(_hg, 0.6); hemi.intensity = ENV.hemiI = skyLight(k.hi);
   // shadows: crisp under a high sun, soft and long at dusk; fainter by moonlight
-  sunLight.shadow.radius = lerp(3.5, 1.3, smoothstep(4, 35, sp.elev));
-  sunLight.shadow.intensity = lerp(0.8, 1, smoothstep(-7, 2, sp.elev));
-  scene.fog.color.copy(k.fog); renderer.setClearColor(k.fog);
+  sunLight.shadow.radius = lerp(3.5, 1.3, smoothstep(4, 35, sp.elev)) + 4 * WEATHER.oc;                  // (overcast: soft
+  sunLight.shadow.intensity = lerp(0.8, 1, smoothstep(-7, 2, sp.elev)) * (1 - 0.75 * WEATHER.oc);       //  and faint)
+  scene.fog.color.copy(k.fog); renderer.setClearColor(k.fog); ENV.fogTint.copy(k.fog);
   ENV.smokeTint.copy(k.smoke);
   ENV.dustTint.setHex(S.ground).lerp(k.smoke, 0.45);
   ENV.lightsOn = 1 - smoothstep(-3, 5, sp.elev);
+  ENV.lamps = Math.max(ENV.lightsOn, WEATHER.lamps());   // lamps on in the fog / a storm by day too (not the real spot lights: ENV.lightsOn)
   ENV.night = 1 - smoothstep(-10, 1, sp.elev);
   updateBloom();
-  BASE.winMat.emissive.setHex(0xffc27a).multiplyScalar((0.75 + 0.85 * HDR) * ENV.lightsOn);   // HDR: lit windows glow (bloom)
+  BASE.winMat.emissive.setHex(0xffc27a).multiplyScalar((0.75 + 0.85 * HDR) * ENV.lamps);   // HDR: lit windows glow (bloom)
 }
 
 /* ---- audio ---- */
@@ -712,15 +716,15 @@ function updateSite(dt) {
 const SKY_SLEW = 0.5;   // rad/s: the sky lights' fastest swing (reached gradually: 1 rad/s²)
 function updateLights() {
   for (const m of NAV_MATS) {
-    let a = m.userData.day ? Math.max(ENV.lightsOn, 0.75) : ENV.lightsOn; const b = m.userData.blink;   // vehicle beacons flash by day too
+    let a = m.userData.day ? Math.max(ENV.lamps, 0.75) : ENV.lamps; const b = m.userData.blink;   // vehicle beacons flash by day too
     if (b) { const ph = ((T / b.period) + (b.phase || 0)) % 1; a *= ((ph + 1) % 1) < b.duty ? 1 : 0; }
-    m.opacity = a; m.size = m.userData.scale * ENV.ppu; m.color.setScalar(1 + 1.6 * HDR * ENV.lightsOn);   // HDR at night: the lamps glow (bloom)
+    m.opacity = a; m.size = m.userData.scale * ENV.ppu; m.color.setScalar(1 + 1.6 * HDR * ENV.lamps);   // HDR at night: the lamps glow (bloom)
   }
   for (const s of SEARCHLIGHTS) {
-    const on = ENV.lightsOn * s.enabled;
+    const on = ENV.lightsOn * s.enabled, beam = Math.max(ENV.lamps, ENV.lightsOn) * s.enabled * (1 + 1.2 * WEATHER.fog + 0.5 * WEATHER.rain);   // (beams thicker in fog and rain)
     // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn)
     if (s.light) { s.light.intensity = s.o.intensity * on * SPOT_K; s.light.visible = ENV.lightsOn > 0; }
-    if (s.cone) s.cone.material.uniforms.uOpacity.value = s.o.coneOpacity * on * (0.45 + 0.55 * ENV.night);
+    if (s.cone) s.cone.material.uniforms.uOpacity.value = s.o.coneOpacity * beam * (0.45 + 0.55 * Math.max(ENV.night, WEATHER.fog * 0.6));
   }
 }
 
@@ -984,6 +988,7 @@ function step(dt) {
   FX.smoke.update(dt, ENV.smokeTint, camera);
   FX.scorch.update(dt);
   FX.lights.update(dt, 0.6 + ENV.night * 0.8);
+  WEATHER.update(dt);
   TERRAIN.update(dt);
   STRESS.update(dt);
   updateCombat(dt);

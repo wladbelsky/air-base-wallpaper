@@ -10,7 +10,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 - Plain JS, no build step, no npm. `'use strict'` classic scripts sharing **global** scope
   (no modules). three.js **r149** is vendored as `js/three.min.js` — never edit it.
 - `index.html` loads scripts in dependency order (later files use globals of earlier ones):
-  `core → flightpath → models → base → terrain → airframes → effects → radio → airfield → aircraft → missions → persist → combat → airwar → tanker → groundops → main → properties → settings`,
+  `core → flightpath → models → base → terrain → airframes → effects → weather → radio → airfield → aircraft → missions → persist → combat → airwar → tanker → groundops → main → properties → settings`,
   then an inline script registers the WE audio listener (or starts the browser demo beat).
   `main.js` calls `init()` at its end, so anything `init()` needs must be defined before `main.js`.
 
@@ -41,7 +41,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=43`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=44`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).

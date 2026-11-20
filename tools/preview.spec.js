@@ -37,6 +37,13 @@ const SCENES = {
     const ev = TANKER.ev, on = document.getElementById('subs').classList.contains('on');
     return !!ev && !!ev.P && ev.kind === 'boom' && ev.tanker.hoseOut === 1 && __seen(ev.tanker.mesh.position, -0.3) && (on || tries > 900);
   } },
+  // a summer night thunderstorm: rain, wet paving, a lightning strike over the base
+  storm: { hour: 22.5, season: 'summer', before: () => { CFG.weatherMode = 'storm'; }, tries: 600, until: (tries) => {
+    const on = document.getElementById('subs').classList.contains('on'), b = WEATHER.bolt;
+    if (!b.visible || WEATHER.boltT < 0.16) return false;
+    const p = new THREE.Vector3(); b.getMatrixAt(0, new THREE.Matrix4()); for (let i = 0; i < b.count; i += 4) { const m = new THREE.Matrix4(); b.getMatrixAt(i, m); p.setFromMatrixPosition(m); if (!__seen(p.setY(0), -0.2)) return false; }
+    return on || tries > 400;
+  } },
   // a spring evening emergency: crash tenders foaming a jet stopped on the runway (the camera closes in on it)
   emergency: { hour: 19.1, season: 'spring', before: () => { CFG.missions = 0; GROUND_OPS.emTimer = 1e9; }, tries: 1200, until: (tries) => {
     if (!window.__e) {

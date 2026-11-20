@@ -175,6 +175,9 @@
     if (MISSILES.length > 300) v.push(`MISSILES ${MISSILES.length}`);
     if (PENDING.length > 300) v.push(`PENDING ${PENDING.length}`);
     if (FLYBYS.length > 8) v.push(`FLYBYS ${FLYBYS.length}`);
+    // weather (weather.js): a known kind, pools within their size
+    if (!WX_KINDS.includes(WEATHER.kind)) v.push(`weather kind ${WEATHER.kind}`);
+    if (WEATHER.drops.count > RAIN_N || WEATHER.splash.count > SPLASH_N || WEATHER.bolt.count > BOLT_N || FX.mist.live.length > MIST_N) v.push('weather pools over their size');
     if (GROUND_OPS.chutes.length > 40) v.push(`parachutes ${GROUND_OPS.chutes.length}`);
     if (GROUND_OPS.scenes.length > AIRCRAFT.length + 6) v.push(`ground scenes ${GROUND_OPS.scenes.length}`);
     if (GROUND_OPS.emerg && !inWing.has(GROUND_OPS.emerg)) v.push('emergency of an aircraft not in the air wing');

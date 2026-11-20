@@ -161,10 +161,10 @@ const TERRAIN = {
   },
   update(dt) {
     const w = this.weather; if (!w) return;
-    const on = w.kind && CFG.weather; w.pts.visible = !!on;
+    const wx = WEATHER.rain, on = w.kind && (CFG.weather || (w.kind === 'snow' && wx > 0.05)); w.pts.visible = !!on;   // (winter rain / storms: snow, heavier)
     if (!on) return;
     const P = w.pts.geometry.attributes.position.array, C = w.pts.geometry.attributes.color.array, snow = w.kind === 'snow';
-    w.acc += dt * (snow ? 220 : 26);
+    w.acc += dt * (snow ? 220 * (1 + 3 * wx) : 26);
     while (w.acc > 1) {
       w.acc--; const i = w.next; w.next = (w.next + 1) % w.n;
       const p = AIRWAR.groundAt(rand(-1.15, 1.15), rand(-1.2, 1.3), 0);
