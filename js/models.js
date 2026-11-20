@@ -7,6 +7,7 @@ function M(color, o) {
     MAT_CACHE[k] = new THREE.MeshPhongMaterial(Object.assign({ color: color, flatShading: true, shininess: 8, specular: 0x151515 }, o || {}));
     MAT_CACHE[k].userData.shared = true;   // cached: never disposed with a model
     if (!o) MAT_CACHE[k].userData.plain = true;   // just a colour: mergeStatic may bake it into vertex colours (PLAIN_MAT)
+    MAT_CACHE[k].userData.mopts = o ? JSON.stringify(o) : '';   // never changed after: BATCH draws all of one options set in one batch (colour per instance)
   }
   return MAT_CACHE[k];
 }
@@ -32,15 +33,14 @@ function mergeStatic(root, dynamic) {
     for (const c of o.children) {
       if (skip.has(c)) { nested.push(c); continue; }
       const mt = c.material;
-      if (c.isMesh && !c.children.length && mt && !Array.isArray(mt) && !mt.transparent && !mt.map && c.geometry.attributes.normal) {
+      if (c.isMesh && !c.isInstancedMesh && !c.isBatchedMesh && !c.children.length && mt && !Array.isArray(mt) && !mt.transparent && !mt.map && c.geometry.attributes.normal) {
         const key = (mt.userData.plain ? 'plain' : mt.uuid) + '|' + c.castShadow + '|' + c.receiveShadow;
         (groups.get(key) || groups.set(key, []).get(key)).push(c);
       }
       walk(c);
     }
   })(root);
-  for (const list of groups.values()) {
-    if (list.length < 2) continue;
+  for (const list of groups.values()) {   // (a lone mesh too: the merged one is non-indexed and batched like the rest)
     const vc = list.some(m => m.material !== list[0].material), pos = [], nor = [], col = [];   // several colours: baked into the vertices
     for (const m of list) {
       const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
@@ -55,10 +55,102 @@ function mergeStatic(root, dynamic) {
     if (vc) geo.setAttribute('color', new THREE.BufferAttribute(concatF32(col), 3));
     const mesh = new THREE.Mesh(geo, vc ? PLAIN_MAT : list[0].material);
     mesh.castShadow = list[0].castShadow; mesh.receiveShadow = list[0].receiveShadow;
+    mesh.userData.batched = true; mesh.layers.set(BATCH_LAYER);   // drawn by its batch (BATCH, below), not on its own
     root.add(mesh);
   }
   for (const d of nested) mergeStatic(d, dynamic);
 }
+/* ===== Batched drawing of the merged static meshes (three.js BatchedMesh) =====
+   mergeStatic leaves one merged mesh per material in every model / dynamic node; there are hundreds of them (every
+   aircraft, vehicle, enemy, the base). They stay in the scene graph as they are — visibility, matrixWorld, the doors,
+   clones, Box3 all work as before — but on BATCH_LAYER, which the camera doesn't draw. BATCH.sync() (renderFrame, before
+   the render) gives each one an instance in a shared BatchedMesh per (material, shadows, vertex colours) and copies its
+   world matrix / visibility: a batch is one draw call (WEBGL_multi_draw) for all its instances.
+   - A geometry is added to its batch once (enemy / vehicle clones share their template's), removed when it is disposed
+     (disposeTree): its instances go with it.
+   - A mesh not drawn this frame (hidden, behind a shut door, not in the scene) has its instance hidden; one out of the
+     scene for good (a dropped enemy clone, a pooled vehicle) gives its instance back after ~1 s (taken again when it is
+     back).
+   - A mesh whose material was swapped (wreckArmor) leaves its batch and is drawn on its own again (layer 0).
+   - The M(colour, options) materials (cached, never changed) share one batch per options set: its material is
+     M(white, options), the colour goes per instance. Others (PLAIN_MAT, the seasonal roofs, windows) get one each.
+   - The batches grow (instances, vertices: optimize first) and never shrink; an empty one is disposed. */
+const BATCH_LAYER = 1;
+const BATCH = {
+  groups: new Map(), recs: new WeakMap(), live: [], frame: 0, gcT: 0,
+  key(m) { const mo = m.material.userData.mopts; return (mo != null ? 'M' + mo : m.material.uuid) + '|' + m.castShadow + '|' + m.receiveShadow + '|' + !!m.geometry.attributes.color; },
+  group(m) {
+    const k = this.key(m); let G = this.groups.get(k);
+    if (!G) {
+      const mo = m.material.userData.mopts, bm = new THREE.BatchedMesh(64, 32768, 0, mo != null ? M(0xffffff, mo ? JSON.parse(mo) : undefined) : m.material);
+      bm.castShadow = m.castShadow; bm.receiveShadow = m.receiveShadow;
+      bm.frustumCulled = false; bm.perObjectFrustumCulled = true; bm.sortObjects = false;   // (instances move: no whole-batch bounds; opaque, unsorted)
+      bm.userData.batch = true; scene.add(bm);
+      G = { bm, geos: new Map(), k, tint: mo != null }; this.groups.set(k, G);
+    }
+    return G;
+  },
+  /* the batch's id of a geometry, added on first use (room made by optimize(), else by growing the buffers) */
+  geoId(G, geo) {
+    let e = G.geos.get(geo);
+    if (e) return e;
+    const bm = G.bm, n = geo.attributes.position.count;
+    let id;
+    try { id = bm.addGeometry(geo); }
+    catch (err) {
+      bm.optimize();
+      try { id = bm.addGeometry(geo); }
+      catch (err2) { bm.setGeometrySize(Math.max(bm._maxVertexCount * 2, bm._maxVertexCount + n * 2), 0); id = bm.addGeometry(geo); }
+    }
+    e = { id, recs: new Set() }; G.geos.set(geo, e);
+    geo.addEventListener('dispose', () => this.dropGeometry(G, geo));
+    return e;
+  },
+  dropGeometry(G, geo) {
+    const e = G.geos.get(geo); if (!e) return;
+    G.bm.deleteGeometry(e.id);                                   // (deletes its instances)
+    for (const r of e.recs) { r.dead = true; this.recs.delete(r.m); }
+    G.geos.delete(geo); this.live = this.live.filter(r => !r.dead);
+    if (!G.geos.size) { scene.remove(G.bm); G.bm.dispose(); this.groups.delete(G.k); }   // (the materials of a rebuilt model: its batch is gone)
+  },
+  add(m) {
+    const G = this.group(m), e = this.geoId(G, m.geometry), bm = G.bm;
+    let inst;
+    try { inst = bm.addInstance(e.id); }
+    catch (err) { bm.setInstanceCount(bm.maxInstanceCount * 2); inst = bm.addInstance(e.id); }
+    if (G.tint) bm.setColorAt(inst, m.material.color);
+    const r = { m, G, e, inst, mat: m.material, seen: 0, seenT: T, vis: true, dead: false };
+    e.recs.add(r); this.recs.set(m, r); this.live.push(r);
+    return r;
+  },
+  remove(r) {
+    if (r.dead) return;
+    r.dead = true; r.G.bm.deleteInstance(r.inst); r.e.recs.delete(r); this.recs.delete(r.m);
+  },
+  /* before every render (scene.updateMatrixWorld() done): every merged mesh in view → its instance */
+  sync() {
+    const f = ++this.frame;
+    scene.traverseVisible(o => {
+      if (!o.isMesh || !o.userData.batched) return;
+      let r = this.recs.get(o);
+      if (r && o.material !== r.mat) { this.remove(r); o.userData.batched = false; o.layers.enable(0); return; }   // its material swapped: drawn on its own
+      if (!r) r = this.add(o);
+      r.seen = f; r.seenT = T; r.G.bm.setMatrixAt(r.inst, o.matrixWorld);
+      if (!r.vis) { r.vis = true; r.G.bm.setVisibleAt(r.inst, true); }
+    });
+    let dead = false; const gc = T - this.gcT > 0.5; if (gc) this.gcT = T;
+    for (const r of this.live) {
+      if (r.seen === f || r.dead) continue;
+      if (r.vis) { r.vis = false; r.G.bm.setVisibleAt(r.inst, false); }
+      // out of the scene for ~1 s (sim time; a dropped clone, a pooled vehicle): the instance is freed (taken again on its return)
+      if (gc && T - r.seenT > 1) { let p = r.m; while (p.parent) p = p.parent; if (p !== scene) { this.remove(r); dead = true; } }
+    }
+    if (dead) this.live = this.live.filter(r => !r.dead);
+  },
+  /* draw calls / instances / vertices in the batches (tests, the measurements in CLAUDE.md) */
+  stats() { let n = 0, v = 0; for (const G of this.groups.values()) { n += G.bm._instanceInfo.filter(i => i.active).length; v += G.bm._maxVertexCount; } return { batches: this.groups.size, instances: n, vertices: v, live: this.live.length }; }
+};
+
 const mm = c => (c && c.isMaterial) ? c : M(c);
 function shade(m, cast) { m.castShadow = cast !== false; m.receiveShadow = true; return m; }
 function box(p, w, h, d, c, x, y, z) { const m = shade(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mm(c))); m.position.set(x, y, z); p.add(m); return m; }

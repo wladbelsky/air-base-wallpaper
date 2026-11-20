@@ -103,6 +103,39 @@ test('the shaders are compiled under the splash: the first frame and a fight add
   expect(r.p, `programs after a fight (${r.kinds})`).toBeLessThanOrEqual(p0 + 2);
 });
 
+test('batching: the merged meshes draw through a few BatchedMeshes that follow them; a rebuild frees what it drops', async ({ wp }) => {
+  await wp.boot();
+  await wp.sim(20);
+  const r = await wp.run(() => {
+    __t.props({ bloom: false, shadows: false }); __t.render();
+    const main = renderer.info.render.calls, s0 = BATCH.stats();
+    // an aircraft's merged meshes: their instances carry its world matrices; hidden with it
+    const a = AIRCRAFT.find(x => x.mesh.visible), ms = []; a.mesh.traverse(o => { if (o.userData.batched) ms.push(o); });
+    const m4 = new THREE.Matrix4(), rec = BATCH.recs.get(ms[0]);
+    rec.G.bm.getMatrixAt(rec.inst, m4);
+    const same = m4.elements.every((v, i) => Math.abs(v - ms[0].matrixWorld.elements[i]) < 1e-5);
+    a.mesh.visible = false; __t.render(); const hidden = !rec.G.bm.getVisibleAt(rec.inst); a.mesh.visible = true; __t.render();
+    const onLayer = ms.every(o => !o.layers.test(camera.layers));
+    buildAirWing(); for (let i = 0; i < 6; i++) { step(0.5); __t.render(); }
+    // (the count varies: aircraft behind a shut door were never drawn, so never batched) — what the batches hold is alive
+    const out = BATCH.live.filter(r => { let p = r.m; while (p.parent) p = p.parent; return p !== scene; }).length;
+    const disposed = [...BATCH.groups.values()].reduce((n, G) => n + [...G.geos.keys()].filter(g => g.__disposed).length, 0);
+    return { main, s0, s1: BATCH.stats(), n: ms.length, same, hidden, onLayer, out, disposed, empty: [...BATCH.groups.values()].filter(G => !G.geos.size).length };
+  });
+  expect(r.n).toBeGreaterThan(0);
+  expect(r.onLayer, 'not drawn on their own').toBe(true);
+  expect(r.same, 'instance matrix = the mesh\'s world matrix').toBe(true);
+  expect(r.hidden, 'hidden with its aircraft').toBe(true);
+  expect(r.main, 'main-pass draw calls').toBeLessThan(220);
+  expect(r.s1.batches).toBeLessThanOrEqual(r.s0.batches);
+  expect(r.s1.instances, 'one instance per live record').toBe(r.s1.live);
+  expect(r.out, 'instances of meshes gone from the scene').toBe(0);
+  expect(r.disposed, 'geometries of the disposed aircraft still in a batch').toBe(0);
+  expect(r.empty).toBe(0);
+  const g = await wp.run(() => __t.geometries());
+  expect(g.leaked, g.leakedTypes.join()).toBe(0);
+});
+
 test('shadows darken the ground, and the shadow camera covers the whole screen', async ({ wp }) => {
   await wp.boot();
   await wp.sim(3);

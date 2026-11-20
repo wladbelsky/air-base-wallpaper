@@ -47,7 +47,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=44`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=45`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -476,6 +476,15 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   (mount yaw/pitch/barrel groups, radars, door leaves / panels, gear, rotors, blades, props, boom / hoses, searchlight
   holders, enemy rotors / turrets) **must be listed as dynamic**, or it gets baked into the static mesh. Code must not keep
   references to static meshes after the builder returns.
+- **Batched drawing** (`BATCH`, models.js): every merged mesh (`userData.batched`, on `BATCH_LAYER`, which the camera
+  doesn't draw) stays in the scene graph as before — visibility, `matrixWorld`, doors, clones, Box3, raycasts (enable the
+  layer) work — and `BATCH.sync()` (in `renderFrame`, after `scene.updateMatrixWorld()`: `matrixWorldAutoUpdate` is off)
+  gives it an instance in a shared `BatchedMesh` (one draw call per batch, WEBGL_multi_draw) and copies its world matrix
+  / visibility. Batches: one per `M(colour, options)` options set (material `M(white, options)`, colour per instance —
+  so `M()` materials must never be changed), one per other material (`PLAIN_MAT`, seasonal roofs, windows). A geometry
+  enters its batch once (clones share it) and leaves it when disposed; an instance whose mesh left the scene for ~1 s of
+  sim time is freed; an empty batch is disposed; a mesh whose material is swapped (`wreckArmor`) is drawn on its own.
+  Only what is drawn gets an instance (an aircraft behind a shut door gets one when it comes out).
 - Many repeated objects are one `InstancedMesh` (vegetation, fence posts, stand marks, helicopter pads, scorch marks, tracers).
 - `shade()` sets `castShadow`/`receiveShadow` per mesh; don't blanket-enable shadows with `traverse`.
 - Shared scratch vectors (`_v`, `_p`, `_d`, `_al`…) must not be passed into a function that also
@@ -496,8 +505,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   hundreds of ms each in WE's ANGLE / D3D).
 - **The panel's DOM** is written only where a value changed (`setTxt` / `setCls`, the clock once a minute, nothing
   while `showPanel` is off; the meter in whole percent): it was ~28% of the simulation's time.
-- Measured 2026-10 (peace, 27 aircraft): ~370 main-pass draw calls (~500 with the shadow pass; ~450 / ~660 before the
-  plain-colour merge), ~0.25 ms per simulation step in the test container. `vehHoldAir` skips aircraft too far for
+- Measured 2026-11 (peace, 27 aircraft, r187): ~137 main-pass draw calls, ~149 with the shadow pass, +14 for bloom
+  (before the batching: ~342 / ~511; ~450 / ~660 before the plain-colour merge); `BATCH.sync` ~0.15 ms a frame, a
+  simulation step ~0.25–0.4 ms in the test container. `vehHoldAir` skips aircraft too far for
   their next 8 units to matter (the route sampling is the costly part).
 
 ## Running & testing

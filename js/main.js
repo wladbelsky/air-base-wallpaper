@@ -75,7 +75,7 @@ function init() {
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.NeutralToneMapping;   // bright lights / flashes roll off instead of clipping; colours below ~0.8 untouched
   renderer.info.autoReset = false;                   // counted per frame (renderFrame), not per pass
-  scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x9fc0da, 300, 800);
+  scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x9fc0da, 300, 800); scene.matrixWorldAutoUpdate = false;   // (renderFrame updates them, then BATCH.sync)
   camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 700);
 
   hemi = new THREE.HemisphereLight(0xffffff, 0x333333, 0.6); scene.add(hemi);
@@ -125,18 +125,20 @@ function init() {
    splash make the shadow pass's programs (compile() doesn't) and the post-processing passes (bloom). */
 let SHADERS_READY = false;
 function compileVisible(root, target) {
-  const hid = []; root.traverse(o => { if (!o.visible && !o.isLight) { hid.push(o); o.visible = true; } });
+  const hid = [], bat = []; root.traverse(o => { if (!o.visible && !o.isLight) { hid.push(o); o.visible = true; } if (o.userData.batched && o.visible) bat.push(o); });
+  for (const o of bat) o.visible = false;   // (drawn by their batches: no program of their own)
   // the programs are made for where the scene is drawn: with bloom the linear HDR target (no tone mapping, linear output)
   if (CFG.bloom) { if (!composer) buildComposer(); renderer.setRenderTarget(composer.renderTarget1); }
   const p = renderer.compileAsync(root, camera, target);   // (its compile() runs now: the objects can hide again)
   renderer.setRenderTarget(null);
-  for (const o of hid) o.visible = false;
+  for (const o of bat) o.visible = true; for (const o of hid) o.visible = false;
   return p;
 }
 async function warmShaders() {
   if (QS.get('warm') === '0') { SHADERS_READY = true; return; }   // (the tests skip it: SwiftShader compiles synchronously, ~4 s a boot)
   const g = new THREE.Group();
   for (const k of ['cruise', 'ballistic', ...Object.keys(ENEMY_TYPES), ...Object.keys(HELI_TYPES), ...Object.keys(ARMOR_TYPES)]) g.add(enemyMesh(k));
+  scene.updateMatrixWorld(); BATCH.sync();   // the batches exist (their programs are compiled with the rest)
   const spots = SEARCHLIGHTS.filter(s => s.light).map(s => s.light), flip = () => spots.forEach(l => { l.visible = !l.visible; });
   try {
     const a = compileVisible(scene), b = compileVisible(g, scene); flip(); const c = compileVisible(scene), d = compileVisible(g, scene); flip();
@@ -230,6 +232,7 @@ function updateBloom() {
 function renderFrame() {
   renderer.info.reset();
   if (CFG.shadows) fitShadow();
+  scene.updateMatrixWorld(); BATCH.sync();   // (the renderer doesn't update the matrices again: matrixWorldAutoUpdate off)
   if (CFG.bloom) { if (!composer) buildComposer(); composer.render(); }
   else renderer.render(scene, camera);
 }

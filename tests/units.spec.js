@@ -166,6 +166,7 @@ test('airfield: the routes home from both runways, every exit, keep to the pavin
     scene.updateMatrixWorld(true);
     const ms = []; BASE.group.traverseVisible(o => { if (o.isMesh && !o.isInstancedMesh) ms.push(o); }); BASE.rwy2.traverseVisible(o => { if (o.isMesh && !o.isInstancedMesh) ms.push(o); });
     const rc = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0), out = [];
+    rc.layers.enableAll();   // (the merged meshes are on BATCH_LAYER)
     const paved = (x, z) => { rc.set(new THREE.Vector3(x, 0.5, z), down); const h = rc.intersectObjects(ms, false)[0]; return !!h && h.point.y > 0.02; };
     const s = PARKING.stands[0], H = HOLD, H2 = BASE_LAYOUT.hold2;
     const walk = (pts, what) => {
