@@ -12,7 +12,7 @@ test('every script / stylesheet in index.html carries the same ?v= cache-buster,
   const v = vs[0][1];
   for (const [f, n] of vs) expect(n, `${f} ?v=`).toBe(v);
   // three.rNNN.min.js is vendored and never changes (a new release gets a new name): the only local asset without a cache-buster
-  const bare = [...html.matchAll(/(?:src|href)="(js\/[^"?]+\.js|[^"?:]+\.css)"/g)].map(m => m[1]).filter(f => !/^js\/three\.r\d+\.min\.js$/.test(f));
+  const bare = [...html.matchAll(/(?:src|href)="(js\/[^"?]+\.js|[^"?:]+\.css)"/g)].map(m => m[1]).filter(f => !/^js\/three\.r\d+\.webgpu\.min\.js$/.test(f));
   expect(bare, 'local scripts / styles without ?v=').toEqual([]);
   expect(read('CLAUDE.md'), 'CLAUDE.md "Current: v=N"').toContain('Current: `v=' + v + '`');
 });
@@ -26,7 +26,7 @@ test('every file referenced by index.html exists and every js/ file is loaded', 
 
 test('scripts load in the order documented in CLAUDE.md', () => {
   const order = [...html.matchAll(/src="js\/([\w.]+)\.js/g)].map(m => m[1]);
-  expect(order[0]).toMatch(/^three\.r\d+\.min$/);
+  expect(order[0]).toMatch(/^three\.r\d+\.webgpu\.min$/);
   const doc = /`(core(?: → \w+)+)`/.exec(read('CLAUDE.md'));
   expect(doc, 'load order line in CLAUDE.md').toBeTruthy();
   expect(order.slice(1)).toEqual(doc[1].split(' → '));
@@ -35,8 +35,8 @@ test('scripts load in the order documented in CLAUDE.md', () => {
 
 test('the vendored three.js is the release package.json pins, built by tools/vendor_three.js', () => {
   const rev = /^(?:\d+)\.(\d+)\.\d+$/.exec(JSON.parse(read('package.json')).devDependencies.three)[1];
-  expect(html).toContain(`src="js/three.r${rev}.min.js"`);
-  expect(read(`js/three.r${rev}.min.js`).slice(0, 200)).toContain(`three.js r${rev}`);
+  expect(html).toContain(`src="js/three.r${rev}.webgpu.min.js"`);
+  expect(read(`js/three.r${rev}.webgpu.min.js`).slice(0, 200)).toContain(`three.js r${rev}`);
 });
 
 test('js/properties.js is generated from project.json (run tools/gen_properties.py)', () => {

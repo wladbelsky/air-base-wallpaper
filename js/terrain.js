@@ -148,12 +148,13 @@ const TERRAIN = {
   buildWeather(season) {
     const kind = season === 'winter' ? 'snow' : season === 'autumn' ? 'leaves' : null;
     if (!this.weather) {
-      const n = 900, g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
-      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
-      const mat = new THREE.PointsMaterial({ size: 3, map: TEX.soft, vertexColors: true, transparent: true, depthWrite: false, sizeAttenuation: false, opacity: 0.9 });
-      const pts = new THREE.Points(g, mat); pts.frustumCulled = false; pts.renderOrder = 2; scene.add(pts);
-      this.weather = { pts, n, v: new Float32Array(n * 3), life: new Float32Array(n), ph: new Float32Array(n), next: 0, acc: 0, kind: null };
+      // an instanced Sprite with a PointsNodeMaterial (sized points: WebGPU draws Points 1 px wide)
+      const n = 900, posA = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage), colA = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
+      const { instancedBufferAttribute: iba, vec4, materialColor } = THREE.TSL;
+      const mat = new THREE.PointsNodeMaterial({ size: 3, map: TEX.soft, transparent: true, depthWrite: false, sizeAttenuation: false, opacity: 0.9 });
+      mat.positionNode = iba(posA); mat.colorNode = vec4(iba(colA), 1).mul(materialColor);
+      const pts = new THREE.Sprite(mat); pts.count = n; pts.frustumCulled = false; pts.renderOrder = 2; scene.add(pts);
+      this.weather = { pts, posA, colA, n, v: new Float32Array(n * 3), life: new Float32Array(n), ph: new Float32Array(n), next: 0, acc: 0, kind: null };
     }
     const w = this.weather; w.kind = kind; w.life.fill(0);
     w.pts.material.size = kind === 'leaves' ? 4 : 3; w.pts.material.blending = kind === 'snow' ? THREE.AdditiveBlending : THREE.NormalBlending;
@@ -163,7 +164,7 @@ const TERRAIN = {
     const w = this.weather; if (!w) return;
     const wx = WEATHER.rain, on = w.kind && (CFG.weather || (w.kind === 'snow' && wx > 0.05)); w.pts.visible = !!on;   // (winter rain / storms: snow, heavier)
     if (!on) return;
-    const P = w.pts.geometry.attributes.position.array, C = w.pts.geometry.attributes.color.array, snow = w.kind === 'snow';
+    const P = w.posA.array, C = w.colA.array, snow = w.kind === 'snow';
     w.acc += dt * (snow ? 220 * (1 + 3 * wx) : 26);
     while (w.acc > 1) {
       w.acc--; const i = w.next; w.next = (w.next + 1) % w.n;
@@ -180,7 +181,7 @@ const TERRAIN = {
       P[i * 3] += (w.v[i * 3] + sway) * dt; P[i * 3 + 1] += w.v[i * 3 + 1] * dt; P[i * 3 + 2] += (w.v[i * 3 + 2] + sway * 0.5) * dt;
       if (P[i * 3 + 1] < 0.05) w.life[i] = 0;
     }
-    w.pts.geometry.attributes.position.needsUpdate = true; w.pts.geometry.attributes.color.needsUpdate = true;
+    w.posA.needsUpdate = true; w.colA.needsUpdate = true;
     if (snow) w.pts.material.opacity = lerp(0.55, 0.9, ENV.night);
   }
 };

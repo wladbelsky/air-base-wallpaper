@@ -59,7 +59,7 @@ class Aircraft {
   dispose() {
     scene.remove(this.mesh);
     AIRFIELD.release(this); AIRFIELD.rwy.delete(this); AIRFIELD.rwy2.delete(this); AIRFIELD.arrivals.delete(this);
-    this.mesh.traverse(o => { if (o.isPoints) { const i = NAV_MATS.indexOf(o.material); if (i >= 0) NAV_MATS.splice(i, 1); } });
+    this.mesh.traverse(o => { if (o.userData.nav) { const i = NAV_MATS.indexOf(o.material); if (i >= 0) NAV_MATS.splice(i, 1); } });
     for (const s of this.searchlights) { const i = SEARCHLIGHTS.indexOf(s); if (i >= 0) SEARCHLIGHTS.splice(i, 1); }
     disposeTree(this.mesh);
   }
@@ -247,7 +247,7 @@ class Aircraft {
     this.updateState(dt);
     this.model.tick(dt, this);
     const on = this.lightsOn;                                       // nav lights / beacons: off while shut down on the ground
-    if (on !== this.navOn) { this.navOn = on; if (!this.navPts) { this.navPts = []; this.mesh.traverse(o => { if (o.isPoints) this.navPts.push(o); }); } for (const p of this.navPts) p.visible = on; }
+    if (on !== this.navOn) { this.navOn = on; if (!this.navPts) { this.navPts = []; this.mesh.traverse(o => { if (o.userData.nav) this.navPts.push(o); }); } for (const p of this.navPts) p.visible = on; }
   }
   /* engines running (or stopped on the runway in an emergency): nav lights and beacons on */
   get lightsOn() { return this.state !== 'parked' && this.state !== 'towed'; }

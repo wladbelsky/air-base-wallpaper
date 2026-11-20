@@ -10,9 +10,9 @@ test('default: nothing of the weather is drawn, the same frame as clear', async 
   await wp.boot();
   await wp.sim(20);
   const r = await wp.run(() => {
-    const d = { mode: CFG.weatherMode, kind: WEATHER.kind, vis: [WEATHER.drops.visible, WEATHER.splash.visible, WEATHER.bolt.visible, FX.mist.mesh.visible], calls: (__t.render(), renderer.info.render.calls), fog: [scene.fog.near, scene.fog.far] };
+    const d = { mode: CFG.weatherMode, kind: WEATHER.kind, vis: [WEATHER.drops.visible, WEATHER.splash.visible, WEATHER.bolt.visible, FX.mist.mesh.visible], calls: (__t.render(), renderer.info.render.drawCalls), fog: [scene.fog.near, scene.fog.far] };
     __t.props({ weathermode: 'clear' });
-    return Object.assign(d, { calls2: (__t.render(), renderer.info.render.calls) });
+    return Object.assign(d, { calls2: (__t.render(), renderer.info.render.drawCalls) });
   });
   expect(r.mode).toBe('default');
   expect(r.kind).toBe('clear');

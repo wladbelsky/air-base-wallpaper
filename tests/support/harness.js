@@ -28,7 +28,8 @@ class Wallpaper {
   constructor(page, errors) { this.page = page; this.errors = errors; this.installed = false; }
   /* load the wallpaper; query e.g. '?hour=0' */
   /* splash: keep the start-up splash (it covers the page until T > 3.2 — or 8 s of real time — and blocks clicks) */
-  /* warm: the shader warm-up under the splash (warmShaders; skipped by default: SwiftShader compiles synchronously, ~4 s a boot) */
+  /* warm: the shader warm-up under the splash (warmShaders; skipped by default: SwiftShader compiles synchronously, ~4 s a boot)
+     WebGPURenderer runs on its WebGL 2 backend (?gl=webgl2): WebGPU in the headless container drops its instance */
   async boot({ seed = SEED, we = true, query = '', time = '2026-06-21T12:00:00Z', splash = false, warm = false } = {}) {
     if (!this.installed) {
       await this.page.clock.setFixedTime(new Date(time));
@@ -37,8 +38,10 @@ class Wallpaper {
       this.installed = true;
     }
     if (!warm) query += (query.includes('?') ? '&' : '?') + 'warm=0';
+    query += (query.includes('?') ? '&' : '?') + 'gl=webgl2';
     await this.page.goto('/index.html' + query);
-    const ok = await this.page.evaluate(() => typeof ready !== 'undefined' && ready && AIRCRAFT.length > 0);
+    // init() is async (the renderer's device)
+    const ok = await this.page.waitForFunction(() => typeof ready !== 'undefined' && ready && AIRCRAFT.length > 0, null, { timeout: 30000 }).then(() => true, () => false);
     if (!ok) throw new Error('wallpaper did not initialise');
     // the shaders compile asynchronously under the splash (warmShaders, compileAsync): wait for them
     await this.page.waitForFunction(() => SHADERS_READY === true, null, { timeout: 30000 });

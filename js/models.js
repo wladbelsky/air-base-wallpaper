@@ -71,7 +71,7 @@ function mergeStatic(root, dynamic) {
    - A mesh not drawn this frame (hidden, behind a shut door, not in the scene) has its instance hidden; one out of the
      scene for good (a dropped enemy clone, a pooled vehicle) gives its instance back after ~1 s (taken again when it is
      back).
-   - A mesh whose material was swapped (wreckArmor) leaves its batch and is drawn on its own again (layer 0).
+   - A mesh whose material was swapped (wreckArmor: a burnt M() colour) moves to that material's batch (no new program).
    - The M(colour, options) materials (cached, never changed) share one batch per options set: its material is
      M(white, options), the colour goes per instance. Others (PLAIN_MAT, the seasonal roofs, windows) get one each.
    - The batches grow (instances, vertices: optimize first) and never shrink; an empty one is disposed. */
@@ -126,6 +126,7 @@ const BATCH = {
   remove(r) {
     if (r.dead) return;
     r.dead = true; r.G.bm.deleteInstance(r.inst); r.e.recs.delete(r); this.recs.delete(r.m);
+    const i = this.live.indexOf(r); if (i >= 0) this.live.splice(i, 1);
   },
   /* before every render (scene.updateMatrixWorld() done): every merged mesh in view → its instance */
   sync() {
@@ -133,19 +134,19 @@ const BATCH = {
     scene.traverseVisible(o => {
       if (!o.isMesh || !o.userData.batched) return;
       let r = this.recs.get(o);
-      if (r && o.material !== r.mat) { this.remove(r); o.userData.batched = false; o.layers.enable(0); return; }   // its material swapped: drawn on its own
+      if (r && o.material !== r.mat) { this.remove(r); r = null; }   // its material swapped (a wreck: burnt M()): into that material's batch
       if (!r) r = this.add(o);
       r.seen = f; r.seenT = T; r.G.bm.setMatrixAt(r.inst, o.matrixWorld);
       if (!r.vis) { r.vis = true; r.G.bm.setVisibleAt(r.inst, true); }
     });
-    let dead = false; const gc = T - this.gcT > 0.5; if (gc) this.gcT = T;
+    let dead = false; const gc = T - this.gcT > 0.5; if (gc) this.gcT = T; if (this.gone) this.gone.length = 0;
     for (const r of this.live) {
       if (r.seen === f || r.dead) continue;
       if (r.vis) { r.vis = false; r.G.bm.setVisibleAt(r.inst, false); }
       // out of the scene for ~1 s (sim time; a dropped clone, a pooled vehicle): the instance is freed (taken again on its return)
-      if (gc && T - r.seenT > 1) { let p = r.m; while (p.parent) p = p.parent; if (p !== scene) { this.remove(r); dead = true; } }
+      if (gc && T - r.seenT > 1) { let p = r.m; while (p.parent) p = p.parent; if (p !== scene) dead = true, (this.gone || (this.gone = [])).push(r); }
     }
-    if (dead) this.live = this.live.filter(r => !r.dead);
+    if (dead) for (const r of this.gone) this.remove(r);   // (not while iterating: remove() takes it off `live`)
   },
   /* draw calls / instances / vertices in the batches (tests, the measurements in CLAUDE.md) */
   stats() { let n = 0, v = 0; for (const G of this.groups.values()) { n += G.bm._instanceInfo.filter(i => i.active).length; v += G.bm._maxVertexCount; } return { batches: this.groups.size, instances: n, vertices: v, live: this.live.length }; }
@@ -194,39 +195,38 @@ function dashed(p, x1, z1, x2, z2, w, color, y, dash, gap) {
 }
 function windowMat() { return new THREE.MeshPhongMaterial({ color: 0x14202c, emissive: 0x000000, shininess: 70, specular: 0x7090b0, flatShading: true }); }
 
-/* ===== Navigation lights (point sprites) ===== */
+/* ===== Navigation lights (point sprites) =====
+   One instanced Sprite per group (WebGPU draws points only 1 px wide: a PointsNodeMaterial on a Sprite gives sized ones):
+   per instance the light's position and colour; size in pixels (material.size), opacity, the glow texture. Tagged
+   userData.nav (aircraft switch theirs with their engines). */
 const NAV_MATS = [];
 function navLights(parent, list, blink, scale) {
-  const pos = [], col = [], c = new THREE.Color();
-  list.forEach(l => { pos.push(l[0], l[1], l[2]); c.setHex(l[3]); col.push(c.r, c.g, c.b); });
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  const m = new THREE.PointsMaterial({ size: 8, map: TEX.glow, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false, fog: false, opacity: 0 });
+  const n = list.length, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color();
+  list.forEach((l, i) => { pos[i * 3] = l[0]; pos[i * 3 + 1] = l[1]; pos[i * 3 + 2] = l[2]; c.setHex(l[3]); c.toArray(col, i * 3); });
+  const { instancedBufferAttribute: iba, vec4, materialColor } = THREE.TSL;
+  const m = new THREE.PointsNodeMaterial({ size: 8, map: TEX.glow, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false, fog: false, opacity: 0 });
+  m.positionNode = iba(new THREE.InstancedBufferAttribute(pos, 3));
+  m.colorNode = vec4(iba(new THREE.InstancedBufferAttribute(col, 3)), 1).mul(materialColor);
   m.userData = { scale: scale || 1.1, blink: blink || null };
   NAV_MATS.push(m);
-  const pts = new THREE.Points(g, m); pts.frustumCulled = false; pts.renderOrder = 5;
+  const pts = new THREE.Sprite(m); pts.count = n; pts.frustumCulled = false; pts.renderOrder = 5; pts.userData.nav = true;
   parent.add(pts); return pts;
 }
 
 /* ===== Searchlights with visible beam ===== */
 const SEARCHLIGHTS = [];
-/* the beams are shaded in sRGB (as they always were) and turned linear for the output: exactly (sRGB EOTF, BEAM_G > 2)
-   when they are added on screen (no bloom: the old look); added in the linear HDR target (bloom) that came out ~4x fainter,
-   so there by c^BEAM_G, 1.25 (updateBloom) */
-const BEAM_G = { value: 2.2 };
+/* the beam: additive, fading along its length and toward its edges (a node material). Shaded in sRGB as it always was,
+   turned linear by c^BEAM_G: added in the linear HDR target, the exact sRGB curve came out ~4x fainter than on the old
+   sRGB screen */
+const BEAM_G = 1.25;
 function coneMaterial(color, len) {
-  return new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color(color).convertLinearToSRGB() /* the beam is shaded in sRGB, as it always was */ }, uOpacity: { value: 0 }, uLen: { value: len }, uG: BEAM_G },
-    vertexShader: `uniform float uLen; varying float vD; varying float vRim;
-      void main(){ vD = position.z/uLen; vec3 n = normalize(normalMatrix*normal); vRim = abs(n.z);
-      gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 uColor; uniform float uOpacity; uniform float uG; varying float vD; varying float vRim;
-      void main(){ float d = clamp(vD,0.0,1.0); float a = uOpacity*pow(1.0-d,1.7)*(0.25+0.75*pow(vRim,1.3)); vec3 s = uColor*a; gl_FragColor = vec4(uG > 2.0 ? sRGBTransferEOTF(vec4(s,1.0)).rgb : pow(s, vec3(uG)), 1.0);
-      #include <colorspace_fragment>
-      }`,
-    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false
-  });
+  const { uniform, positionLocal, normalView, vec3, vec4, pow, clamp, abs, float } = THREE.TSL;
+  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const c = new THREE.Color(color).convertLinearToSRGB(), uOpacity = uniform(0);
+  const d = clamp(positionLocal.z.div(len), 0, 1), a = uOpacity.mul(pow(float(1).sub(d), 1.7)).mul(float(0.25).add(pow(abs(normalView.z), 1.3).mul(0.75)));
+  m.colorNode = vec4(pow(vec3(c.r, c.g, c.b).mul(a), vec3(BEAM_G)), 1);
+  m.uOpacity = uOpacity;   // (updateLights)
+  return m;
 }
 function makeSearchlight(parent, x, y, z, opts) {
   const o = Object.assign({ color: 0xfff1d6, angle: 0.16, len: 22, intensity: 2.2, cone: true, coneOpacity: 0.35, housing: true }, opts || {});

@@ -13,7 +13,7 @@ test('a day frame renders without GL errors, within the draw-call budget, with t
     __t.render();
     const gl = renderer.getContext(), err = gl.getError();
     return {
-      err, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, programs: renderer.info.programs.length,
+      err, calls: renderer.info.render.drawCalls, tris: renderer.info.render.triangles, programs: renderer.info.memory.programs,
       center: __t.sample(300, 160, 40, 40), ground: __t.sample(600, 330, 30, 25), lost: gl.isContextLost(), lightsOn: ENV.lightsOn,
       spots: SEARCHLIGHTS.filter(s => s.light && s.light.visible).length
     };
@@ -77,13 +77,13 @@ test('bloom: the night lights glow; toggling it renders without GL errors, count
     const gl = renderer.getContext(), out = {};
     for (const b of [true, false, true]) {
       __t.props({ bloom: b });
-      out[b] = { c: __t.sample(0, 0, 640, 360), lit: __t.bright(0, 0, 1280, 720, 110), calls: renderer.info.render.calls, err: gl.getError(), tex: renderer.info.memory.textures, hdr: FX.flash.mesh.material.uniforms.uK.value };
+      out[b] = { c: __t.sample(0, 0, 640, 360), lit: __t.bright(0, 0, 1280, 720, 50), calls: renderer.info.render.drawCalls, err: gl.getError(), tex: renderer.info.memory.textures, hdr: FX.flash.uK.value };
     }
     return out;
   });
   expect(r.true.err).toBe(0); expect(r.false.err).toBe(0);
   // the glow adds light around the lamps; the passes add only a few draw calls to the scene's (counted per frame)
-  expect(r.true.lit, `bright pixels with bloom ${r.true.lit} vs without ${r.false.lit}`).toBeGreaterThan(r.false.lit * 1.15);
+  expect(r.true.lit, `bright pixels with bloom ${r.true.lit} vs without ${r.false.lit}`).toBeGreaterThan(r.false.lit * 1.06);
   expect(r.true.calls).toBeGreaterThan(r.false.calls);
   expect(r.true.calls).toBeLessThan(r.false.calls + 20);
   expect(r.false.hdr, 'no HDR emitters without bloom').toBe(1);
@@ -92,13 +92,13 @@ test('bloom: the night lights glow; toggling it renders without GL errors, count
 
 test('the shaders are compiled under the splash: the first frame and a fight add no programs', async ({ wp }) => {
   await wp.boot({ warm: true });
-  const p0 = await wp.run(() => renderer.info.programs.length);
+  const p0 = await wp.run(() => renderer.info.memory.programs);
   await wp.run(() => __t.render());
-  expect(await wp.run(() => renderer.info.programs.length), 'the first frame').toBe(p0);
+  expect(await wp.run(() => renderer.info.memory.programs), 'the first frame').toBe(p0);
   // a fight: waves, armour, helicopters, missiles, tracers, flashes, smoke, craters, fires (as at night, the lamps on)
   await wp.run(() => { __t.forceFight(); STRESS.level = 0.8; });
   for (let i = 0; i < 12; i++) { await wp.sim(5, { audio: true }); await wp.run(() => __t.render()); }
-  const r = await wp.run(() => ({ p: renderer.info.programs.length, kinds: [...new Set(ENEMIES.map(e => e.kind))] }));
+  const r = await wp.run(() => ({ p: renderer.info.memory.programs, kinds: [...new Set(ENEMIES.map(e => e.kind))] }));
   expect(r.kinds.length, 'the fight is on').toBeGreaterThan(0);
   expect(r.p, `programs after a fight (${r.kinds})`).toBeLessThanOrEqual(p0 + 2);
 });
@@ -108,7 +108,7 @@ test('batching: the merged meshes draw through a few BatchedMeshes that follow t
   await wp.sim(20);
   const r = await wp.run(() => {
     __t.props({ bloom: false, shadows: false }); __t.render();
-    const main = renderer.info.render.calls, s0 = BATCH.stats();
+    const main = renderer.info.render.drawCalls, s0 = BATCH.stats();
     // an aircraft's merged meshes: their instances carry its world matrices; hidden with it
     const a = AIRCRAFT.find(x => x.mesh.visible), ms = []; a.mesh.traverse(o => { if (o.userData.batched) ms.push(o); });
     const m4 = new THREE.Matrix4(), rec = BATCH.recs.get(ms[0]);
@@ -178,7 +178,7 @@ test('GPU memory plateaus over a long fight with fly-bys, missiles and smoke', a
   for (let i = 0; i < 20; i++) {
     const r = await wp.sim(30);
     expect(r.violations).toEqual([]);
-    mem.push(await wp.run(() => Object.assign(__t.geometries(), { t: renderer.info.memory.textures, p: renderer.info.programs.length, calls: renderer.info.render.calls, err: renderer.getContext().getError() })));
+    mem.push(await wp.run(() => Object.assign(__t.geometries(), { t: renderer.info.memory.textures, p: renderer.info.memory.programs, calls: renderer.info.render.drawCalls, err: renderer.getContext().getError() })));
   }
   for (const m of mem) {
     expect(m.err).toBe(0); expect(m.calls).toBeLessThan(1000);

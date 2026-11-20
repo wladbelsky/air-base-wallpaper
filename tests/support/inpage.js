@@ -238,7 +238,9 @@
   H.find = (key, n = 0) => AIRCRAFT.filter(a => a.spec.key === key)[n];
 
   /* ---- rendering ---- */
-  H.render = () => renderFrame();   // what frame() does after the steps
+  // what frame() does after the steps; WebGPURenderer advances its node frame (a pass renders once per frame) in its own
+  // requestAnimationFrame loop, which the harness has switched off: a frame per render here
+  H.render = () => { renderer._nodes.nodeFrame.update(); renderFrame(); };
   /* average colour [r, g, b] (0..255) of a rectangle in CSS pixels (y from the top), read straight after a render */
   H.sample = (x, y, w, h) => {
     H.render();

@@ -63,14 +63,18 @@ function applySettings() {
   const title = document.querySelector('#panel .title'); if (title) title.textContent = `◆ ${CFG.baseName} · BASE OPS`;
   if (!ready) return;
   for (const s of SITES) if (s.ui) s.ui.nm.textContent = s.name();
-  sunLight.castShadow = CFG.shadows;
+  sunLight.shadow.autoUpdate = CFG.shadows;   // (off: no shadow pass, intensity 0 — toggling castShadow would rebuild every material)
   updateCamera(); updateEnvironment();
 }
 
 /* ---- init ---- */
-function init() {
+/* WebGPURenderer: WebGPU where the browser has it (Wallpaper Engine's CEF does), else (or ?gl=webgl2) its WebGL 2 backend;
+   the same node materials and passes on both. init() waits for the device: `ready` comes after it. */
+async function init() {
   const canvas = document.getElementById('c');
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, precision: 'highp', powerPreference: 'high-performance' });
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', forceWebGL: QS.get('gl') === 'webgl2' });
+  await renderer.init();
+  GPU.webgpu = !!renderer.backend.isWebGPUBackend;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.NeutralToneMapping;   // bright lights / flashes roll off instead of clipping; colours below ~0.8 untouched
@@ -80,7 +84,7 @@ function init() {
 
   hemi = new THREE.HemisphereLight(0xffffff, 0x333333, 0.6); scene.add(hemi);
   sunLight = new THREE.DirectionalLight(0xffffff, 1);
-  sunLight.castShadow = CFG.shadows;
+  sunLight.castShadow = true; sunLight.shadow.autoUpdate = CFG.shadows;
   sunLight.shadow.mapSize.set(2048, 2048);
   Object.assign(sunLight.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: -100, far: 400 });   // bounds: fitShadow()
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.03;
@@ -96,7 +100,7 @@ function init() {
   TERRAIN.build(seasonNow());
 
   FX.tracers = new Tracers(scene, 1200);
-  FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);   // (HDR with bloom: updateBloom)
+  FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);   // (HDR with bloom: updateBloom, uK)
   FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 420, true);   // (a burning structure keeps ~50 up)
   FX.scorch = new Scorch(scene, 120);
   FX.lights = new FlashLights(scene, 4);
@@ -124,12 +128,14 @@ function init() {
    loop draws nothing until SHADERS_READY (a draw with a program still compiling would wait for it); frames under the
    splash make the shadow pass's programs (compile() doesn't) and the post-processing passes (bloom). */
 let SHADERS_READY = false;
+const GPU = { webgpu: false };   // which backend WebGPURenderer runs on (renderer.backend)
 function compileVisible(root, target) {
   const hid = [], bat = []; root.traverse(o => { if (!o.visible && !o.isLight) { hid.push(o); o.visible = true; } if (o.userData.batched && o.visible) bat.push(o); });
   for (const o of bat) o.visible = false;   // (drawn by their batches: no program of their own)
-  // the programs are made for where the scene is drawn: with bloom the linear HDR target (no tone mapping, linear output)
-  if (CFG.bloom) { if (!composer) buildComposer(); renderer.setRenderTarget(composer.renderTarget1); }
-  const p = renderer.compileAsync(root, camera, target);   // (its compile() runs now: the objects can hide again)
+  // a program is made for where it draws: the scene pass's target (HDR, multisampled), not the canvas
+  if (!pipeline) buildPipeline();
+  renderer.setRenderTarget(scenePass.renderTarget);
+  const p = renderer.compileAsync(root, camera, target);   // (it collects the objects now: they can hide again)
   renderer.setRenderTarget(null);
   for (const o of bat) o.visible = true; for (const o of hid) o.visible = false;
   return p;
@@ -138,11 +144,12 @@ async function warmShaders() {
   if (QS.get('warm') === '0') { SHADERS_READY = true; return; }   // (the tests skip it: SwiftShader compiles synchronously, ~4 s a boot)
   const g = new THREE.Group();
   for (const k of ['cruise', 'ballistic', ...Object.keys(ENEMY_TYPES), ...Object.keys(HELI_TYPES), ...Object.keys(ARMOR_TYPES)]) g.add(enemyMesh(k));
+  const wreck = enemyMesh('t90'); wreck.traverse(o => { if (o.isMesh) o.material = M(0x2c2a26); }); g.add(wreck);   // a wreck's batch (wreckArmor)
+  for (const k of Object.keys(VEH_BUILD)) g.add((VEH_TEMPLATES[k] || (VEH_TEMPLATES[k] = VEH_BUILD[k]())).clone());   // the ground vehicles (crane parts, hoses: drawn on their own)
   scene.updateMatrixWorld(); BATCH.sync();   // the batches exist (their programs are compiled with the rest)
   const spots = SEARCHLIGHTS.filter(s => s.light).map(s => s.light), flip = () => spots.forEach(l => { l.visible = !l.visible; });
   try {
-    const a = compileVisible(scene), b = compileVisible(g, scene); flip(); const c = compileVisible(scene), d = compileVisible(g, scene); flip();
-    await Promise.all([a, b, c, d]);
+    await compileVisible(scene); await compileVisible(g, scene); flip(); await compileVisible(scene); await compileVisible(g, scene); flip();   // (one at a time: WebGPURenderer.compileAsync isn't re-entrant)
   } catch (e) { console.warn('shader warm-up', e); }
   // one frame with the enemies in view (the camera's middle): their shadow-pass (depth) programs, which compile() doesn't
   // make, and the post-processing passes
@@ -201,40 +208,37 @@ function retireAircraft() {
 
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
-  if (composer) composer.setSize(window.innerWidth, window.innerHeight);
   updateCamera();
 }
-/* ---- one frame on screen: the scene, through the bloom passes when CFG.bloom ----
-   The scene is rendered into a half-float (HDR) multisampled target, UnrealBloomPass adds the glow of everything brighter
-   than its threshold (lights, flashes, fire, tracers: HDR colours > 1), OutputPass tone maps and encodes it (sRGB).
-   Without bloom the renderer tone maps / encodes itself. Built on first use, kept (toggling it costs nothing after). */
-let composer = null, bloomPass = null;
-function buildComposer() {
-  const w = window.innerWidth, h = window.innerHeight, pr = renderer.getPixelRatio();
-  const rt = new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: 4 });
-  composer = new THREE.EffectComposer(renderer, rt);
-  composer.addPass(new THREE.RenderPass(scene, camera));
-  bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(w, h), 0.5, 0.45, 1); composer.addPass(bloomPass);
-  composer.addPass(new THREE.OutputPass());
-  composer.setSize(w, h); updateBloom();
+/* ---- one frame on screen: a RenderPipeline — the scene pass (half-float, multisampled: HDR), + the bloom of what is
+   brighter than its threshold (lights, flashes, fire, tracers, lightning: HDR colours > 1) when CFG.bloom; the pipeline
+   tone maps / encodes the result. The scene is always drawn into the linear target (bloom on or off), so the sprite
+   and beam curves (SPRITE_AG / SPRITE_CP / BEAM_G) are fixed. Built on first use; toggling bloom swaps the output node. */
+let pipeline = null, bloomNode = null, sceneOut = null, pipeBloom = null, scenePass = null;
+function buildPipeline() {
+  pipeline = new THREE.RenderPipeline(renderer);
+  const sp = scenePass = THREE.TSL.pass(scene, camera, { samples: 4 });
+  sceneOut = sp.getTextureNode('output'); bloomNode = THREE.bloom(sceneOut, 0.5, 0.45, 1);
+  updateBloom();
 }
 /* the glow follows the light: stronger at night (the lamps, the windows, a flash in the dark), a high threshold by day
    (sunlit snow / white roofs stay out of it). The emitters are HDR (colours > 1: what glows) only with bloom on — without
    it they would just be brighter than they always were. */
 let HDR = 1;
 function updateBloom() {
-  HDR = CFG.bloom ? 1 : 0; BEAM_G.value = CFG.bloom ? 1.25 : 2.2;
+  HDR = CFG.bloom ? 1 : 0;
   const k = HDR * (0.35 + 0.65 * ENV.lightsOn);   // (by day a flame stays a flame, not a red ball)
-  FX.flash.mesh.material.uniforms.uK.value = 1 + 1.1 * k; FX.tracers.mesh.material.color.setScalar(1 + 1.2 * k); SPRITE_AG.value = CFG.bloom ? 0.6 : 1; SPRITE_CP.value = CFG.bloom ? 0.6 : 1;
-  if (!bloomPass) return;
-  bloomPass.strength = lerp(0.35, 0.7, ENV.night); bloomPass.threshold = lerp(1.6, 0.9, ENV.lightsOn); bloomPass.radius = 0.45;
+  FX.flash.uK.value = 1 + 1.1 * k; FX.tracers.mesh.material.color.setScalar(1 + 1.2 * k);
+  if (!pipeline) return;
+  if (pipeBloom !== CFG.bloom) { pipeBloom = CFG.bloom; pipeline.outputNode = CFG.bloom ? sceneOut.add(bloomNode) : sceneOut; pipeline.needsUpdate = true; }
+  bloomNode.strength.value = lerp(0.5, 1.4, ENV.night); bloomNode.threshold.value = lerp(1.4, 0.55, ENV.lightsOn); bloomNode.radius.value = 0.55;   // (BloomNode: a weaker scale than the old UnrealBloomPass)
 }
 function renderFrame() {
   renderer.info.reset();
   if (CFG.shadows) fitShadow();
   scene.updateMatrixWorld(); BATCH.sync();   // (the renderer doesn't update the matrices again: matrixWorldAutoUpdate off)
-  if (CFG.bloom) { if (!composer) buildComposer(); composer.render(); }
-  else renderer.render(scene, camera);
+  if (!pipeline) buildPipeline();
+  pipeline.render();
 }
 function updateCamera() {
   const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
@@ -275,7 +279,7 @@ function updateEnvironment() {
   hemi.color.copy(k.hs); hemi.groundColor.copy(k.hg).lerp(_hg, 0.6); hemi.intensity = ENV.hemiI = skyLight(k.hi);
   // shadows: crisp under a high sun, soft and long at dusk; fainter by moonlight
   sunLight.shadow.radius = lerp(3.5, 1.3, smoothstep(4, 35, sp.elev)) + 4 * WEATHER.oc;                  // (overcast: soft
-  sunLight.shadow.intensity = lerp(0.8, 1, smoothstep(-7, 2, sp.elev)) * (1 - 0.75 * WEATHER.oc);       //  and faint)
+  sunLight.shadow.intensity = lerp(0.8, 1, smoothstep(-7, 2, sp.elev)) * (1 - 0.75 * WEATHER.oc) * (CFG.shadows ? 1 : 0);       //  and faint)
   scene.fog.color.copy(k.fog); renderer.setClearColor(k.fog); ENV.fogTint.copy(k.fog);
   ENV.smokeTint.copy(k.smoke);
   ENV.dustTint.setHex(S.ground).lerp(k.smoke, 0.45);
@@ -727,7 +731,7 @@ function updateLights() {
     const on = ENV.lightsOn * s.enabled, beam = Math.max(ENV.lamps, ENV.lightsOn) * s.enabled * (1 + 1.2 * WEATHER.fog + 0.5 * WEATHER.rain);   // (beams thicker in fog and rain)
     // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn)
     if (s.light) { s.light.intensity = s.o.intensity * on * SPOT_K; s.light.visible = ENV.lightsOn > 0; }
-    if (s.cone) s.cone.material.uniforms.uOpacity.value = s.o.coneOpacity * beam * (0.45 + 0.55 * Math.max(ENV.night, WEATHER.fog * 0.6));
+    if (s.cone) s.cone.material.uOpacity.value = s.o.coneOpacity * beam * (0.45 + 0.55 * Math.max(ENV.night, WEATHER.fog * 0.6));
   }
 }
 
