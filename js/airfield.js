@@ -302,5 +302,6 @@ const AIRFIELD = {
     n = 0;
     for (const s of PARKING.heli) { m.pad.setMatrixAt(n, M4.makeTranslation(s.x, 0, s.z)); m.pad.setColorAt(n++, c); }
     m.pad.count = n; m.pad.instanceMatrix.needsUpdate = true; if (m.pad.instanceColor) m.pad.instanceColor.needsUpdate = true;
+    m.stand.boundingSphere = m.pad.boundingSphere = null;   // an InstancedMesh is culled by its own bounds, cached once: recomputed for the new set
   }
 };

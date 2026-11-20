@@ -118,7 +118,7 @@ class SpriteFX {
       C[i * 4] = it.col.r; C[i * 4 + 1] = it.col.g; C[i * 4 + 2] = it.col.b; C[i * 4 + 3] = it.a;
       S[i * 2] = it.sc; S[i * 2 + 1] = it.rot;
     }
-    if (live.length) for (const a of this.attrs) { a.needsUpdate = true; a.updateRange.count = live.length * a.itemSize; }   // upload only the live part
+    if (live.length) for (const a of this.attrs) { a.clearUpdateRanges(); a.addUpdateRange(0, live.length * a.itemSize); a.needsUpdate = true; }   // upload only the live part
     this.geo.instanceCount = live.length; this.mesh.visible = live.length > 0;
   }
 }
