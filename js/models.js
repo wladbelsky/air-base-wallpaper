@@ -119,14 +119,20 @@ function navLights(parent, list, blink, scale) {
 
 /* ===== Searchlights with visible beam ===== */
 const SEARCHLIGHTS = [];
+/* the beams are shaded in sRGB (as they always were) and turned linear for the output: exactly (sRGB EOTF, BEAM_G > 2)
+   when they are added on screen (no bloom: the old look); added in the linear HDR target (bloom) that came out ~4x fainter,
+   so there by c^BEAM_G, 1.25 (updateBloom) */
+const BEAM_G = { value: 2.2 };
 function coneMaterial(color, len) {
   return new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color(color).convertLinearToSRGB() /* an additive glow written straight to the sRGB screen */ }, uOpacity: { value: 0 }, uLen: { value: len } },
+    uniforms: { uColor: { value: new THREE.Color(color).convertLinearToSRGB() /* the beam is shaded in sRGB, as it always was */ }, uOpacity: { value: 0 }, uLen: { value: len }, uG: BEAM_G },
     vertexShader: `uniform float uLen; varying float vD; varying float vRim;
       void main(){ vD = position.z/uLen; vec3 n = normalize(normalMatrix*normal); vRim = abs(n.z);
       gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 uColor; uniform float uOpacity; varying float vD; varying float vRim;
-      void main(){ float d = clamp(vD,0.0,1.0); float a = uOpacity*pow(1.0-d,1.7)*(0.25+0.75*pow(vRim,1.3)); gl_FragColor = vec4(uColor*a,1.0); }`,
+    fragmentShader: `uniform vec3 uColor; uniform float uOpacity; uniform float uG; varying float vD; varying float vRim;
+      void main(){ float d = clamp(vD,0.0,1.0); float a = uOpacity*pow(1.0-d,1.7)*(0.25+0.75*pow(vRim,1.3)); vec3 s = uColor*a; gl_FragColor = vec4(uG > 2.0 ? sRGBTransferEOTF(vec4(s,1.0)).rgb : pow(s, vec3(uG)), 1.0);
+      #include <colorspace_fragment>
+      }`,
     transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false
   });
 }

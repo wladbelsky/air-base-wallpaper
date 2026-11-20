@@ -5,7 +5,7 @@ class Tracers {
   constructor(scene, n) {
     this.n = n;
     const geo = new THREE.BoxGeometry(1, 1, 1); geo.translate(-0.5, 0, 0);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });   // (HDR with bloom: updateBloom)
     this.mesh = new THREE.InstancedMesh(geo, mat, n);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.frustumCulled = false; this.mesh.renderOrder = 6;
@@ -59,17 +59,22 @@ const SPRITE_VS = `attribute vec3 iPos; attribute vec4 iCol; attribute vec2 iSR;
     gl_Position = projectionMatrix * mvPosition;
     #include <fog_vertex>
   }`;
-const SPRITE_FS = `uniform sampler2D map; varying vec2 vUv; varying vec4 vCol;
+const SPRITE_FS = `uniform sampler2D map; uniform float uK; uniform float uAG; uniform float uCP; varying vec2 vUv; varying vec4 vCol;
   #include <fog_pars_fragment>
   void main() {
-    gl_FragColor = vCol * texture2D(map, vUv);
+    gl_FragColor = vCol * texture2D(map, vUv); gl_FragColor.rgb = pow(gl_FragColor.rgb, vec3(uCP)) * uK; gl_FragColor.a = pow(gl_FragColor.a, uAG);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
     #include <fog_fragment>
   }`;
+/* Blended in the linear HDR target (bloom) sprites don't add up as they did on the sRGB screen (the old look, still the one
+   without bloom): dark smoke over light ground came out pale, overlapping flames red instead of yellow-hot. There
+   (updateBloom) SPRITE_AG bends the alpha of the normal-blended pools (smoke: alpha^0.6) and SPRITE_CP the colour of the
+   additive ones (flashes, flames: closer to the sRGB value, so the layers add up to yellow) */
+const SPRITE_AG = { value: 1 }, SPRITE_CP = { value: 1 };
 const _sfxFwd = new V3(), farFirst = (a, b) => b.depth - a.depth;
 class SpriteFX {
-  constructor(scene, tex, blending, n, fog) {
+  constructor(scene, tex, blending, n, fog, hdr) {
     this.n = n; this.sorted = blending !== THREE.AdditiveBlending;   // additive blending is order independent
     this.items = []; this.live = [];
     for (let i = 0; i < n; i++) this.items.push({ on: false, p: new V3(), v: new V3(), col: new THREE.Color(), rot: 0, life: 0, max: 1, s0: 1, s1: 1, a0: 1, drag: 0, rise: 0, sc: 1, a: 0, depth: 0 });
@@ -78,7 +83,7 @@ class SpriteFX {
     const attr = (k, size) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * size), size).setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, a); return a; };
     this.aPos = attr('iPos', 3); this.aCol = attr('iCol', 4); this.aSR = attr('iSR', 2); this.attrs = [this.aPos, this.aCol, this.aSR];
     geo.instanceCount = 0;
-    const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog]); uniforms.map = { value: tex };
+    const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog]); uniforms.map = { value: tex }; uniforms.uK = { value: hdr || 1 }; uniforms.uAG = this.sorted ? SPRITE_AG : { value: 1 }; uniforms.uCP = this.sorted ? { value: 1 } : SPRITE_CP;   // hdr: colour scale (> 1: glows under bloom)
     const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: SPRITE_VS, fragmentShader: SPRITE_FS, blending, transparent: true, depthWrite: false, fog: !!fog });
     this.mesh = new THREE.Mesh(geo, mat); this.mesh.frustumCulled = false; this.mesh.visible = false;
     this.mesh.renderOrder = blending === THREE.AdditiveBlending ? 7 : 3; scene.add(this.mesh);

@@ -70,6 +70,26 @@ test('night is darker than day, with nav lights and searchlights on', async ({ w
   expect(night.spots).toBeGreaterThan(0);
 });
 
+test('bloom: the night lights glow; toggling it renders without GL errors, counts the whole frame and leaks nothing', async ({ wp }) => {
+  await wp.boot({ query: '?hour=0' });
+  await wp.sim(3);
+  const r = await wp.run(() => {
+    const gl = renderer.getContext(), out = {};
+    for (const b of [true, false, true]) {
+      __t.props({ bloom: b });
+      out[b] = { c: __t.sample(0, 0, 640, 360), lit: __t.bright(0, 0, 1280, 720, 110), calls: renderer.info.render.calls, err: gl.getError(), tex: renderer.info.memory.textures, hdr: FX.flash.mesh.material.uniforms.uK.value };
+    }
+    return out;
+  });
+  expect(r.true.err).toBe(0); expect(r.false.err).toBe(0);
+  // the glow adds light around the lamps; the passes add only a few draw calls to the scene's (counted per frame)
+  expect(r.true.lit, `bright pixels with bloom ${r.true.lit} vs without ${r.false.lit}`).toBeGreaterThan(r.false.lit * 1.15);
+  expect(r.true.calls).toBeGreaterThan(r.false.calls);
+  expect(r.true.calls).toBeLessThan(r.false.calls + 20);
+  expect(r.false.hdr, 'no HDR emitters without bloom').toBe(1);
+  expect(r.true.tex, 'the bloom targets are kept, not rebuilt').toBe(await wp.run(() => { __t.props({ bloom: false }); __t.props({ bloom: true }); __t.render(); return renderer.info.memory.textures; }));
+});
+
 test('shadows darken the ground, and the shadow camera covers the whole screen', async ({ wp }) => {
   await wp.boot();
   await wp.sim(3);

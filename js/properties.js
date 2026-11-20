@@ -76,6 +76,12 @@ const WE_PROPERTIES = {
   "precision": 1,
   "condition": "timemode.value == 'fixed'"
  },
+ "bloom": {
+  "order": 7,
+  "text": "Glow around lights and fire (bloom)",
+  "type": "bool",
+  "value": true
+ },
  "audiosensitivity": {
   "order": 10,
   "text": "Audio sensitivity, %",

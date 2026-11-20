@@ -29,6 +29,7 @@ window.wallpaperPropertyListener = {
     if (has('flybyfrequency')) CFG.flyby = p.flybyfrequency.value;
     if (has('autoflight')) CFG.auto = p.autoflight.value;
     if (has('shadows')) CFG.shadows = p.shadows.value;
+    if (has('bloom')) CFG.bloom = p.bloom.value;
     if (has('showpanel')) CFG.showPanel = p.showpanel.value;
     if (has('panelposition')) CFG.panelPos = p.panelposition.value;
     if (has('panelscale')) CFG.panelScale = p.panelscale.value;
@@ -71,6 +72,7 @@ function init() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.NeutralToneMapping;   // bright lights / flashes roll off instead of clipping; colours below ~0.8 untouched
+  renderer.info.autoReset = false;                   // counted per frame (renderFrame), not per pass
   scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x9fc0da, 300, 800);
   camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 700);
 
@@ -92,7 +94,7 @@ function init() {
   TERRAIN.build(seasonNow());
 
   FX.tracers = new Tracers(scene, 1200);
-  FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);
+  FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);   // (HDR with bloom: updateBloom)
   FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 420, true);   // (a burning structure keeps ~50 up)
   FX.scorch = new Scorch(scene, 120);
   FX.lights = new FlashLights(scene, 4);
@@ -167,7 +169,39 @@ function retireAircraft() {
 
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
+  if (composer) composer.setSize(window.innerWidth, window.innerHeight);
   updateCamera();
+}
+/* ---- one frame on screen: the scene, through the bloom passes when CFG.bloom ----
+   The scene is rendered into a half-float (HDR) multisampled target, UnrealBloomPass adds the glow of everything brighter
+   than its threshold (lights, flashes, fire, tracers: HDR colours > 1), OutputPass tone maps and encodes it (sRGB).
+   Without bloom the renderer tone maps / encodes itself. Built on first use, kept (toggling it costs nothing after). */
+let composer = null, bloomPass = null;
+function buildComposer() {
+  const w = window.innerWidth, h = window.innerHeight, pr = renderer.getPixelRatio();
+  const rt = new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: 4 });
+  composer = new THREE.EffectComposer(renderer, rt);
+  composer.addPass(new THREE.RenderPass(scene, camera));
+  bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(w, h), 0.5, 0.45, 1); composer.addPass(bloomPass);
+  composer.addPass(new THREE.OutputPass());
+  composer.setSize(w, h); updateBloom();
+}
+/* the glow follows the light: stronger at night (the lamps, the windows, a flash in the dark), a high threshold by day
+   (sunlit snow / white roofs stay out of it). The emitters are HDR (colours > 1: what glows) only with bloom on — without
+   it they would just be brighter than they always were. */
+let HDR = 1;
+function updateBloom() {
+  HDR = CFG.bloom ? 1 : 0; BEAM_G.value = CFG.bloom ? 1.25 : 2.2;
+  const k = HDR * (0.35 + 0.65 * ENV.lightsOn);   // (by day a flame stays a flame, not a red ball)
+  FX.flash.mesh.material.uniforms.uK.value = 1 + 1.1 * k; FX.tracers.mesh.material.color.setScalar(1 + 1.2 * k); SPRITE_AG.value = CFG.bloom ? 0.6 : 1; SPRITE_CP.value = CFG.bloom ? 0.6 : 1;
+  if (!bloomPass) return;
+  bloomPass.strength = lerp(0.35, 0.7, ENV.night); bloomPass.threshold = lerp(1.6, 0.9, ENV.lightsOn); bloomPass.radius = 0.45;
+}
+function renderFrame() {
+  renderer.info.reset();
+  if (CFG.shadows) fitShadow();
+  if (CFG.bloom) { if (!composer) buildComposer(); composer.render(); }
+  else renderer.render(scene, camera);
 }
 function updateCamera() {
   const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
@@ -214,7 +248,8 @@ function updateEnvironment() {
   ENV.dustTint.setHex(S.ground).lerp(k.smoke, 0.45);
   ENV.lightsOn = 1 - smoothstep(-3, 5, sp.elev);
   ENV.night = 1 - smoothstep(-10, 1, sp.elev);
-  BASE.winMat.emissive.setHex(0xffc27a).multiplyScalar(0.75 * ENV.lightsOn);
+  updateBloom();
+  BASE.winMat.emissive.setHex(0xffc27a).multiplyScalar((0.75 + 0.85 * HDR) * ENV.lightsOn);   // HDR: lit windows glow (bloom)
 }
 
 /* ---- audio ---- */
@@ -652,7 +687,7 @@ function updateLights() {
   for (const m of NAV_MATS) {
     let a = m.userData.day ? Math.max(ENV.lightsOn, 0.75) : ENV.lightsOn; const b = m.userData.blink;   // vehicle beacons flash by day too
     if (b) { const ph = ((T / b.period) + (b.phase || 0)) % 1; a *= ((ph + 1) % 1) < b.duty ? 1 : 0; }
-    m.opacity = a; m.size = m.userData.scale * ENV.ppu;
+    m.opacity = a; m.size = m.userData.scale * ENV.ppu; m.color.setScalar(1 + 1.6 * HDR * ENV.lightsOn);   // HDR at night: the lamps glow (bloom)
   }
   for (const s of SEARCHLIGHTS) {
     const on = ENV.lightsOn * s.enabled;
@@ -878,8 +913,7 @@ function frame(ms) {
   const el = clamp((ms - lastMs) / 1000, 0, 0.25); lastMs = ms;
   const n = Math.max(1, Math.ceil(el / 0.05)), dt = el / n;
   for (let i = 0; i < n * TIME_SCALE; i++) step(dt);
-  if (CFG.shadows) fitShadow();
-  renderer.render(scene, camera);
+  renderFrame();
 }
 /* The sun's shadow camera covers just the visible ground: the light-space bounds of the screen corners at ground level.
    Anything casting onto the screen lies above that area along the light, however far out or high (a jet climbing

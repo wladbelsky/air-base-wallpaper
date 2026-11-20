@@ -37,6 +37,7 @@ const CFG = {
   subtitles: true,    // Ace Combat style radio subtitles
   saveState: true,    // remember who is in the air / on a mission between sessions (js/persist.js)
   shadows: true,
+  bloom: true,        // glow around lights, fire and flashes (post-processing)
   showPanel: true,
   panelPos: 'br',
   panelScale: 100,
