@@ -205,3 +205,23 @@ test('GPU memory plateaus over a long fight with fly-bys, missiles and smoke', a
   expect(late.p, 'shader programs').toBeLessThanOrEqual(early.p + 2);
   expect(late.reach, `reachable geometries ${mem.map(m => m.reach).join(' ')}`).toBeLessThan(early.reach * 1.1 + 20);
 });
+
+test('perfReport: averages frames, CPU, draw calls and lights; perfFlags keeps its switches in localStorage', async ({ wp }) => {
+  await wp.boot();
+  // two reports at once (the second one starts later): each keeps its own frames (the node frame advanced as the
+  // renderer's own rAF loop would: the harness has none)
+  const [r, r2] = await wp.run(async () => {
+    const f = ms => { renderer._nodes.nodeFrame.update(); frame(ms); };
+    const p = perfReport(0.3); for (let i = 1; i <= 5; i++) f(i * 16.7);
+    const p2 = perfReport(0.2); for (let i = 6; i <= 10; i++) f(i * 16.7);
+    return Promise.all([p, p2]);
+  });
+  expect(r.frames).toBe(10);
+  expect(r2.frames).toBe(5);
+  expect(r.frameMs).toBeCloseTo(16.7, 1);
+  expect(r.drawCalls).toBeGreaterThan(50);
+  expect(r.backend).toBe('WebGL 2');
+  expect(r.batches).toBeGreaterThan(0);
+  const f = await wp.run(() => { perfFlags({ gl: 'webgl2' }); const a = localStorage.getItem('fab-perf'); perfFlags({}); return [a, localStorage.getItem('fab-perf')]; });
+  expect(f).toEqual(['{"gl":"webgl2"}', '{}']);
+});

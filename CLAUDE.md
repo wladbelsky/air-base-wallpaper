@@ -54,7 +54,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=48`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=49`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -539,7 +539,13 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - Browser preview: serve the folder, e.g. `python -m http.server 8765`, open `http://localhost:8765/`.
   The ⚙ SETTINGS drawer mirrors all WE properties (stored in `localStorage`); URL params `?hour=22`,
   `?zoom=150`, `?season=winter`, `?weather=storm`, `?demo=1`, `?ts=N` (time scale), `?warm=0` (no shader warm-up),
-  `?gl=webgl2` (the WebGL 2 backend), `?clustered=1` (experimental), `?vol=1` (the volume on WebGL 2).
+  `?gl=webgl2` (the WebGL 2 backend), `?clustered=1` (experimental), `?vol=1` (the volume on WebGL 2), `?gputime=1`
+  (`GPU.ms` = GPU time of the last frame's render / compute passes, timestamp queries, sampled twice a second).
+- **Performance on a real GPU** (also inside Wallpaper Engine: Settings → General → "CEF devtools port", then
+  `http://localhost:<port>` in Chrome → the wallpaper's console): `perfReport(60)` (main.js) logs and returns frame / CPU
+  / GPU times, hitches, draw calls, lit point / spot lights, batches, memory, the backend and the settings in effect;
+  `perfFlags({ gputime: true })` / `perfFlags({ gl: 'webgl2' })` / `perfFlags({ clustered: true })` / `perfFlags({})`
+  store debug switches in `localStorage` (`fab-perf`, read at load: `PERF.flags`) since WE passes no URL parameters.
 - **Automated tests** (`tests/`, Playwright Test, two projects): `webgl2` — everything, headless Chromium + SwiftShader,
   WebGPURenderer's WebGL 2 backend; `webgpu` — `tests/webgpu.spec.js` on real WebGPU (SwiftShader through Vulkan): a
   *headed* Chromium (headless drops its WebGPU instance, even for a bare clear), so the suite runs under `xvfb-run -a`.

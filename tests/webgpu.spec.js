@@ -52,3 +52,18 @@ test('a WebGPU device that keeps failing falls back to WebGL 2 for this release 
   expect(await wp.run(() => { localStorage.setItem(GL_KEY, JSON.stringify({ v: 'old', gl: 'webgl2' })); return gpuFellBack(); })).toBe(false);
   errors.length = 0;   // (the simulated errors were logged)
 });
+
+test('perfReport on WebGPU with GPU timing (?gputime=1: timestamp queries) — no GPU error', async ({ wp }) => {
+  await wp.boot({ gl: 'webgpu', query: '?hour=12&gputime=1' });
+  // (SwiftShader takes seconds a frame: the frames run back to back, the report's timer fires after them; its timestamp
+  // queries are resolved twice a second of frame time)
+  const r = await wp.run(() => {
+    const f = ms => { renderer._nodes.nodeFrame.update(); frame(ms); };
+    const p = perfReport(0.05); for (let i = 1; i <= 6; i++) f(i * 600);
+    return p;
+  });
+  expect(r.backend).toBe('WebGPU');
+  expect(r.frames).toBe(6);
+  expect(r.drawCalls).toBeGreaterThan(50);
+  expect(typeof r.gpuMs, 'GPU timing on').toBe('number');
+});

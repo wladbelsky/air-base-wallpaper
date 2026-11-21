@@ -73,14 +73,15 @@ function applySettings() {
    the same node materials and passes on both. init() waits for the device: `ready` comes after it. */
 async function init() {
   const canvas = document.getElementById('c');
-  renderer = new THREE.WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', forceWebGL: QS.get('gl') === 'webgl2' || gpuFellBack() });
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', trackTimestamp: GPU.timing,
+    forceWebGL: QS.get('gl') === 'webgl2' || PERF.flags.gl === 'webgl2' || gpuFellBack() });
   await renderer.init();
   GPU.webgpu = !!renderer.backend.isWebGPUBackend;
   if (GPU.webgpu) watchGpuErrors();
   // Forward+ clustered lighting (WebGPU only: a compute pass bins the point / spot lights per screen tile and depth slice,
   // a fragment loops over its cluster's): many real lights are cheap — every searchlight, more flashes, the fires. On
   // the WebGL 2 backend the lights stay rationed (4 flash lights, 4 helicopter lights, spot lights hidden by day).
-  GPU.clustered = GPU.webgpu && QS.get('clustered') === '1';   // (experimental: its clusters don't fit our orthographic camera — the spots lit nothing)
+  GPU.clustered = GPU.webgpu && (QS.get('clustered') === '1' || PERF.flags.clustered === true);   // (experimental: its clusters don't fit our orthographic camera — the spots lit nothing)
   if (GPU.clustered) renderer.lighting = new THREE.ClusteredLighting(LIGHT_MAX);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -136,7 +137,22 @@ async function init() {
    loop draws nothing until SHADERS_READY (a draw with a program still compiling would wait for it); frames under the
    splash make the shadow pass's programs (compile() doesn't) and the post-processing passes (bloom). */
 let SHADERS_READY = false;
-const GPU = { webgpu: false, clustered: false };   // which backend WebGPURenderer runs on (renderer.backend), clustered lights
+// perfReport() state and the debug switches kept in localStorage (see perfReport, below frame())
+const PERF = { recs: [],
+  flags: (() => { try { return JSON.parse(localStorage.getItem('fab-perf') || '{}') || {}; } catch (e) { return {}; } })(),
+  sample(ms, cpu) {   // into every report running (each perfReport() call has its own record)
+    let lit = 0; scene.traverseVisible(o => { if ((o.isPointLight || o.isSpotLight) && o.intensity > 0) lit++; });
+    for (const r of this.recs) {
+      if (r.last) r.frame.push(ms - r.last); r.last = ms;
+      r.cpu.push(cpu); r.calls.push(renderer.info.render.drawCalls); r.lights.push(lit);
+      if (GPU.timing) { r.gpu.push(GPU.ms.render); r.comp.push(GPU.ms.compute); }
+    }
+  }
+};
+const GPU = { webgpu: false, clustered: false,   // which backend WebGPURenderer runs on (renderer.backend), clustered lights
+  // ?gputime=1 / perfFlags({ gputime: true }) (debug): GPU time of the last frame's render / compute passes in ms, measured
+  // twice a second (GPU.ms; timestamp queries)
+  timing: QS.get('gputime') === '1' || PERF.flags.gputime === true, ms: { render: 0, compute: 0 }, tsT: 0 };
 const LIGHT_MAX = 128;
 /* safety net: WebGPU failing (a stream of validation errors in the first 30 s — once a nothing-drawn screen in WE) →
    remember it for this release (the cache-buster) and reload on the WebGL 2 backend; the next release tries WebGPU again */
@@ -1005,8 +1021,49 @@ function frame(ms) {
   // simulate the real elapsed time in sub-steps of at most 50 ms: low FPS limits don't slow the world down
   const el = clamp((ms - lastMs) / 1000, 0, 0.25); lastMs = ms;
   const n = Math.max(1, Math.ceil(el / 0.05)), dt = el / n;
+  const t0 = PERF.recs.length ? performance.now() : 0;
   for (let i = 0; i < n * TIME_SCALE; i++) step(dt);
   renderFrame();
+  if (PERF.recs.length) PERF.sample(ms, performance.now() - t0);
+  if (GPU.timing && ms - GPU.tsT > 500) {
+    GPU.tsT = ms;
+    renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER).then(v => { GPU.ms.render = v || 0; }, () => {});
+    renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE).then(v => { GPU.ms.compute = v || 0; }, () => {});
+  }
+}
+/* ---- performance report on a real GPU. In Wallpaper Engine: Settings → General → "CEF devtools port" (e.g. 8080),
+   open http://localhost:8080 in Chrome, pick the wallpaper, then in its console:
+     perfReport(60)                   — measures 60 s and logs a summary (frame times, CPU, GPU, draw calls, lights)
+     perfFlags({ gputime: true })     — GPU timing (timestamp queries) from the next load (F5 in the devtools)
+     perfFlags({ gl: 'webgl2' })      — the next load on the WebGL 2 backend (compare with WebGPU)
+     perfFlags({ clustered: true })   — the next load with clustered lighting (experimental, WebGPU)
+     perfFlags({})                    — back to normal
+   The flags live in localStorage (WE passes no URL parameters); ?gputime=1 / ?gl=webgl2 / ?clustered=1 in a browser. ---- */
+function perfFlags(f) { try { localStorage.setItem('fab-perf', JSON.stringify(f || {})); } catch (e) { return 'localStorage unavailable'; } return 'saved — reload to apply: ' + JSON.stringify(f || {}); }
+function perfReport(sec = 30) {
+  const r = { frame: [], cpu: [], gpu: [], comp: [], calls: [], lights: [], last: 0, T0: T, t0: performance.now() }; PERF.recs.push(r);
+  console.log(`perfReport: measuring ${sec} s…`);
+  return new Promise(res => setTimeout(() => {
+    PERF.recs.splice(PERF.recs.indexOf(r), 1);
+    const avg = a => a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(2) : null;
+    const p95 = a => a.length ? +[...a].sort((x, y) => x - y)[Math.floor(a.length * 0.95)].toFixed(2) : null;
+    const b = BATCH.stats();
+    const out = {
+      backend: GPU.webgpu ? 'WebGPU' : 'WebGL 2', fellBack: gpuFellBack(), clustered: GPU.clustered, volumetric: VOLUME.active, bloom: CFG.bloom,
+      shadows: CFG.shadows, fpsLimit, size: `${renderer.domElement.width}x${renderer.domElement.height}`, night: +ENV.night.toFixed(2),
+      combat: AUD.armed, weather: WEATHER.kind, aircraft: AIRCRAFT.length, enemies: ENEMIES.length, frames: r.cpu.length,
+      // simulated seconds per real second: 1 at any frame rate (below 1 only when frames take over 0.25 s, or paused)
+      simRate: +((T - r.T0) / Math.max(1e-3, (performance.now() - r.t0) / 1000)).toFixed(3), fps: r.frame.length ? +(1000 / avg(r.frame)).toFixed(1) : 0,
+      frameMs: avg(r.frame), frameMsP95: p95(r.frame), frameMsMax: r.frame.length ? +Math.max(...r.frame).toFixed(1) : null,
+      hitches: r.frame.filter(t => t > 33.4).length,   // frames longer than two vsyncs: visible stutter
+      cpuMs: avg(r.cpu), cpuMsP95: p95(r.cpu), cpuMsMax: r.cpu.length ? +Math.max(...r.cpu).toFixed(1) : null,
+      gpuMs: GPU.timing ? avg(r.gpu) : 'perfFlags({ gputime: true }) + reload', gpuComputeMs: GPU.timing ? avg(r.comp) : null,
+      drawCalls: avg(r.calls), lights: avg(r.lights), lightsMax: r.lights.length ? Math.max(...r.lights) : 0,
+      batches: b.batches, batchInstances: b.instances,
+      programs: renderer.info.memory.programs, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures
+    };
+    console.log('perfReport ' + JSON.stringify(out)); res(out);
+  }, sec * 1000));
 }
 /* The sun's shadow camera covers just the visible ground: the light-space bounds of the screen corners at ground level.
    Anything casting onto the screen lies above that area along the light, however far out or high (a jet climbing

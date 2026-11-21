@@ -209,6 +209,11 @@ fly-by frequency, automatic flight ops, missions, camera shake, enemies, season,
 control panel (show, position, size, colour), the counts of every aircraft type, session memory, subtitles and the base
 name.
 
+To measure performance on your machine: in Wallpaper Engine's settings set a **CEF devtools port** (General tab),
+open `http://localhost:<port>` in Chrome, pick the wallpaper and run `perfReport(60)` in its console — after a minute
+it logs frame rate, hitches, CPU and GPU time, draw calls and lights. `perfFlags({ gputime: true })` and a reload adds
+GPU timing; `perfFlags({ gl: 'webgl2' })` compares with the WebGL 2 backend; `perfFlags({})` resets.
+
 ## Development
 
 Plain JavaScript, no build step: three.js r187 (WebGPURenderer, WebGL 2 fallback) is vendored as one bundle
