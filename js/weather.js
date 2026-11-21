@@ -54,7 +54,7 @@ const WEATHER = {
     this.timer = rand(900, 2400);
   },
   /* the saved kind (persist.js), once per page load */
-  restore(w) { if (this.back || !w || !WX_TARGET[w.kind]) return; this.back = true; this.kind = w.kind; this.timer = clamp(+w.t || 900, 60, 2400); const tg = WX_TARGET[w.kind]; this.oc = tg.oc; this.rain = tg.rain; this.fog = tg.fog; this.wind = tg.wind; this.wet = tg.rain > 0 ? 1 : 0; },
+  restore(w) { if (this.back || !w || !WX_TARGET[w.kind]) return; this.back = true; this.kind = w.kind; this.timer = clamp(Number.isFinite(+w.t) ? +w.t : 900, 60, 2400); const tg = WX_TARGET[w.kind]; this.oc = tg.oc; this.rain = tg.rain; this.fog = tg.fog; this.wind = tg.wind; this.wet = tg.rain > 0 && !this.snowy() ? 1 : 0; },   // (t 0: due now, not 15 min; winter: nothing wet)
   save() { return CFG.weatherMode === 'auto' ? { kind: this.kind, t: Math.round(this.timer / 60) * 60 } : null; },
   update(dt) {
     if (CFG.weatherMode === 'auto' && (this.timer -= dt) <= 0) this.next();
@@ -69,7 +69,7 @@ const WEATHER = {
     this.applyFog();
     // gusts: the wind (smoke, dust, the rain's slant) swells and eases
     this.gustPh += dt * (0.25 + 0.2 * this.wind);
-    const g = 1 + 0.25 * Math.sin(this.gustPh) * Math.sin(this.gustPh * 0.37 + 1.3) * Math.min(1, this.wind - 0.3);
+    const g = 1 + (CFG.weatherMode === 'default' ? 0 : 0.25) * Math.sin(this.gustPh) * Math.sin(this.gustPh * 0.37 + 1.3) * Math.min(1, this.wind - 0.3);   // (default: the steady wind it always had)
     WIND.copy(WIND0).multiplyScalar(this.wind * g);
     this.updateRain(dt); this.updateMist(dt); this.updateLightning(dt);
     hemi.intensity = ENV.hemiI * (1 + 5 * this.flash);                                      // a lightning flash: the sky light (no extra light)

@@ -66,6 +66,7 @@ function applySettings() {
   for (const s of SITES) if (s.ui) s.ui.nm.textContent = s.name();
   sunLight.shadow.autoUpdate = CFG.shadows;   // (off: no shadow pass, intensity 0 — toggling castShadow would rebuild every material)
   updateCamera(); updateEnvironment();
+  if (pipeline && VOLUME.on() && !VOLUME.active) dropPipeline();   // volumetric switched on: the next frame builds the pipeline with it
 }
 
 /* ---- init ---- */
@@ -75,6 +76,15 @@ async function init() {
   const canvas = document.getElementById('c');
   renderer = new THREE.WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', trackTimestamp: GPU.timing,
     forceWebGL: QS.get('gl') === 'webgl2' || PERF.flags.gl === 'webgl2' || gpuFellBack() });
+  // the device / context lost (a GPU reset, a driver update, sleep): WebGPURenderer stops drawing for good (WebGLRenderer
+  // restored its context) — reload (PERSIST saves on pagehide); lost early on WebGPU: WebGL 2 for this release
+  const lost = renderer.onDeviceLost;
+  renderer.onDeviceLost = (info) => {
+    lost.call(renderer, info);                                     // (logs it, stops drawing)
+    if (GPU.reloading) return; GPU.reloading = true;
+    if (GPU.webgpu && performance.now() < 30000) try { localStorage.setItem(GL_KEY, JSON.stringify({ v: GL_VER, gl: 'webgl2' })); } catch (e) {}
+    setTimeout(() => location.reload(), 2000);
+  };
   await renderer.init();
   GPU.webgpu = !!renderer.backend.isWebGPUBackend;
   if (GPU.webgpu) watchGpuErrors();
@@ -185,8 +195,10 @@ async function warmShaders() {
   scene.updateMatrixWorld(); BATCH.sync();   // the batches exist (their programs are compiled with the rest)
   const spots = SEARCHLIGHTS.filter(s => s.light).map(s => s.light), flip = () => spots.forEach(l => { l.visible = !l.visible; });
   try {
-    await compileVisible(scene); await compileVisible(g, scene); flip(); await compileVisible(scene); await compileVisible(g, scene); flip();   // (one at a time: WebGPURenderer.compileAsync isn't re-entrant)
+    await compileVisible(scene); await compileVisible(g, scene);   // (one at a time: WebGPURenderer.compileAsync isn't re-entrant)
+    if (!SHADERS_READY) { flip(); await compileVisible(scene); await compileVisible(g, scene); }   // (not once the loop runs — the 15 s fallback: its updateLights sets them)
   } catch (e) { console.warn('shader warm-up', e); }
+  spots.forEach(l => { l.visible = GPU.clustered || ENV.lightsOn > 0; });   // as updateLights has them (a flip back after the loop had set them left them wrong)
   // one frame with the enemies in view (the camera's middle): their shadow-pass (depth) programs, which compile() doesn't
   // make, and the post-processing passes
   g.position.copy(CAM_TGT); g.children.forEach((m, i) => m.position.set((i % 6 - 2.5) * 4, 6, Math.floor(i / 6) * 4 - 4));
@@ -259,6 +271,7 @@ function buildPipeline() {
   bloomNode = THREE.bloom(sceneOut, 0.5, 0.45, 1);
   updateBloom();
 }
+function dropPipeline() { pipeline.dispose(); scenePass.dispose(); bloomNode.dispose(); pipeline = bloomNode = sceneOut = scenePass = pipeBloom = null; }
 /* ---- volumetric light (WebGPU; ?vol=1 forces it on the WebGL 2 backend): the searchlights' beams lit in the haze ----
    A box over the base (VOL_LAYER: only its own low-res pass draws it) with a VolumeNodeMaterial: the ray through it is
    marched in steps and every light (clustered, WebGPU: cheap) scatters into it by the haze's density — beams from the
@@ -266,8 +279,9 @@ function buildPipeline() {
    clear day); the meshed beams (coneMaterial) are hidden meanwhile. Rendered at a quarter of the resolution. */
 const VOL_LAYER = 2;
 const VOLUME = {
-  mesh: null, density: null, active: false,
+  mesh: null, density: null, active: false, blank: false,
   on() { return CFG.volumetric && (GPU.webgpu || QS.get('vol') === '1'); },
+  live() { return this.active && CFG.volumetric; },   // built and switched on (switched off later: hidden, its pass idle)
   build() {
     const { uniform, Fn, vec2, vec3, smoothstep, screenCoordinate, screenUV, interleavedGradientNoise } = THREE.TSL;
     this.density = uniform(0);
@@ -278,7 +292,12 @@ const VOLUME = {
     this.mesh.layers.set(VOL_LAYER); this.mesh.frustumCulled = false; scene.add(this.mesh);
     // its pass clears to black / transparent: with the renderer's clear colour (the sky) it was added over the whole frame
     const vp = THREE.TSL.pass(scene, camera, { depthBuffer: false }), up = vp.updateBefore, cc = new THREE.Color();
-    vp.updateBefore = function (frame) { renderer.getClearColor(cc); const a = renderer.getClearAlpha(); renderer.setClearColor(0x000000, 0); const r = up.call(this, frame); renderer.setClearColor(cc, a); return r; };
+    // nothing in the haze (a clear day, switched off): cleared once, then not drawn (its target stays black)
+    vp.updateBefore = function (frame) {
+      if (!VOLUME.mesh.visible && VOLUME.blank) return;
+      VOLUME.blank = !VOLUME.mesh.visible;
+      renderer.getClearColor(cc); const a = renderer.getClearAlpha(); renderer.setClearColor(0x000000, 0); const r = up.call(this, frame); renderer.setClearColor(cc, a); return r;
+    };
     vp.setLayers(new THREE.Layers()); vp.getLayers().set(VOL_LAYER); vp.setResolutionScale(0.25);
     this.vp = vp; this.active = true;
     // blurred back up (3×3 Gaussian, one low-res texel apart, bilinear): the dithered ray starts (a texel = 4×4 pixels)
@@ -291,7 +310,7 @@ const VOLUME = {
   update() {
     if (!this.active) return;
     const d = (0.025 + 0.09 * WEATHER.fog + 0.03 * WEATHER.rain) * Math.max(ENV.lamps, ENV.lightsOn);
-    this.density.value = d; this.mesh.visible = d > 1e-4;
+    this.density.value = d; this.mesh.visible = CFG.volumetric && d > 1e-4;
     const rt = this.vp.renderTarget; this.texel.value.set(1 / Math.max(1, rt.width), 1 / Math.max(1, rt.height));
   }
 };
@@ -806,7 +825,10 @@ function updateLights() {
     // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn);
     // clustered (WebGPU): always shown — a light out of its cluster costs nothing, and no toggle rebuilds the lights
     if (s.light) { s.light.intensity = s.o.intensity * on * SPOT_K; s.light.visible = GPU.clustered || ENV.lightsOn > 0; }
-    if (s.cone) { s.cone.material.uOpacity.value = s.o.coneOpacity * beam * (0.45 + 0.55 * Math.max(ENV.night, WEATHER.fog * 0.6)); s.cone.visible = !(VOLUME.active && s.light); }   // (a real light's beam: the volume draws it)
+    // a real light's beam: the volume draws what the light gives (ENV.lightsOn); the cone only the lamps' share beyond it
+    // (by day in fog the spot light is hidden: its beam was gone altogether)
+    const vol = VOLUME.live() && s.light, k = vol ? beam * (1 - ENV.lightsOn / Math.max(1e-3, ENV.lamps)) : beam;
+    if (s.cone) { s.cone.material.uOpacity.value = s.o.coneOpacity * k * (0.45 + 0.55 * Math.max(ENV.night, WEATHER.fog * 0.6)); s.cone.visible = !vol || k > 1e-3; }
   }
   VOLUME.update();
 }

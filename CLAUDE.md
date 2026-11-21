@@ -54,7 +54,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=51`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=52`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -120,13 +120,20 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   run the rationed lights: 4 flash lights, 4 helicopter lights, 2 apron floodlights, spot lights hidden by day.
 - **WebGPU safety net** (`watchGpuErrors` / `gpuFellBack`, main.js): 20 uncaptured GPU errors in the first 30 s →
   `localStorage` `fab.gl = { v: <cache-buster>, gl: 'webgl2' }` and a reload on the WebGL 2 backend; the next release
-  (another `?v`) tries WebGPU again.
+  (another `?v`) tries WebGPU again. A lost device / context (a GPU reset, a driver update, sleep: WebGPURenderer stops
+  drawing for good, it never restores a context) → `renderer.onDeviceLost` reloads after 2 s (lost in the first 30 s on
+  WebGPU: WebGL 2 for this release).
 - **Volumetric light** (`VOLUME`, main.js; `CFG.volumetric`, WebGPU, `?vol=1` forces it on WebGL 2): a box over the base
   on `VOL_LAYER` with a `VolumeNodeMaterial`, drawn by its own quarter-resolution pass and added to the scene: the rays
   are marched and every light on `VOL_LAYER` (spot / flash / fire lights enable it; not the sun or the sky) scatters by
   the haze's density (night × weather: thick in fog and rain). The meshed beams of real lights are hidden meanwhile.
   Its output is blurred (3×3 Gaussian in TSL, `VOLUME.texel`): the dithered ray starts at a quarter of the resolution
-  showed as a checkerboard in the floodlights' beams (`gaussianBlur` is an addon not in the vendored bundle). Its
+  showed as a checkerboard in the floodlights' beams (`gaussianBlur` is an addon not in the vendored bundle). Built with
+  the pipeline when `VOLUME.on()`; `VOLUME.live()` (built and `CFG.volumetric`) gates the mesh and the cone swap, and
+  switching it on when it wasn't built drops the pipeline (`dropPipeline`: rebuilt next frame). With its mesh hidden (no
+  haze, switched off) the pass clears once and is skipped. A real light's meshed cone draws the lamps' share beyond
+  `ENV.lightsOn` (by day in fog its spot light is hidden). Known gap: the rays aren't stopped at the scene's depth (the
+  glow of a beam behind a roof shows over it). Its
   pass clears to black (its `updateBefore` is wrapped): with the renderer's clear colour (the sky) it was added over the
   whole frame.
 - **Shader warm-up** (`warmShaders`, end of `init`, under the splash): `compileAsync` (async pipelines on WebGPU,
@@ -154,7 +161,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   low down the camera-facing sprite was cut off by the ground along a straight line), the
   lightning `bolt` (instanced segments, HDR). Lightning flashes the sky light (`hemi.intensity = ENV.hemiI × …`): no
   light is added. In winter the rain falls as `TERRAIN`'s snow (heavier, shown even with `CFG.weather` off), no
-  lightning, nothing gets wet. `wet` darkens `PLAIN_MAT` / the ground and raises their gloss (uniforms only).
+  lightning, nothing gets wet (the snow's ring — 3600 slots — wraps at 900 × rate / 220: a storm's flakes live as long
+  as at the base rate). `default` mode has no gusts. `wet` darkens `PLAIN_MAT` / the ground and raises their gloss (uniforms only).
 
 ## Airfield (`js/airfield.js`, `js/aircraft.js`)
 - **Rooftops**: the builders in `base.js` list the buildings' boxes in `OBSTACLES` (`obstacle(p, x, z, w, d, top)`:
@@ -509,7 +517,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   / visibility. Batches: one per `M(colour, options)` options set (material `M(white, options)`, colour per instance —
   so `M()` materials must never be changed), one per other material (`PLAIN_MAT`, seasonal roofs, windows). A geometry
   enters its batch once (clones share it) and leaves it when disposed; an instance whose mesh left the scene for ~1 s of
-  sim time is freed; an empty batch is disposed; a mesh whose material is swapped (`wreckArmor`) is drawn on its own.
+  sim time is freed; an empty batch is disposed; a mesh whose material is swapped (`wreckArmor`) moves to that material's
+  batch (`BATCH.sync`: `remove` + `add`).
   Only what is drawn gets an instance (an aircraft behind a shut door gets one when it comes out).
 - Many repeated objects are one `InstancedMesh` (vegetation, fence posts, stand marks, helicopter pads, scorch marks, tracers).
 - `shade()` sets `castShadow`/`receiveShadow` per mesh; don't blanket-enable shadows with `traverse`.

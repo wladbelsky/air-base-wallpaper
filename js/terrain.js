@@ -148,8 +148,9 @@ const TERRAIN = {
   buildWeather(season) {
     const kind = season === 'winter' ? 'snow' : season === 'autumn' ? 'leaves' : null;
     if (!this.weather) {
-      // an instanced Sprite with a PointsNodeMaterial (sized points: WebGPU draws Points 1 px wide)
-      const n = 900, posA = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage), colA = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
+      // an instanced Sprite with a PointsNodeMaterial (sized points: WebGPU draws Points 1 px wide); room for a winter
+      // storm's heavy snow (update: 900 used at the base rate)
+      const n = 3600, posA = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage), colA = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
       const { instancedBufferAttribute: iba, vec4, materialColor } = THREE.TSL;
       const mat = new THREE.PointsNodeMaterial({ size: 3, map: TEX.soft, transparent: true, depthWrite: false, sizeAttenuation: false, opacity: 0.9 });
       mat.positionNode = iba(posA); mat.colorNode = vec4(iba(colA), 1).mul(materialColor);
@@ -165,9 +166,12 @@ const TERRAIN = {
     const wx = WEATHER.rain, on = w.kind && (CFG.weather || (w.kind === 'snow' && wx > 0.05)); w.pts.visible = !!on;   // (winter rain / storms: snow, heavier)
     if (!on) return;
     const P = w.posA.array, C = w.colA.array, snow = w.kind === 'snow';
-    w.acc += dt * (snow ? 220 * (1 + 3 * wx) : 26);
+    // the ring grows with the rate (each flake lives as long as at the base rate: a storm's 4x the rate in 900 slots
+    // recycled every flake after ~1 s, high up — the heavy snow was a flickering band, never falling)
+    const rate = snow ? 220 * (1 + 3 * wx) : 26, cap = Math.min(w.n, Math.round(900 * Math.max(1, rate / 220)));
+    w.acc += dt * rate;
     while (w.acc > 1) {
-      w.acc--; const i = w.next; w.next = (w.next + 1) % w.n;
+      w.acc--; const i = w.next % cap; w.next = (i + 1) % cap;
       const p = AIRWAR.groundAt(rand(-1.15, 1.15), rand(-1.2, 1.3), 0);
       P[i * 3] = p.x + rand(-8, 8); P[i * 3 + 1] = rand(14, 30); P[i * 3 + 2] = p.z + rand(-8, 8);
       w.v[i * 3] = WIND.x * (snow ? 0.8 : 1.4); w.v[i * 3 + 1] = snow ? -rand(2.2, 3.4) : -rand(1.2, 2); w.v[i * 3 + 2] = WIND.z * (snow ? 0.8 : 1.4);

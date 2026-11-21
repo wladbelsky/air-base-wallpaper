@@ -198,8 +198,10 @@ function windowMat() { return new THREE.MeshPhongMaterial({ color: 0x14202c, emi
 /* ===== Navigation lights (point sprites) =====
    One instanced Sprite per group (WebGPU draws points only 1 px wide: a PointsNodeMaterial on a Sprite gives sized ones):
    per instance the light's position and colour; size in pixels (material.size), opacity, the glow texture. Tagged
-   userData.nav (aircraft switch theirs with their engines). */
+   userData.nav (aircraft switch theirs with their engines). NavSprite keeps its instance count when cloned (Sprite.copy
+   doesn't copy `count`: a cloned vehicle showed only the first of its head / tail lights). */
 const NAV_MATS = [];
+class NavSprite extends THREE.Sprite { copy(s, r) { super.copy(s, r); this.count = s.count; return this; } }
 function navLights(parent, list, blink, scale) {
   const n = list.length, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color();
   list.forEach((l, i) => { pos[i * 3] = l[0]; pos[i * 3 + 1] = l[1]; pos[i * 3 + 2] = l[2]; c.setHex(l[3]); c.toArray(col, i * 3); });
@@ -209,7 +211,7 @@ function navLights(parent, list, blink, scale) {
   m.colorNode = vec4(iba(new THREE.InstancedBufferAttribute(col, 3)), 1).mul(materialColor);
   m.userData = { scale: scale || 1.1, blink: blink || null };
   NAV_MATS.push(m);
-  const pts = new THREE.Sprite(m); pts.count = n; pts.frustumCulled = false; pts.renderOrder = 5; pts.userData.nav = true;
+  const pts = new NavSprite(m); pts.count = n; pts.frustumCulled = false; pts.renderOrder = 5; pts.userData.nav = true;
   parent.add(pts); return pts;
 }
 

@@ -1,4 +1,4 @@
-// Rebuilds js/three.rNNN.webgpu.min.js from the three package in node_modules (npm run vendor:three; in Docker: tools/vendor_three.ps1).
+// Rebuilds js/three.rNNN.webgpu.min.js from the three package in node_modules (npm run vendor:three).
 // three.js ships only ES modules since r160; the wallpaper's scripts are classic scripts sharing a global THREE, so the
 // whole namespace (+ the post-processing addons in tools/three-entry.js) goes into one IIFE that sets window.THREE.
 // On a three.js update: bump the version in package.json, rename the output (CEF caches the old file: it has no ?v=),
