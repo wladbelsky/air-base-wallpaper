@@ -114,8 +114,11 @@ const WEATHER = {
       this.mistAcc += dt * this.fog * 1.6;
       while (this.mistAcc > 1) {
         this.mistAcc--;
-        const p = AIRWAR.groundAt(rand(-1.3, 1.3), rand(-1.3, 1.3), 0); p.y = rand(0.8, 3.5);
-        this.mist.spawn(p, { s0: rand(18, 26), s1: rand(28, 40), life: rand(22, 32), a0: 0.22 * this.fog, color: 0xffffff, smoke: true, v: _wd.set(WIND.x * 0.6, 0, WIND.z * 0.6), drag: 0 });
+        // a bank is a sprite facing the camera, 28–40 wide: low down its lower half went into the ground and was cut off
+        // along a straight screen-horizontal line (a pale box over the runway in the rain). Its centre is raised by half
+        // its final size along the view's vertical (the ortho camera: the same place on screen, only drawn over the ground)
+        const s1 = rand(28, 40), p = AIRWAR.groundAt(rand(-1.3, 1.3), rand(-1.3, 1.3), 0); p.y = s1 * 0.5 * Math.cos(CFG.camElev * DEG) + rand(0.5, 2);
+        this.mist.spawn(p, { s0: rand(18, 26), s1, life: rand(22, 32), a0: 0.22 * this.fog, color: 0xffffff, smoke: true, v: _wd.set(WIND.x * 0.6, 0, WIND.z * 0.6), drag: 0 });
       }
     }
     this.mist.update(dt, ENV.fogTint, camera);

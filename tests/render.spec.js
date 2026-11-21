@@ -83,7 +83,7 @@ test('bloom: the night lights glow; toggling it renders without GL errors, count
   });
   expect(r.true.err).toBe(0); expect(r.false.err).toBe(0);
   // the glow adds light around the lamps; the passes add only a few draw calls to the scene's (counted per frame)
-  expect(r.true.lit, `bright pixels with bloom ${r.true.lit} vs without ${r.false.lit}`).toBeGreaterThan(r.false.lit * 1.06);
+  expect(r.true.lit, `bright pixels with bloom ${r.true.lit} vs without ${r.false.lit}`).toBeGreaterThan(r.false.lit * 1.03);   // (~+5 % since the night strength was halved)
   expect(r.true.calls).toBeGreaterThan(r.false.calls);
   expect(r.true.calls).toBeLessThan(r.false.calls + 20);
   expect(r.false.hdr, 'no HDR emitters without bloom').toBe(1);

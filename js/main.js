@@ -269,7 +269,7 @@ const VOLUME = {
   mesh: null, density: null, active: false,
   on() { return CFG.volumetric && (GPU.webgpu || QS.get('vol') === '1'); },
   build() {
-    const { uniform, Fn, vec3, smoothstep, screenCoordinate, interleavedGradientNoise } = THREE.TSL;
+    const { uniform, Fn, vec2, vec3, smoothstep, screenCoordinate, screenUV, interleavedGradientNoise } = THREE.TSL;
     this.density = uniform(0);
     const m = new THREE.VolumeNodeMaterial({ steps: GPU.webgpu ? 20 : 12 });
     m.offsetNode = interleavedGradientNoise(screenCoordinate);   // (dithered start: no banding)
@@ -280,13 +280,19 @@ const VOLUME = {
     const vp = THREE.TSL.pass(scene, camera, { depthBuffer: false }), up = vp.updateBefore, cc = new THREE.Color();
     vp.updateBefore = function (frame) { renderer.getClearColor(cc); const a = renderer.getClearAlpha(); renderer.setClearColor(0x000000, 0); const r = up.call(this, frame); renderer.setClearColor(cc, a); return r; };
     vp.setLayers(new THREE.Layers()); vp.getLayers().set(VOL_LAYER); vp.setResolutionScale(0.25);
-    this.active = true;
-    return vp.getTextureNode('output');
+    this.vp = vp; this.active = true;
+    // blurred back up (3×3 Gaussian, one low-res texel apart, bilinear): the dithered ray starts (a texel = 4×4 pixels)
+    // showed as a checkerboard in the floodlights' beams
+    const t = vp.getTextureNode('output'), tx = this.texel = uniform(new THREE.Vector2(1, 1));
+    const at = (x, y) => t.sample(screenUV.add(vec2(x, y).mul(tx)));
+    return at(0, 0).mul(4).add(at(1, 0).add(at(-1, 0)).add(at(0, 1)).add(at(0, -1)).mul(2))
+      .add(at(1, 1).add(at(-1, 1)).add(at(1, -1)).add(at(-1, -1))).div(16);
   },
   update() {
     if (!this.active) return;
     const d = (0.025 + 0.09 * WEATHER.fog + 0.03 * WEATHER.rain) * Math.max(ENV.lamps, ENV.lightsOn);
     this.density.value = d; this.mesh.visible = d > 1e-4;
+    const rt = this.vp.renderTarget; this.texel.value.set(1 / Math.max(1, rt.width), 1 / Math.max(1, rt.height));
   }
 };
 /* the glow follows the light: stronger at night (the lamps, the windows, a flash in the dark), a high threshold by day
@@ -299,7 +305,7 @@ function updateBloom() {
   FX.flash.uK.value = 1 + 1.1 * k; FX.tracers.mesh.material.color.setScalar(1 + 1.2 * k);
   if (!pipeline) return;
   if (pipeBloom !== CFG.bloom) { pipeBloom = CFG.bloom; pipeline.outputNode = CFG.bloom ? sceneOut.add(bloomNode) : sceneOut; pipeline.needsUpdate = true; }
-  bloomNode.strength.value = lerp(0.5, 1.4, ENV.night); bloomNode.threshold.value = lerp(1.4, 0.55, ENV.lightsOn); bloomNode.radius.value = 0.55;   // (BloomNode: a weaker scale than the old UnrealBloomPass)
+  bloomNode.strength.value = lerp(0.5, 0.7, ENV.night); bloomNode.threshold.value = lerp(1.4, 0.55, ENV.lightsOn); bloomNode.radius.value = 0.55;   // (BloomNode: a weaker scale than the old UnrealBloomPass)
 }
 function renderFrame() {
   renderer.info.reset();

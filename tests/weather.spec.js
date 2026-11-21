@@ -55,6 +55,9 @@ test('fog greys the day and closes in; the runway lights come on', async ({ wp }
   expect(clear.lamps).toBe(0);
   expect(fog.lamps, 'lamps on in the fog').toBeGreaterThan(0.5);
   expect(fog.real, 'the real spot lights stay off by day (a light shown recompiles every program)').toBe(0);
+  // a mist bank faces the camera: none reaches into the ground (its lower half was cut off along a straight line)
+  const low = await wp.run(() => FX.mist.items.filter(it => it.on && it.p.y < it.s1 * 0.5 * Math.cos(CFG.camElev * DEG)).length);
+  expect(low, 'mist banks cut by the ground').toBe(0);
 });
 
 test('a storm at night: lightning flashes the sky light and draws a bolt', async ({ wp }) => {

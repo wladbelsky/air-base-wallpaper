@@ -54,7 +54,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=50`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=51`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -124,7 +124,9 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 - **Volumetric light** (`VOLUME`, main.js; `CFG.volumetric`, WebGPU, `?vol=1` forces it on WebGL 2): a box over the base
   on `VOL_LAYER` with a `VolumeNodeMaterial`, drawn by its own quarter-resolution pass and added to the scene: the rays
   are marched and every light on `VOL_LAYER` (spot / flash / fire lights enable it; not the sun or the sky) scatters by
-  the haze's density (night × weather: thick in fog and rain). The meshed beams of real lights are hidden meanwhile. Its
+  the haze's density (night × weather: thick in fog and rain). The meshed beams of real lights are hidden meanwhile.
+  Its output is blurred (3×3 Gaussian in TSL, `VOLUME.texel`): the dithered ray starts at a quarter of the resolution
+  showed as a checkerboard in the floodlights' beams (`gaussianBlur` is an addon not in the vendored bundle). Its
   pass clears to black (its `updateBefore` is wrapped): with the renderer's clear colour (the sky) it was added over the
   whole frame.
 - **Shader warm-up** (`warmShaders`, end of `init`, under the splash): `compileAsync` (async pipelines on WebGPU,
@@ -148,7 +150,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   night fog); `applyFog` closes `scene.fog` in (also from `updateCamera`); `lamps()` → `ENV.lamps`: runway / nav
   lights, windows and beams on in bad visibility by day — the real spot lights stay on `ENV.lightsOn` (night only).
 - Pools made once in `build()` (after the FX in `init`): rain streaks (`drops`, `RAIN_N`, a ring buffer, spawned by a
-  time accumulator around the screen centre), `splash` rings, `FX.mist` (a sorted `SpriteFX` in `ENV.fogTint`), the
+  time accumulator around the screen centre), `splash` rings, `FX.mist` (a sorted `SpriteFX` in `ENV.fogTint`; a bank's centre is raised by half its size × cos(camera elevation):
+  low down the camera-facing sprite was cut off by the ground along a straight line), the
   lightning `bolt` (instanced segments, HDR). Lightning flashes the sky light (`hemi.intensity = ENV.hemiI × …`): no
   light is added. In winter the rain falls as `TERRAIN`'s snow (heavier, shown even with `CFG.weather` off), no
   lightning, nothing gets wet. `wet` darkens `PLAIN_MAT` / the ground and raises their gloss (uniforms only).
