@@ -19,6 +19,14 @@ module.exports = defineConfig({
     // WebGL without a GPU: SwiftShader
     launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] }
   },
+  // webgl2: everything (the harness boots WebGPURenderer's WebGL 2 backend); webgpu: tests/webgpu.spec.js on real WebGPU
+  // (SwiftShader through Vulkan) — headless Chromium drops its WebGPU instance, a headed one works: run under a virtual
+  // display (xvfb-run -a npx playwright test; tools/test.ps1 and CI do)
+  projects: [
+    { name: 'webgl2', testIgnore: /webgpu\.spec\.js/ },
+    { name: 'webgpu', testMatch: /webgpu\.spec\.js/, use: { headless: false, launchOptions: { args: ['--enable-unsafe-webgpu',
+      '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-webgpu-adapter=swiftshader', '--disable-vulkan-surface'] } } }
+  ],
   webServer: {
     command: 'node tests/support/serve.js 8765',
     url: 'http://127.0.0.1:8765/index.html',

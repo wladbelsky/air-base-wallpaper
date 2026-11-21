@@ -73,13 +73,14 @@ function applySettings() {
    the same node materials and passes on both. init() waits for the device: `ready` comes after it. */
 async function init() {
   const canvas = document.getElementById('c');
-  renderer = new THREE.WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', forceWebGL: QS.get('gl') === 'webgl2' });
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', forceWebGL: QS.get('gl') === 'webgl2' || gpuFellBack() });
   await renderer.init();
   GPU.webgpu = !!renderer.backend.isWebGPUBackend;
+  if (GPU.webgpu) watchGpuErrors();
   // Forward+ clustered lighting (WebGPU only: a compute pass bins the point / spot lights per screen tile and depth slice,
   // a fragment loops over its cluster's): many real lights are cheap — every searchlight, more flashes, the fires. On
   // the WebGL 2 backend the lights stay rationed (4 flash lights, 4 helicopter lights, spot lights hidden by day).
-  GPU.clustered = GPU.webgpu && QS.get('clustered') !== '0';
+  GPU.clustered = GPU.webgpu && QS.get('clustered') === '1';   // (experimental: its clusters don't fit our orthographic camera — the spots lit nothing)
   if (GPU.clustered) renderer.lighting = new THREE.ClusteredLighting(LIGHT_MAX);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -136,15 +137,26 @@ async function init() {
    splash make the shadow pass's programs (compile() doesn't) and the post-processing passes (bloom). */
 let SHADERS_READY = false;
 const GPU = { webgpu: false, clustered: false };   // which backend WebGPURenderer runs on (renderer.backend), clustered lights
-const LIGHT_MAX = 128;   // the clustered lighting's ceiling (point + spot lights in the scene)
+const LIGHT_MAX = 128;
+/* safety net: WebGPU failing (a stream of validation errors in the first 30 s — once a nothing-drawn screen in WE) →
+   remember it for this release (the cache-buster) and reload on the WebGL 2 backend; the next release tries WebGPU again */
+const GL_KEY = 'fab.gl', GL_VER = ((document.querySelector('script[src*="main.js"]') || {}).src || '').replace(/^.*[?&]v=(\d+).*$/, '$1');
+function gpuFellBack() { try { const d = JSON.parse(localStorage.getItem(GL_KEY) || 'null'); return !!d && d.v === GL_VER && d.gl === 'webgl2'; } catch (e) { return false; } }
+function watchGpuErrors() {
+  const dev = renderer.backend.device, t0 = performance.now(); let n = 0;
+  if (dev && dev.addEventListener) dev.addEventListener('uncapturederror', () => {
+    if (++n < 20 || performance.now() - t0 > 30000 || GPU.fellBack) return;
+    GPU.fellBack = true; console.warn('WebGPU keeps failing: reloading on WebGL 2 for this release');
+    try { localStorage.setItem(GL_KEY, JSON.stringify({ v: GL_VER, gl: 'webgl2' })); } catch (e) {}
+    location.reload();
+  });
+}   // the clustered lighting's ceiling (point + spot lights in the scene)
 function compileVisible(root, target) {
   const hid = [], bat = []; root.traverse(o => { if (!o.visible && !o.isLight) { hid.push(o); o.visible = true; } if (o.userData.batched && o.visible) bat.push(o); });
   for (const o of bat) o.visible = false;   // (drawn by their batches: no program of their own)
-  // a program is made for where it draws: the scene pass's target (HDR, multisampled), not the canvas
-  if (!pipeline) buildPipeline();
-  renderer.setRenderTarget(scenePass.renderTarget);
+  // (for the default target: setting the scene pass's target here, while it was still 1×1, broke that pass for good on
+  // WebGPU — its textures were destroyed on the resize; the frames under the splash make the pass's variants)
   const p = renderer.compileAsync(root, camera, target);   // (it collects the objects now: they can hide again)
-  renderer.setRenderTarget(null);
   for (const o of bat) o.visible = true; for (const o of hid) o.visible = false;
   return p;
 }
@@ -248,7 +260,10 @@ const VOLUME = {
     m.scatteringNode = Fn(({ positionRay }) => vec3(this.density.mul(smoothstep(42, 2, positionRay.y))));   // thinner with height
     this.mesh = new THREE.Mesh(new THREE.BoxGeometry(240, 44, 170), m); this.mesh.position.set(0, 22, -4);
     this.mesh.layers.set(VOL_LAYER); this.mesh.frustumCulled = false; scene.add(this.mesh);
-    const vp = THREE.TSL.pass(scene, camera, { depthBuffer: false }); vp.setLayers(new THREE.Layers()); vp.getLayers().set(VOL_LAYER); vp.setResolutionScale(0.25);
+    // its pass clears to black / transparent: with the renderer's clear colour (the sky) it was added over the whole frame
+    const vp = THREE.TSL.pass(scene, camera, { depthBuffer: false }), up = vp.updateBefore, cc = new THREE.Color();
+    vp.updateBefore = function (frame) { renderer.getClearColor(cc); const a = renderer.getClearAlpha(); renderer.setClearColor(0x000000, 0); const r = up.call(this, frame); renderer.setClearColor(cc, a); return r; };
+    vp.setLayers(new THREE.Layers()); vp.getLayers().set(VOL_LAYER); vp.setResolutionScale(0.25);
     this.active = true;
     return vp.getTextureNode('output');
   },

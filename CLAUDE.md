@@ -54,7 +54,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=47`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=48`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -114,21 +114,26 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   (additive sprite colour), `BEAM_G` (beams) keep the old look. `renderer.info` is reset per frame (`autoReset` off;
   draw calls `info.render.drawCalls`, programs `info.memory.programs`). Render through `renderFrame()` (the harness's
   `__t.render` does), never `renderer.render`.
-- **Clustered lighting** (`GPU.clustered`: WebGPU only, `?clustered=0` off; `renderer.lighting = ClusteredLighting`,
-  ceiling `LIGHT_MAX` 128): point / spot lights are binned per screen tile and depth, so many are cheap — every
-  searchlight is a real light (sky, guard towers, all helicopters), 24 flash lights, 12 `FireLights` on the burning
-  structures, spot lights stay shown by day (intensity 0). On the WebGL 2 backend: 4 flash lights, 4 helicopter lights,
-  2 apron floodlights, spot lights hidden by day.
+- **Clustered lighting** (`GPU.clustered`: experimental, off — `?clustered=1` on WebGPU; `renderer.lighting =
+  ClusteredLighting`, ceiling `LIGHT_MAX` 128): would make every searchlight a real light, 24 flash lights, 12
+  `FireLights`. Off because its clusters don't fit our orthographic camera: the spot lights lit nothing. Both backends
+  run the rationed lights: 4 flash lights, 4 helicopter lights, 2 apron floodlights, spot lights hidden by day.
+- **WebGPU safety net** (`watchGpuErrors` / `gpuFellBack`, main.js): 20 uncaptured GPU errors in the first 30 s →
+  `localStorage` `fab.gl = { v: <cache-buster>, gl: 'webgl2' }` and a reload on the WebGL 2 backend; the next release
+  (another `?v`) tries WebGPU again.
 - **Volumetric light** (`VOLUME`, main.js; `CFG.volumetric`, WebGPU, `?vol=1` forces it on WebGL 2): a box over the base
   on `VOL_LAYER` with a `VolumeNodeMaterial`, drawn by its own quarter-resolution pass and added to the scene: the rays
   are marched and every light on `VOL_LAYER` (spot / flash / fire lights enable it; not the sun or the sky) scatters by
-  the haze's density (night × weather: thick in fog and rain). The meshed beams of real lights are hidden meanwhile.
+  the haze's density (night × weather: thick in fog and rain). The meshed beams of real lights are hidden meanwhile. Its
+  pass clears to black (its `updateBefore` is wrapped): with the renderer's clear colour (the sky) it was added over the
+  whole frame.
 - **Shader warm-up** (`warmShaders`, end of `init`, under the splash): `compileAsync` (async pipelines on WebGPU,
   KHR_parallel_shader_compile on WebGL 2), one call at a time (it isn't re-entrant), of the scene, every enemy template,
   the ground vehicles and a wreck; `compile()` takes visible objects only (r158+), so `compileVisible` shows the hidden
-  ones for the call; both states of the night-only spot lights; the programs are made for the scene pass's target
-  (`setRenderTarget(scenePass.renderTarget)`): a program's key includes where it draws. Frames under the splash make the
-  shadow-pass and post-processing programs and the batches for the templates. The loop draws nothing until `SHADERS_READY` (15 s fallback), the
+  ones for the call; both states of the night-only spot lights. Never `setRenderTarget` a pass's target around it: the
+  target is 1×1 until the pass's first frame, and on WebGPU that broke the scene pass for good (destroyed textures, then
+  `output` as attachment and binding every frame — nothing drawn in WE). Frames under the splash make the pass
+  variants, the shadow-pass and post-processing programs and the batches for the templates. The loop draws nothing until `SHADERS_READY` (15 s fallback), the
   splash waits for it. A new kind of object that first appears in a fight must be in the scene (hidden is fine) or in
   the template group. Turning a light's `visible` (or adding a light) recompiles every program. `?warm=0` skips it
   (the harness does, unless `boot({ warm: true })`: SwiftShader compiles synchronously, ~4 s a boot).
@@ -534,16 +539,19 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - Browser preview: serve the folder, e.g. `python -m http.server 8765`, open `http://localhost:8765/`.
   The ⚙ SETTINGS drawer mirrors all WE properties (stored in `localStorage`); URL params `?hour=22`,
   `?zoom=150`, `?season=winter`, `?weather=storm`, `?demo=1`, `?ts=N` (time scale), `?warm=0` (no shader warm-up),
-  `?gl=webgl2` (the WebGL 2 backend), `?clustered=0`, `?vol=1` (the volume on WebGL 2).
-- **Automated tests** (`tests/`, Playwright Test in headless Chromium + SwiftShader, WebGPURenderer's WebGL 2 backend:
-  WebGPU in the headless container drops its instance, even for a bare clear — the WebGPU path, clustered lighting and
-  the volume by default are checked by hand in Wallpaper Engine; `?vol=1` tests the volume on WebGL 2): run them in Docker —
-  `powershell -ExecutionPolicy Bypass -File tools/test.ps1 [file / -g pattern]` (no local Node; `$env:SEED = N` for
-  another seed); CI runs the same image on every push / PR (`.github/workflows/tests.yml`). Run them after a change.
+  `?gl=webgl2` (the WebGL 2 backend), `?clustered=1` (experimental), `?vol=1` (the volume on WebGL 2).
+- **Automated tests** (`tests/`, Playwright Test, two projects): `webgl2` — everything, headless Chromium + SwiftShader,
+  WebGPURenderer's WebGL 2 backend; `webgpu` — `tests/webgpu.spec.js` on real WebGPU (SwiftShader through Vulkan): a
+  *headed* Chromium (headless drops its WebGPU instance, even for a bare clear), so the suite runs under `xvfb-run -a`.
+  Any WebGPU-only change needs a test there (pixels: `drawImage` of the canvas into a 2D canvas right after
+  `__t.render()`). Run them in Docker — `powershell -ExecutionPolicy Bypass -File tools/test.ps1 [file / -g pattern /
+  --project=webgpu]` (no local Node; `$env:SEED = N` for another seed); CI runs the same image on every push / PR
+  (`.github/workflows/tests.yml`). Run them after a change.
   - The harness (`tests/support/harness.js`) boots the page deterministically: seeded `Math.random` (`SEED`), fixed
     date in UTC, no `requestAnimationFrame` (time only advances through `__t.sim(sec)` = `step(0.05)` per tick),
     `RT()` on simulated time, Wallpaper Engine mode (audio fed by `__t.sim(sec, { audio: true/false })`), no shader
-    warm-up (`?warm=0`; `boot({ warm: true })` for it), the WebGL 2 backend (`?gl=webgl2`). Three.js draws UUIDs from `Math.random`: a three.js update
+    warm-up (`?warm=0`; `boot({ warm: true })` for it), the WebGL 2 backend (`?gl=webgl2`; `boot({ gl: 'webgpu' })` in
+    the webgpu project). Three.js draws UUIDs from `Math.random`: a three.js update
     or new objects at start-up shift the seeded timelines (see "Debugging").
   - `tests/support/inpage.js` (`window.__t`): `sim` runs `checkInvariants()` after every step (runway / arrivals,
     homes and their markings, known states; NaN; under ground; mission / tanker consistency; bounded pools) and the

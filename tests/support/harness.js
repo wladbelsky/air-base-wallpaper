@@ -30,7 +30,8 @@ class Wallpaper {
   /* splash: keep the start-up splash (it covers the page until T > 3.2 — or 8 s of real time — and blocks clicks) */
   /* warm: the shader warm-up under the splash (warmShaders; skipped by default: SwiftShader compiles synchronously, ~4 s a boot)
      WebGPURenderer runs on its WebGL 2 backend (?gl=webgl2): WebGPU in the headless container drops its instance */
-  async boot({ seed = SEED, we = true, query = '', time = '2026-06-21T12:00:00Z', splash = false, warm = false } = {}) {
+  /* gl: 'webgl2' (the default) or 'webgpu' (the webgpu project's real WebGPU: tests/webgpu.spec.js) */
+  async boot({ seed = SEED, we = true, query = '', time = '2026-06-21T12:00:00Z', splash = false, warm = false, gl = 'webgl2' } = {}) {
     if (!this.installed) {
       await this.page.clock.setFixedTime(new Date(time));
       await this.page.addInitScript(initScript, { seed, we });
@@ -38,7 +39,7 @@ class Wallpaper {
       this.installed = true;
     }
     if (!warm) query += (query.includes('?') ? '&' : '?') + 'warm=0';
-    query += (query.includes('?') ? '&' : '?') + 'gl=webgl2';
+    if (gl === 'webgl2') query += (query.includes('?') ? '&' : '?') + 'gl=webgl2';
     await this.page.goto('/index.html' + query);
     // init() is async (the renderer's device)
     const ok = await this.page.waitForFunction(() => typeof ready !== 'undefined' && ready && AIRCRAFT.length > 0, null, { timeout: 30000 }).then(() => true, () => false);
