@@ -140,11 +140,11 @@ let SHADERS_READY = false;
 // perfReport() state and the debug switches kept in localStorage (see perfReport, below frame())
 const PERF = { recs: [],
   flags: (() => { try { return JSON.parse(localStorage.getItem('fab-perf') || '{}') || {}; } catch (e) { return {}; } })(),
-  sample(ms, cpu) {   // into every report running (each perfReport() call has its own record)
+  sample(ms, sim, draw) {   // into every report running (each perfReport() call has its own record)
     let lit = 0; scene.traverseVisible(o => { if ((o.isPointLight || o.isSpotLight) && o.intensity > 0) lit++; });
     for (const r of this.recs) {
       if (r.last) r.frame.push(ms - r.last); r.last = ms;
-      r.cpu.push(cpu); r.calls.push(renderer.info.render.drawCalls); r.lights.push(lit);
+      r.cpu.push(sim + draw); r.sim.push(sim); r.draw.push(draw); r.calls.push(renderer.info.render.drawCalls); r.lights.push(lit);
       if (GPU.timing) { r.gpu.push(GPU.ms.render); r.comp.push(GPU.ms.compute); }
     }
   }
@@ -1011,7 +1011,7 @@ function updateMeter() {
 let frameDue = 0;
 function frame(ms) {
   requestAnimationFrame(frame);
-  if (paused) { lastMs = ms; return; }
+  if (paused) { lastMs = ms; for (const r of PERF.recs) { if (r.last) r.pauses++; r.last = 0; } return; }   // (a pause isn't one long frame)
   if (!SHADERS_READY) { if (RT() > 15) SHADERS_READY = true; else { lastMs = ms; return; } }   // (compiling under the splash; never stuck behind it)
   if (fpsLimit > 0) {
     // due times advance in whole intervals, so the limit holds on any refresh rate (75 / 144 Hz…)
@@ -1023,8 +1023,9 @@ function frame(ms) {
   const n = Math.max(1, Math.ceil(el / 0.05)), dt = el / n;
   const t0 = PERF.recs.length ? performance.now() : 0;
   for (let i = 0; i < n * TIME_SCALE; i++) step(dt);
+  const t1 = PERF.recs.length ? performance.now() : 0;
   renderFrame();
-  if (PERF.recs.length) PERF.sample(ms, performance.now() - t0);
+  if (PERF.recs.length) PERF.sample(ms, t1 - t0, performance.now() - t1);
   if (GPU.timing && ms - GPU.tsT > 500) {
     GPU.tsT = ms;
     renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER).then(v => { GPU.ms.render = v || 0; }, () => {});
@@ -1041,7 +1042,7 @@ function frame(ms) {
    The flags live in localStorage (WE passes no URL parameters); ?gputime=1 / ?gl=webgl2 / ?clustered=1 in a browser. ---- */
 function perfFlags(f) { try { localStorage.setItem('fab-perf', JSON.stringify(f || {})); } catch (e) { return 'localStorage unavailable'; } return 'saved — reload to apply: ' + JSON.stringify(f || {}); }
 function perfReport(sec = 30) {
-  const r = { frame: [], cpu: [], gpu: [], comp: [], calls: [], lights: [], last: 0, T0: T, t0: performance.now() }; PERF.recs.push(r);
+  const r = { frame: [], cpu: [], sim: [], draw: [], gpu: [], comp: [], calls: [], lights: [], last: 0, pauses: 0, T0: T, t0: performance.now() }; PERF.recs.push(r);
   console.log(`perfReport: measuring ${sec} s…`);
   return new Promise(res => setTimeout(() => {
     PERF.recs.splice(PERF.recs.indexOf(r), 1);
@@ -1056,7 +1057,9 @@ function perfReport(sec = 30) {
       simRate: +((T - r.T0) / Math.max(1e-3, (performance.now() - r.t0) / 1000)).toFixed(3), fps: r.frame.length ? +(1000 / avg(r.frame)).toFixed(1) : 0,
       frameMs: avg(r.frame), frameMsP95: p95(r.frame), frameMsMax: r.frame.length ? +Math.max(...r.frame).toFixed(1) : null,
       hitches: r.frame.filter(t => t > 33.4).length,   // frames longer than two vsyncs: visible stutter
+      pauses: r.pauses,   // WE paused the wallpaper (another window in front…): those gaps aren't frames
       cpuMs: avg(r.cpu), cpuMsP95: p95(r.cpu), cpuMsMax: r.cpu.length ? +Math.max(...r.cpu).toFixed(1) : null,
+      simMs: avg(r.sim), simMsP95: p95(r.sim), renderMs: avg(r.draw), renderMsP95: p95(r.draw),   // (cpuMs = the simulation steps + renderFrame's CPU side)
       gpuMs: GPU.timing ? avg(r.gpu) : 'perfFlags({ gputime: true }) + reload', gpuComputeMs: GPU.timing ? avg(r.comp) : null,
       drawCalls: avg(r.calls), lights: avg(r.lights), lightsMax: r.lights.length ? Math.max(...r.lights) : 0,
       batches: b.batches, batchInstances: b.instances,

@@ -54,7 +54,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=49`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=50`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -543,7 +543,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   (`GPU.ms` = GPU time of the last frame's render / compute passes, timestamp queries, sampled twice a second).
 - **Performance on a real GPU** (also inside Wallpaper Engine: Settings → General → "CEF devtools port", then
   `http://localhost:<port>` in Chrome → the wallpaper's console): `perfReport(60)` (main.js) logs and returns frame / CPU
-  / GPU times, hitches, draw calls, lit point / spot lights, batches, memory, the backend and the settings in effect;
+  (`simMs` the steps + `renderMs` renderFrame's CPU side) / GPU times, hitches, WE pauses (not counted as frames), draw
+  calls, lit point / spot lights, batches, memory, the backend and the settings in effect (on WebGPU a `BatchedMesh` is
+  one draw per geometry, not one multi-draw: the draw calls stay high, the state changes are what batching saves);
   `perfFlags({ gputime: true })` / `perfFlags({ gl: 'webgl2' })` / `perfFlags({ clustered: true })` / `perfFlags({})`
   store debug switches in `localStorage` (`fab-perf`, read at load: `PERF.flags`) since WE passes no URL parameters.
 - **Automated tests** (`tests/`, Playwright Test, two projects): `webgl2` — everything, headless Chromium + SwiftShader,

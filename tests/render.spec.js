@@ -222,6 +222,14 @@ test('perfReport: averages frames, CPU, draw calls and lights; perfFlags keeps i
   expect(r.drawCalls).toBeGreaterThan(50);
   expect(r.backend).toBe('WebGL 2');
   expect(r.batches).toBeGreaterThan(0);
+  expect(r.simMs + r.renderMs).toBeCloseTo(r.cpuMs, 1);
+  // a WE pause isn't one long frame
+  const q = await wp.run(async () => {
+    const f = ms => { renderer._nodes.nodeFrame.update(); frame(ms); };
+    const p = perfReport(0.1); f(16.7); f(33.4); paused = true; f(3000); f(3016.7); paused = false; f(3033.4); f(3050.1);
+    return p;
+  });
+  expect([q.frames, q.pauses, q.frameMsMax]).toEqual([4, 1, 16.7]);
   const f = await wp.run(() => { perfFlags({ gl: 'webgl2' }); const a = localStorage.getItem('fab-perf'); perfFlags({}); return [a, localStorage.getItem('fab-perf')]; });
   expect(f).toEqual(['{"gl":"webgl2"}', '{}']);
 });
