@@ -227,7 +227,8 @@ function explosion(p, s) {
   FX.flash.spawn(p, { s0: 3.5 * s, s1: 6 * s, life: 0.22, a0: 1 });
   for (let i = 0; i < 5; i++) {
     const q = p.clone().add(new V3(rand(-1, 1), rand(-0.6, 0.8), rand(-1, 1)).multiplyScalar(s));
-    FX.flash.spawn(q, { s0: 1.4 * s, s1: 3.2 * s, life: rand(0.35, 0.6), a0: 1, color: 0xff8a30 });
+    FX.flash.spawn(q, { s0: 1.4 * s, s1: 3.2 * s, life: rand(0.35, 0.6), a0: 1, color: 0xff8a30, v: _bv.set(rand(-1, 1), rand(1.5, 3.5), rand(-1, 1)).multiplyScalar(s), drag: 1.5 });   // (the fireballs billow up)
+    if (i < 3) FX.fire.spawn(_bf.set(q.x, Math.max(q.y - 0.4 * s, groundH(q.x, q.z)), q.z), { w: rand(1.1, 1.6) * s, w1: rand(1.6, 2.2) * s, h: rand(1.5, 2.1), life: rand(0.5, 0.8), a0: 0.95, v: _bv.set(WIND.x * 0.2, rand(1, 2) * s, WIND.z * 0.2) });
     FX.smoke.spawn(q.clone(), { s0: 1.4 * s, s1: 5 * s, life: rand(2.5, 4), a0: 0.75, color: 0x222222, v: new V3(rand(-1, 1) + WIND.x * 0.5, rand(0.3, 1), rand(-1, 1) + WIND.z * 0.5), drag: 0.5 });
   }
   FX.lights.flash(p, 6, 0.35);
@@ -382,7 +383,8 @@ const DAMAGE = {
   smoke(p, burn, dt, y) {
     if (burn > 0) {
       if (Math.random() < dt * 12) FX.smoke.spawn(new V3(p.x, y, p.z), { s0: 0.7, s1: 3.2, life: 3, a0: 0.6 * Math.min(1, burn / 4), color: 0x262626, v: drift(1.2, rand(0.8, 1.6)) });
-      if (Math.random() < dt * 9) FX.flash.spawn(new V3(p.x + rand(-0.3, 0.3), y + 0.1, p.z + rand(-0.3, 0.3)), { s0: 0.8, s1: 1.2, life: 0.12, a0: 0.9 * Math.min(1, burn / 4), color: 0xff7a20 });
+      if (Math.random() < dt * 4) FX.fire.spawn(_bf.set(p.x + rand(-0.35, 0.35), y - 0.1, p.z + rand(-0.35, 0.35)), { w: rand(0.6, 0.9), w1: rand(0.8, 1.1), h: rand(1.6, 2.2), life: rand(0.6, 0.9), a0: 0.95 * Math.min(1, burn / 4), v: _bv.set(WIND.x * 0.15, rand(0.3, 0.6), WIND.z * 0.15) });
+      if (Math.random() < dt * 1.5) ember(_bf.set(p.x, y + 0.3, p.z), 0.4);
     } else if (Math.random() < dt * 2.5) FX.smoke.spawn(new V3(p.x, y, p.z), { s0: 0.4, s1: 2.0, life: 2.6, a0: 0.3, color: 0x4a4a48, v: drift(1, rand(0.5, 1)) });
   }
 };
@@ -445,17 +447,23 @@ function updateCombat(dt) {
     const f = BASE_FIRES[i]; f.t -= dt;
     if (f.t <= 0) { BASE_FIRES.splice(i, 1); continue; }
     const k = Math.min(1, f.t / 8), r = f.r || 1;
-    for (f.fl += dt * 26; f.fl >= 1; f.fl--) FX.flash.spawn(_bf.set(f.p.x + rand(-r, r), f.p.y + rand(0.1, 0.5), f.p.z + rand(-r, r)),
-      { s0: rand(1.4, 2.2) * k, s1: rand(2.6, 3.6) * k, life: rand(0.25, 0.45), a0: k, color: pick(FIRE_COLS), v: _bv.set(WIND.x * 0.3, rand(1.8, 3), WIND.z * 0.3) });
+    // tongues of flame (FlameFX: each licks and flickers on its own), a hot glow at their roots, sparks going up
+    for (f.fl += dt * 14; f.fl >= 1; f.fl--) FX.fire.spawn(_bf.set(f.p.x + rand(-r, r), f.p.y + rand(-0.15, 0.1), f.p.z + rand(-r, r)),
+      { w: rand(1.5, 2.4) * (0.55 + 0.45 * k), w1: rand(1.9, 2.8) * (0.55 + 0.45 * k), h: rand(1.2, 1.8), life: rand(0.7, 1.1), a0: 0.85 * k, v: _bv.set(WIND.x * 0.25, rand(0.3, 0.7), WIND.z * 0.25) });
+    for (f.gl = (f.gl || 0) + dt * 5; f.gl >= 1; f.gl--) FX.flash.spawn(_bf.set(f.p.x + rand(-r, r) * 0.7, f.p.y + 0.3, f.p.z + rand(-r, r) * 0.7),
+      { s0: rand(1.6, 2.4) * k, s1: rand(2.2, 3) * k, life: rand(0.3, 0.5), a0: 0.5 * k, color: pick(FIRE_COLS) });
+    for (f.em = (f.em || 0) + dt * 5 * k; f.em >= 1; f.em--) ember(_bf.set(f.p.x + rand(-r, r), f.p.y + 0.8, f.p.z + rand(-r, r)), 1);
     for (f.sm += dt * 12; f.sm >= 1; f.sm--) FX.smoke.spawn(_bf.set(f.p.x + rand(-r, r) * 0.6, f.p.y + 1.2, f.p.z + rand(-r, r) * 0.6),
       { s0: 1.6, s1: 7, life: rand(4, 5.5), a0: 0.85 * k, color: 0x1a1a1a, v: drift(1.4, rand(1.8, 2.8)), drag: 0.15 });
   }
 }
-const _bf = new V3(), _bv = new V3(), FIRE_COLS = [0xff6a18, 0xff8a28, 0xffa838];
+const _bf = new V3(), _bv = new V3(), _be = new V3(), FIRE_COLS = [0xff6a18, 0xff8a28, 0xffa838];
+/* a spark from a fire: a tiny hot point rising in the heat and drifting downwind, flickering out */
+function ember(p, s) { FX.flash.spawn(p, { s0: rand(0.16, 0.26) * (0.6 + 0.4 * s), s1: 0.06, life: rand(1, 2), a0: 1, color: 0xffb050, v: _be.set(WIND.x * 0.6 + rand(-0.6, 0.6), rand(2, 4) * s + 1, WIND.z * 0.6 + rand(-0.6, 0.6)), drag: 0.5 }); }
 function fallStep(e, dt) {          // shot-down aircraft: spinning down in smoke until it hits the ground
   e.v.y -= 9 * dt; e.v.multiplyScalar(1 - 0.15 * dt); e.p.addScaledVector(e.v, dt);
   e.mesh.position.copy(e.p); e.mesh.rotateX(e.spin * dt);
-  e.smokeT += dt; while (e.smokeT > 0.03) { e.smokeT -= 0.03; FX.smoke.spawn(e.p.clone(), { s0: 0.8, s1: 3, life: 2.5, a0: 0.7, color: 0x1e1e1e, v: drift(1, 0.4) }); if (Math.random() < 0.5) FX.flash.spawn(e.p, { s0: 1, s1: 1.4, life: 0.08, a0: 0.9, color: 0xff7a20 }); }
+  e.smokeT += dt; while (e.smokeT > 0.03) { e.smokeT -= 0.03; FX.smoke.spawn(e.p.clone(), { s0: 0.8, s1: 3, life: 2.5, a0: 0.7, color: 0x1e1e1e, v: drift(1, 0.4) }); if (Math.random() < 0.35) FX.fire.spawn(e.p, { w: rand(0.9, 1.3), w1: 0.5, h: rand(1.4, 1.8), life: rand(0.2, 0.3), a0: 0.9 }); }
   if (e.p.y < groundH(e.p.x, e.p.z)) { groundHit(e.p, 2.2); if (e.kind === 'bandit' || e.kind === 'heli') DAMAGE.hit(e.p, 2); e.dead = true; scene.remove(e.mesh); }
 }
 function updateBandit(e, dt, armed, st) {
@@ -517,12 +525,13 @@ function wreckArmor(e) {
 const WRECK_FIRE = 20, WRECK_SINK = 30, WRECK_SINK_T = 8;   // s: flames until ~20, smoulders, sinks into the ground from 30 over 8
 function updateArmor(e, dt, armed) {
   if (e.falling) {                           // knocked out: burns, smoulders, then the wreck sinks into the ground and is removed
-    const b = e.burnT += dt, fire = 1 - smoothstep(WRECK_FIRE - 6, WRECK_FIRE, b), sink = clamp((b - WRECK_SINK) / WRECK_SINK_T, 0, 1);
+    const b = e.burnT += dt, fire = e.fire = 1 - smoothstep(WRECK_FIRE - 6, WRECK_FIRE, b), sink = clamp((b - WRECK_SINK) / WRECK_SINK_T, 0, 1);
     const y = e.p.y + 0.7 - sink * 1.4;
     // a column of black smoke (thinning as it smoulders out), flames licking over the hull while it burns
     // (≤ 9 a second, ~3 s each: a column of knocked-out vehicles must not use up the shared smoke pool)
     if (Math.random() < dt * (3.5 + 5.5 * fire)) FX.smoke.spawn(new V3(e.p.x + rand(-0.3, 0.3), y + 0.2, e.p.z + rand(-0.3, 0.3)), { s0: 0.7 + 0.5 * fire, s1: 2.8 + 1.8 * fire, life: rand(2.6, 3.4), a0: 0.35 + 0.35 * fire, color: fire > 0.3 ? 0x161616 : 0x3a3a38, v: drift(1, 0.7 + 0.6 * fire) });
-    if (fire > 0 && Math.random() < dt * 16 * fire) FX.flash.spawn(new V3(e.p.x + rand(-0.6, 0.6), y + rand(-0.1, 0.3), e.p.z + rand(-0.4, 0.4)), { s0: rand(0.4, 0.7), s1: rand(0.9, 1.4), life: rand(0.14, 0.3), a0: 0.9 * fire, color: pick([0xff6a18, 0xff8a28, 0xffb040]) });
+    if (fire > 0 && Math.random() < dt * 5 * fire) FX.fire.spawn(_bf.set(e.p.x + rand(-0.5, 0.5), y - 0.2, e.p.z + rand(-0.35, 0.35)), { w: rand(0.7, 1.1), w1: rand(0.9, 1.3), h: rand(1.6, 2.2), life: rand(0.6, 0.9), a0: 0.95 * fire, v: _bv.set(WIND.x * 0.2, rand(0.3, 0.6), WIND.z * 0.2) });
+    if (fire > 0 && Math.random() < dt * 2 * fire) ember(_bf.set(e.p.x, y + 0.4, e.p.z), 0.6);
     if (b < 4 && Math.random() < dt * 3) FX.flash.spawn(new V3(e.p.x, y + 0.3, e.p.z), { s0: 0.9, s1: 1.8, life: 0.12, a0: 1, color: 0xffc060 });   // ammunition cooking off
     if (sink > 0) {
       e.mesh.position.y = e.p.y - sink * 1.4;

@@ -34,7 +34,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); the fence is a rectangle with chamfered corners and a west annex around both runways' approach lights (`fence`, `gate` = the gate segment, `towers` = guard-tower corners; the perimeter road is its 5-unit inward offset, `insetPoly`); `masts` (floodlight masts; units.spec keeps them clear of every taxiing aircraft's fuselage / wings and of the vehicles' ways); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
 | `js/terrain.js` | `TERRAIN`: the ground (tiled canvas texture + vertex-colour patches) and the vegetation per season (InstancedMesh per kind: firs and snow drifts / cacti, rocks, shrubs / leafy trees in spring or autumn colours), weather particles (snowfall, falling leaves) |
 | `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; smooth fuselages are `lathe` bodies (profile `[x, r, axis lift]`, `transportBody` for the transports with the cockpit `windscreen` band on the nose); `gear(g, legs, h)` legs `[x, z, kind]` — `n` / `s` / `t` / `tan` / `b4` / `b6` — folding up over ~1 s with `st.gearDown` (`tickGear`); KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Tu-95 — propeller groups `prop` / `prop2`, spun contra-rotating on the clones (`e.props`) —, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
-| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — an instanced pool of slots (no longer a ring buffer); they flatten and shrink away at the end of their life — every one: `fadeOut` (3 s) is the only early way out (`repair`, `absorb`, and `crowd`: fewer than `CROWD` of the 120 slots free, the oldest start fading), and with no free slot a new crater simply isn't made — once a full ring buffer took over live ones and they vanished at once; a hit within `MERGE`·(r1 + r2) of a live one widens it (≤ 1.4×; `absorb` fades out the neighbours it then overlaps — the harness flags stacked craters, fading ones aside); on paved ground (`pavedAt`, base.js) ≤ 40 s, shell holes (r < 1.1: the tanks' rounds past the wire, several a second) ≤ 20 s), `FlashLights` |
+| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `FlameFX` (`FX.fire`: procedural flames — see "Combat"), `FireLights`, `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — an instanced pool of slots (no longer a ring buffer); they flatten and shrink away at the end of their life — every one: `fadeOut` (3 s) is the only early way out (`repair`, `absorb`, and `crowd`: fewer than `CROWD` of the 120 slots free, the oldest start fading), and with no free slot a new crater simply isn't made — once a full ring buffer took over live ones and they vanished at once; a hit within `MERGE`·(r1 + r2) of a live one widens it (≤ 1.4×; `absorb` fades out the neighbours it then overlaps — the harness flags stacked craters, fading ones aside); on paved ground (`pavedAt`, base.js) ≤ 40 s, shell holes (r < 1.1: the tanks' rounds past the wire, several a second) ≤ 20 s), `FlashLights` |
 | `js/weather.js` | `WEATHER`: rain, fog, thunderstorms (`CFG.weatherMode`) — see "Weather" |
 | `js/radio.js` | callsigns (+ `ENEMY_NAMES`, `RADIO_NAMES` — the tower is `<base name> TOWER`), `RADIO` subtitle queue, mission orders, `STRESS` + `THREAT_TIERS`, `radioLine()`, line pools `OPS` / `OPS_VOICE` / `OPS_UNARMED` / `COMBAT` / `AIRWAR_LINES` / `ENEMY_LINES` / `TANKER_LINES` / `LINES` (see "Radio lines & threat tiers") |
 | `js/airfield.js` | `AIRFIELD`: homes (`assignHome` / `release`), taxi routes (`pushback`, `toHold`, `lineUp`, `exitFor`, `homeRoute`), runway use (`rwy`, `arrivals`, `canLineUp`, `canApproach`, `clearToLand`), ground traffic (`blocked`), shelter / hangar doors, stand markings and helicopter pads (`updateMarks`) — see "Airfield" |
@@ -55,7 +55,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=57`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=58`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -101,8 +101,10 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 - **Colour management** is on: hex colours are sRGB and become linear (`Color.setHex`), canvas textures say so
   (`srgbTex`, core.js), vertex colours are linear (terrain patches `k^2.2`; `mergeStatic` bakes `material.color`, already
   linear). Output: sRGB, **Neutral tone mapping** (colours below ~0.8 untouched, bright ones roll off), then a final
-  **grade** on the screen colours (`gradeOut`, `GRADE`: saturation × 0.87 toward the luminance, contrast × 0.9 around
-  0.44 by day, easing to 1 at night — `GRADE.k`, `updateBloom`: around 0.44 it lifted black, a milky night) — the pipeline's own output transform is off (`outputColorTransform` false: `renderOutput` in `gradeOut`). Linear
+  **grade** on the screen colours (`gradeOut`, `GRADE.day` / `GRADE.night`, eased by `ENV.night` in `updateBloom` into
+  uniforms `GRADE.u`: saturation toward the luminance, contrast around a pivot — day sat 0.87, con 0.9 around 0.44;
+  night sat 0.8, con 0.87 around 0.33, fitted on three night scenes rendered with the pre-r187 code and now: mean 0.21
+  → 0.18, spread 0.072 → 0.099, saturation 0.070 → 0.109 — the grade lands each at the midpoint) — the pipeline's own output transform is off (`outputColorTransform` false: `renderOutput` in `gradeOut`). Linear
   light made the picture more contrasty and saturated than before r187 (measured on WE screenshots: luminance spread
   0.116 → 0.143, saturation 0.063 → 0.111); the grade takes it halfway back.
 - **Lights are physical** (legacy lights are gone since r165). The sky palette (`SKY_KEYS`) keeps its old sRGB meaning:
@@ -391,7 +393,14 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
   site rows show DAMAGED; on its roof (`obstacleTop`), the blast too; 30–40 s: flame tongues over `r` of it, a tall black
   smoke column, dying down over the last 8 s, spawned by time accumulators (`fl`, `sm`); a hit near a burning one spreads
-  that fire instead of stacking another; the smoke pool is 420 for it). Craters (`Scorch`) sit `Scorch.LIFT` (0.055) up: above the paving and its painted lines. Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
+  that fire instead of stacking another; the smoke pool is 420 for it). **Flames** are `FX.fire` (`FlameFX`, effects.js):
+  one instanced Sprite anchored at its base, each instance a tall tongue whose colour is TSL noise, not a texture — a
+  teardrop mask cut by fractal noise scrolling up (`uT` = `T % 600`: three's `time` is wall-clock and loses float
+  precision over days), heat from a white-yellow core through orange to a red tip, HDR by `uK` with bloom; spawned by
+  time accumulators from structure fires (~14/s, embers `ember()` and a hot glow at the roots in `FX.flash`), burning
+  wrecks (`e.fire`), units / aircraft on fire (`DAMAGE.smoke`), falling aircraft and explosions (their fireballs rise).
+  `FireLights` light the biggest fires (structures, then wrecks): 2 point lights without clustered lighting (12 with),
+  built in `init` and always in the scene, only their intensity moves (dark with nothing burning). Craters (`Scorch`) sit `Scorch.LIFT` (0.055) up: above the paving and its painted lines. Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
   tracers with gravity (`dropBomb`, `FixedWing.dropBombs`), resolved in `FX.tracers.onSplash` (splash ≥ 2.3 = an enemy
   bomb → `enemyBomb`: a structure within 3 of where it fell takes the hit, else a crater; then `DAMAGE.hit`).
   **Threat (`STRESS`) goes by time only** (10 min up while `AUD.fighting`, 3 min down): hits used to bump it +0.03 per
@@ -568,7 +577,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   dawn toggle the warm-up covers): r187 gathers lights from visible subtrees only and a changed set rebuilds every
   render object and recompiles every lit pipeline. So the helicopters' real lights are a scene-level pool
   (`HELI_LIGHTS`, 4, built in `init`) that follows their searchlight (`s.follow`, `followLight`) and is dark while the
-  helicopter is hidden — as children of the helicopter, every combat pass (`cbt_wait` hides it) was a stall at night. Only two apron floodlights and the first four helicopters have a real light; the
+  helicopter is hidden — as children of the helicopter, every combat pass (`cbt_wait` hides it) was a stall at night. Two fire lights (`FireLights`) are a fixed pair the same way. Only two apron floodlights and the first four helicopters have a real light; the
   guard-tower and sky searchlights are beams (`noLight`).
 - Main loop (`frame`): FPS limit keeps cadence via `frameDue`; simulation runs in ≤50 ms sub-steps
   (stalls capped at 0.25 s). `onBeat` does nothing while `paused`.

@@ -113,6 +113,70 @@ class SpriteFX {
   }
 }
 
+/* Flames: tall tongues of procedural fire instead of round blobs. One instanced Sprite (one draw call), anchored at its
+   base (center y 0.12) and stretched up (scale: width, height); per instance its position, size, a seed and its alpha.
+   The colour is noise, not a texture: a teardrop mask (wide at the base, narrowing up, swaying more toward the tip)
+   cut by fractal noise scrolling up through it (uT: the simulation's time, wrapped — three's `time` is wall-clock and
+   loses float precision over days of uptime), so every tongue licks and flickers on its own; its "heat" runs from a
+   white-yellow core through orange to a deep red edge and tip. Additive, HDR by uK (bloom) like FX.flash. */
+class FlameFX {
+  constructor(scene, n) {
+    this.n = n; this.items = []; this.live = []; this.next = 0;
+    for (let i = 0; i < n; i++) this.items.push({ on: false, p: new V3(), v: new V3(), life: 0, max: 1, w0: 1, w1: 1, h: 1.8, seed: 0, a0: 1, w: 1, a: 0 });
+    const attr = (size) => new THREE.InstancedBufferAttribute(new Float32Array(n * size), size).setUsage(THREE.DynamicDrawUsage);
+    this.aPos = attr(3); this.aD = attr(4); this.attrs = [this.aPos, this.aD];
+    const { instancedBufferAttribute: iba, uv, uniform, vec2, vec3, vec4, float, abs, mix, smoothstep, clamp, pow, mx_fractal_noise_float: fbm } = THREE.TSL;
+    this.uK = uniform(1); this.uT = uniform(0);
+    const d = iba(this.aD), seed = d.z, alpha = d.w, q = uv(), y = q.y, t = this.uT;
+    const n1 = fbm(vec3(q.x.mul(2.2).add(seed), y.mul(1.6).sub(t.mul(1.9)), seed.mul(1.7)), 3, 2.0, 0.5);
+    const n2 = fbm(vec3(q.x.mul(5).add(seed.mul(3.1)), y.mul(3.4).sub(t.mul(3.6)), seed), 2, 2.0, 0.5);
+    const x = q.x.sub(0.5).add(n1.mul(0.16).mul(y.add(0.15)));                    // sways, more toward the tip
+    const half = mix(float(0.47), float(0.07), pow(y, 0.9));                      // narrows upward
+    const body = smoothstep(half, half.mul(0.25), abs(x));
+    const tip = smoothstep(float(0.97), float(0.35).add(n2.mul(0.25)), y);          // the tip breaks up into tongues
+    const base = smoothstep(float(0), float(0.1), y);
+    const heat = clamp(body.mul(tip).mul(base).mul(n2.mul(0.55).add(0.8)).mul(float(1.05).sub(y.mul(0.55))), 0, 1);
+    const red = vec3(0.6, 0.05, 0.0), orange = vec3(1.0, 0.36, 0.03), core = vec3(1.0, 0.78, 0.38);
+    const col = mix(mix(red, orange, smoothstep(0.1, 0.5, heat)), core, smoothstep(0.68, 0.98, heat));
+    const a = smoothstep(0.04, 0.32, heat).mul(alpha);
+    const mat = new THREE.SpriteNodeMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false });
+    mat.positionNode = iba(this.aPos); mat.scaleNode = vec2(d.x, d.y);
+    mat.colorNode = vec4(col.mul(this.uK.mul(heat.mul(0.5).add(0.6))), a);   // (the core brightest: it blooms)
+    this.mesh = new THREE.Sprite(mat); this.mesh.center.set(0.5, 0.12); this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.visible = false;
+    this.mesh.renderOrder = 7; scene.add(this.mesh);
+  }
+  /* o: { w (width at birth), w1 (at the end), h (height / width), life, a0, v } */
+  spawn(p, o) {
+    const it = this.items[this.next]; this.next = (this.next + 1) % this.n;
+    it.on = true; it.p.copy(p); it.life = it.max = o.life || 0.8; it.w0 = o.w || 1; it.w1 = o.w1 || it.w0 * 1.15; it.h = o.h || 1.8;
+    it.a0 = o.a0 != null ? o.a0 : 1; it.seed = Math.random() * 50;
+    if (o.v) it.v.copy(o.v); else it.v.set(0, 0, 0);
+    return it;
+  }
+  update(dt, T) {
+    this.uT.value = T % 600;
+    const live = this.live; live.length = 0;
+    for (const it of this.items) {
+      if (!it.on) continue;
+      it.life -= dt;
+      if (it.life <= 0) { it.on = false; continue; }
+      const k = 1 - it.life / it.max;
+      it.p.addScaledVector(it.v, dt);
+      it.w = lerp(it.w0, it.w1, k);
+      it.a = it.a0 * Math.min(1, k / 0.15) * (1 - k * k);   // grows in, burns, dies away
+      live.push(it);
+    }
+    const P = this.aPos.array, D = this.aD.array;
+    for (let i = 0; i < live.length; i++) {
+      const it = live[i];
+      P[i * 3] = it.p.x; P[i * 3 + 1] = it.p.y; P[i * 3 + 2] = it.p.z;
+      D[i * 4] = it.w; D[i * 4 + 1] = it.w * it.h; D[i * 4 + 2] = it.seed; D[i * 4 + 3] = it.a;
+    }
+    if (live.length) for (const a of this.attrs) { a.clearUpdateRanges(); a.addUpdateRange(0, live.length * a.itemSize); a.needsUpdate = true; }
+    this.mesh.count = live.length; this.mesh.visible = live.length > 0;
+  }
+}
+
 /* craters where shells and bombs hit the ground: a low lathe (dark bowl, a raised rim of turned-up earth that catches
    the light, soot-dark ejecta thinning out to the ground) in vertex colours; one instanced mesh, a fixed pool of slots; old
    ones flatten and shrink away. A hit on a live crater widens it instead of stacking a second one on it (merge); on paved
@@ -193,7 +257,10 @@ class Scorch {
 class FireLights {
   constructor(scene, n) { this.items = []; for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xff8a3a, 0, 16, 2); l.layers.enable(2); scene.add(l); this.items.push(l); } this.ph = 0; }
   update(dt, nightBoost) {
-    this.ph += dt; const fires = BASE_FIRES.slice().sort((a, b) => b.r * Math.min(1, b.t / 8) - a.r * Math.min(1, a.t / 8));
+    // the biggest fires: burning structures, then burning wrecks (an armour wreck's flames: `fire`, updateArmor)
+    this.ph += dt; const fires = BASE_FIRES.slice();
+    for (const e of ENEMIES) if (e.kind === 'armor' && e.falling && e.fire > 0.05) fires.push({ p: e.p, r: 0.7 * e.fire, t: 8 });
+    fires.sort((a, b) => b.r * Math.min(1, b.t / 8) - a.r * Math.min(1, a.t / 8));
     this.items.forEach((l, i) => {
       const f = fires[i]; if (!f) { l.intensity = 0; return; }
       const k = Math.min(1, f.t / 8) * f.r, fl = 0.75 + 0.25 * Math.sin(this.ph * 13 + i * 2.1) * Math.sin(this.ph * 7.3 + i);

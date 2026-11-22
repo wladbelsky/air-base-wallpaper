@@ -125,8 +125,9 @@ async function init() {
   FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 420, true);   // (a burning structure keeps ~50 up)
   FX.scorch = new Scorch(scene, 120);
   FX.lights = new FlashLights(scene, GPU.clustered ? 24 : 4);
-  if (GPU.clustered) FX.fireLights = new FireLights(scene, 12);
-  else HELI_LIGHTS.build(scene);   // (before the air wing: the scene's lights are fixed from the start)
+  FX.fire = new FlameFX(scene, 240);   // (structures, wrecks, units, crashes, explosions at once: ~25 a burning roof)
+  FX.fireLights = new FireLights(scene, GPU.clustered ? 12 : 2);   // (2 without clustering: fixed, always in the scene — the light set never changes)
+  if (!GPU.clustered) HELI_LIGHTS.build(scene);   // (before the air wing: the scene's lights are fixed from the start)
   WEATHER.build();
   // shells, rockets and bombs that reach the ground: dust, or a bomb hitting a structure
   FX.tracers.onSplash = (p, big) => {
@@ -290,14 +291,17 @@ function resize() {
 let pipeline = null, bloomNode = null, sceneOut = null, pipeBloom = null, scenePass = null;
 /* the final grade, on screen colours (after the tone mapping and the sRGB encoding): the linear light made the picture
    more contrasty and saturated than before r187 (the shade side and the ground darker, the sunlit side warmer) — halfway
-   back: saturation × GRADE.sat toward the luminance, contrast × GRADE.con around GRADE.mid (the mean stays). The
-   contrast eases back to 1 at night (GRADE.k, updateBloom): around 0.44 it lifted black to ~0.04 — a milky night */
-const GRADE = { sat: 0.87, con: 0.9, mid: 0.44, k: null };   // (by day max − min saturation scales by sat × con: 0.78)
+   back: saturation × sat toward the luminance, contrast × con around mid. Day and night have their own (updateBloom
+   eases between them by ENV.night): by day measured on WE screenshots (spread 0.116 → 0.143, saturation 0.063 →
+   0.111); at night on three night scenes rendered with the pre-r187 code and now (mean 0.21 → 0.18, spread 0.072 →
+   0.099, saturation 0.070 → 0.109, the darkest 5 % 0.11 → 0.055: darker and harder) — the night's pivot 0.33 lifts
+   the mean a little too, to the midpoint */
+const GRADE = { day: { sat: 0.87, con: 0.9, mid: 0.44 }, night: { sat: 0.8, con: 0.87, mid: 0.33 }, u: null };
 function gradeOut(n) {
-  const { renderOutput, luminance, mix, vec3, float, uniform } = THREE.TSL;
-  if (!GRADE.k) GRADE.k = uniform(GRADE.con);
-  const c = renderOutput(n), rgb = c.rgb, l = luminance(rgb);
-  const s = mix(vec3(l), rgb, float(GRADE.sat)), g = s.sub(GRADE.mid).mul(GRADE.k).add(GRADE.mid);
+  const { renderOutput, luminance, mix, vec3, uniform } = THREE.TSL;
+  if (!GRADE.u) GRADE.u = { sat: uniform(GRADE.day.sat), con: uniform(GRADE.day.con), mid: uniform(GRADE.day.mid) };
+  const U = GRADE.u, c = renderOutput(n), rgb = c.rgb, l = luminance(rgb);
+  const s = mix(vec3(l), rgb, U.sat), g = s.sub(U.mid).mul(U.con).add(U.mid);
   return THREE.TSL.vec4(g, c.a);
 }
 function buildPipeline() {
@@ -365,10 +369,10 @@ let HDR = 1;
 function updateBloom() {
   HDR = CFG.bloom ? 1 : 0;
   const k = HDR * (0.35 + 0.65 * ENV.lightsOn);   // (by day a flame stays a flame, not a red ball)
-  FX.flash.uK.value = 1 + 1.1 * k; FX.tracers.mesh.material.color.setScalar(1 + 1.2 * k);
+  FX.flash.uK.value = 1 + 1.1 * k; FX.fire.uK.value = 1 + 1.3 * k; FX.tracers.mesh.material.color.setScalar(1 + 1.2 * k);
   if (!pipeline) return;
-  if (GRADE.k) GRADE.k.value = lerp(GRADE.con, 1, ENV.night);
   if (pipeBloom !== CFG.bloom) { pipeBloom = CFG.bloom; pipeline.outputNode = gradeOut(CFG.bloom ? sceneOut.add(bloomNode) : sceneOut); pipeline.needsUpdate = true; }
+  const D = GRADE.day, N = GRADE.night, kn = ENV.night; GRADE.u.sat.value = lerp(D.sat, N.sat, kn); GRADE.u.con.value = lerp(D.con, N.con, kn); GRADE.u.mid.value = lerp(D.mid, N.mid, kn);
   bloomNode.strength.value = lerp(0.5, 0.7, ENV.night); bloomNode.threshold.value = lerp(1.4, 0.55, ENV.lightsOn); bloomNode.radius.value = 0.55;   // (BloomNode: a weaker scale than the old UnrealBloomPass)
 }
 /* the shadow map is drawn every second frame while the wallpaper runs at 50 fps or more (frameAvg, ms between drawn
@@ -1215,7 +1219,7 @@ function step(dt) {
   FX.smoke.update(dt, ENV.smokeTint, camera);
   FX.scorch.update(dt);
   FX.lights.update(dt, 0.6 + ENV.night * 0.8);
-  if (FX.fireLights) FX.fireLights.update(dt, 0.6 + ENV.night * 0.8);
+  FX.fire.update(dt, T); FX.fireLights.update(dt, 0.6 + ENV.night * 0.8);
   WEATHER.update(dt);
   TERRAIN.update(dt);
   STRESS.update(dt);

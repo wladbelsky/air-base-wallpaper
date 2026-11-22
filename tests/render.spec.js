@@ -249,3 +249,42 @@ test('perfReport: averages frames, CPU, draw calls and lights; perfFlags keeps i
   expect(f).toEqual(['{"gl":"webgl2"}', '{}']);
 });
 
+
+// fire (FlameFX): tongues of procedural flame over a burning roof, warm and bright; the fire lights are a fixed pair in
+// the scene (the light set never changes) lit only while something burns; HDR only with bloom
+test('fire: a burning roof draws flames and lights the roof; fixed fire lights, dark without a fire; uK 1 without bloom', async ({ wp }) => {
+  await wp.boot({ query: '?hour=23&season=summer' });
+  await wp.sim(2);
+  const r = await wp.run(() => {
+    const lights = () => { let n = 0; scene.traverse(o => { if (o.isLight) n++; }); return n; };
+    const n0 = lights(), dark = FX.fireLights.items.every(l => l.intensity === 0);
+    const t = BASE.targets.find(t => /HANGAR/i.test(t.name)); baseImpact(t.p.clone(), 1.6, t.name);
+    CFG.zoom = 420; CAM_TGT.set(t.p.x, t.p.y, t.p.z); updateCamera();
+    for (let i = 0; i < 60; i++) step(0.05);
+    __t.render();
+    const v = t.p.clone().add(new THREE.Vector3(0, 1.5, 0)).project(camera), x = (v.x + 1) / 2 * innerWidth, y = (1 - v.y) / 2 * innerHeight;
+    const c = __t.sample(x - 30, y - 30, 60, 60);
+    const lit = FX.fireLights.items.filter(l => l.intensity > 0).length, flames = FX.fire.live.length, n1 = lights();
+    __t.props({ bloom: false }); const k0 = FX.fire.uK.value; __t.props({ bloom: true });
+    return { n0, n1, dark, lit, flames, c, k0, err: renderer.getContext().getError() };
+  });
+  expect(r.err).toBe(0);
+  expect(r.dark, 'no fire: the fire lights are dark').toBe(true);
+  expect(r.n1, 'the light set never changes').toBe(r.n0);
+  expect(r.lit, 'the fire lights the roof').toBeGreaterThan(0);
+  expect(r.flames, 'tongues of flame').toBeGreaterThan(5);
+  expect(r.c[0], `warm and bright over the roof ${r.c}`).toBeGreaterThan(r.c[2] + 40);
+  expect(r.k0, 'no HDR without bloom').toBe(1);
+  // a long fire never outgrows its pool; the flames die with it
+  const s = await wp.run(() => { let mx = 0; for (let i = 0; i < 900; i++) { step(0.05); mx = Math.max(mx, FX.fire.live.length); } return { mx, left: BASE_FIRES.length, live: FX.fire.live.length, lit: FX.fireLights.items.filter(l => l.intensity > 0).length }; });
+  expect(s.mx).toBeLessThanOrEqual(240);
+  expect([s.left, s.live, s.lit], 'out: no flames, the lights dark').toEqual([0, 0, 0]);
+});
+
+test('the grade: day and night values follow ENV.night (night: the pre-r187 / r187 midpoint)', async ({ wp }) => {
+  await wp.boot({ query: '?hour=23' });
+  const n = await wp.run(() => { __t.render(); updateBloom(); return { night: ENV.night, sat: GRADE.u.sat.value, con: GRADE.u.con.value, mid: GRADE.u.mid.value }; });
+  expect(n.night).toBe(1);
+  expect([n.sat, n.con, n.mid]).toEqual([GRADE_N.sat, GRADE_N.con, GRADE_N.mid]);
+});
+const GRADE_N = { sat: 0.8, con: 0.87, mid: 0.33 };
