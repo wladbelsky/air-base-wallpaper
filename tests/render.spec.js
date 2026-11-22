@@ -77,13 +77,14 @@ test('bloom: the night lights glow; toggling it renders without GL errors, count
     const gl = renderer.getContext(), out = {};
     for (const b of [true, false, true]) {
       __t.props({ bloom: b });
-      out[b] = { c: __t.sample(0, 0, 640, 360), lit: __t.bright(0, 0, 1280, 720, 50), calls: renderer.info.render.drawCalls, err: gl.getError(), tex: renderer.info.memory.textures, hdr: FX.flash.uK.value };
+      out[b] = { c: __t.sample(0, 0, 640, 360), lit: __t.sample(0, 0, innerWidth, innerHeight).reduce((x, y) => x + y, 0) / 3, calls: renderer.info.render.drawCalls, err: gl.getError(), tex: renderer.info.memory.textures, hdr: FX.flash.uK.value };
     }
     return out;
   });
   expect(r.true.err).toBe(0); expect(r.false.err).toBe(0);
   // the glow adds light around the lamps; the passes add only a few draw calls to the scene's (counted per frame)
-  expect(r.true.lit, `bright pixels with bloom ${r.true.lit} vs without ${r.false.lit}`).toBeGreaterThan(r.false.lit * 1.03);   // (~+5 % since the night strength was halved)
+  // (the frame's mean level: counting pixels over a threshold went with the night grade, which lifts the darks either way)
+  expect(r.true.lit, `mean level with bloom ${r.true.lit} vs without ${r.false.lit}`).toBeGreaterThan(r.false.lit + 0.4);
   expect(r.true.calls).toBeGreaterThan(r.false.calls);
   expect(r.true.calls).toBeLessThan(r.false.calls + 20);
   expect(r.false.hdr, 'no HDR emitters without bloom').toBe(1);
