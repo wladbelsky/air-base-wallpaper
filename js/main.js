@@ -265,12 +265,14 @@ function resize() {
 let pipeline = null, bloomNode = null, sceneOut = null, pipeBloom = null, scenePass = null;
 /* the final grade, on screen colours (after the tone mapping and the sRGB encoding): the linear light made the picture
    more contrasty and saturated than before r187 (the shade side and the ground darker, the sunlit side warmer) — halfway
-   back: saturation × GRADE.sat toward the luminance, contrast × GRADE.con around GRADE.mid (the mean stays) */
-const GRADE = { sat: 0.87, con: 0.9, mid: 0.44 };   // (max − min saturation scales by sat × con: 0.78)
+   back: saturation × GRADE.sat toward the luminance, contrast × GRADE.con around GRADE.mid (the mean stays). The
+   contrast eases back to 1 at night (GRADE.k, updateBloom): around 0.44 it lifted black to ~0.04 — a milky night */
+const GRADE = { sat: 0.87, con: 0.9, mid: 0.44, k: null };   // (by day max − min saturation scales by sat × con: 0.78)
 function gradeOut(n) {
-  const { renderOutput, luminance, mix, vec3, float } = THREE.TSL;
+  const { renderOutput, luminance, mix, vec3, float, uniform } = THREE.TSL;
+  if (!GRADE.k) GRADE.k = uniform(GRADE.con);
   const c = renderOutput(n), rgb = c.rgb, l = luminance(rgb);
-  const s = mix(vec3(l), rgb, float(GRADE.sat)), g = s.sub(GRADE.mid).mul(GRADE.con).add(GRADE.mid);
+  const s = mix(vec3(l), rgb, float(GRADE.sat)), g = s.sub(GRADE.mid).mul(GRADE.k).add(GRADE.mid);
   return THREE.TSL.vec4(g, c.a);
 }
 function buildPipeline() {
@@ -333,6 +335,7 @@ function updateBloom() {
   const k = HDR * (0.35 + 0.65 * ENV.lightsOn);   // (by day a flame stays a flame, not a red ball)
   FX.flash.uK.value = 1 + 1.1 * k; FX.tracers.mesh.material.color.setScalar(1 + 1.2 * k);
   if (!pipeline) return;
+  if (GRADE.k) GRADE.k.value = lerp(GRADE.con, 1, ENV.night);
   if (pipeBloom !== CFG.bloom) { pipeBloom = CFG.bloom; pipeline.outputNode = gradeOut(CFG.bloom ? sceneOut.add(bloomNode) : sceneOut); pipeline.needsUpdate = true; }
   bloomNode.strength.value = lerp(0.5, 0.7, ENV.night); bloomNode.threshold.value = lerp(1.4, 0.55, ENV.lightsOn); bloomNode.radius.value = 0.55;   // (BloomNode: a weaker scale than the old UnrealBloomPass)
 }

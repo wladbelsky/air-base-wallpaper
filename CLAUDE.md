@@ -54,7 +54,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=53`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=54`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -101,7 +101,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   (`srgbTex`, core.js), vertex colours are linear (terrain patches `k^2.2`; `mergeStatic` bakes `material.color`, already
   linear). Output: sRGB, **Neutral tone mapping** (colours below ~0.8 untouched, bright ones roll off), then a final
   **grade** on the screen colours (`gradeOut`, `GRADE`: saturation × 0.87 toward the luminance, contrast × 0.9 around
-  0.44) — the pipeline's own output transform is off (`outputColorTransform` false: `renderOutput` in `gradeOut`). Linear
+  0.44 by day, easing to 1 at night — `GRADE.k`, `updateBloom`: around 0.44 it lifted black, a milky night) — the pipeline's own output transform is off (`outputColorTransform` false: `renderOutput` in `gradeOut`). Linear
   light made the picture more contrasty and saturated than before r187 (measured on WE screenshots: luminance spread
   0.116 → 0.143, saturation 0.063 → 0.111); the grade takes it halfway back.
 - **Lights are physical** (legacy lights are gone since r165). The sky palette (`SKY_KEYS`) keeps its old sRGB meaning:
