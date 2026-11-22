@@ -248,3 +248,4 @@ test('perfReport: averages frames, CPU, draw calls and lights; perfFlags keeps i
   const f = await wp.run(() => { perfFlags({ gl: 'webgl2' }); const a = localStorage.getItem('fab-perf'); perfFlags({}); return [a, localStorage.getItem('fab-perf')]; });
   expect(f).toEqual(['{"gl":"webgl2"}', '{}']);
 });
+

@@ -84,7 +84,7 @@ const BATCH = {
     const k = this.key(m); let G = this.groups.get(k);
     if (!G) {
       this.ev.batch++;
-      const mo = m.material.userData.mopts, bm = new THREE.BatchedMesh(256, 32768, 0, mo != null ? M(0xffffff, mo ? JSON.parse(mo) : undefined) : m.material);
+      const mo = m.material.userData.mopts, bm = new THREE.BatchedMesh(1024, 32768, 0, mo != null ? M(0xffffff, mo ? JSON.parse(mo) : undefined) : m.material);
       bm.castShadow = m.castShadow; bm.receiveShadow = m.receiveShadow;
       bm.frustumCulled = false; bm.perObjectFrustumCulled = true; bm.sortObjects = false;   // (instances move: no whole-batch bounds; opaque, unsorted)
       bm.userData.batch = true; scene.add(bm);
@@ -102,7 +102,7 @@ const BATCH = {
     catch (err) {
       this.ev.grow++; bm.optimize();
       try { id = bm.addGeometry(geo); }
-      catch (err2) { bm.setGeometrySize(Math.max(bm._maxVertexCount * 2, bm._maxVertexCount + n * 2), 0); id = bm.addGeometry(geo); }
+      catch (err2) { bm.setGeometrySize(Math.max(bm._maxVertexCount * 2, bm._maxVertexCount + n * 2), 0); bm.material.needsUpdate = true; id = bm.addGeometry(geo); }
     }
     e = { id, recs: new Set() }; G.geos.set(geo, e);
     geo.addEventListener('dispose', () => this.dropGeometry(G, geo));
@@ -119,7 +119,7 @@ const BATCH = {
     const G = this.group(m), e = this.geoId(G, m.geometry), bm = G.bm;
     let inst;
     try { inst = bm.addInstance(e.id); }
-    catch (err) { this.ev.grow++; bm.setInstanceCount(bm.maxInstanceCount * 2); inst = bm.addInstance(e.id); }
+    catch (err) { this.ev.grow++; bm.setInstanceCount(bm.maxInstanceCount * 2); bm.material.needsUpdate = true; inst = bm.addInstance(e.id); }
     if (G.tint) bm.setColorAt(inst, m.material.color);
     const r = { m, G, e, inst, mat: m.material, seen: 0, seenT: T, vis: true, dead: false };
     e.recs.add(r); this.recs.set(m, r); this.live.push(r);
@@ -150,16 +150,14 @@ const BATCH = {
     }
     if (dead) for (const r of this.gone) this.remove(r);   // (not while iterating: remove() takes it off `live`)
   },
-  /* the warm-up (under the splash): every merged mesh's geometry into its batch now, hidden ones too (an aircraft in a
-     shut shelter, the enemy / vehicle / fly-by templates) — the batches grew mid-fight otherwise (optimize /
-     setGeometrySize copy and upload a whole batch: a stall) — then room for twice the instances in use */
+  /* the warm-up (under the splash, before anything is drawn): every merged mesh's geometry into its batch now, hidden
+     ones too (an aircraft in a shut shelter, the enemy / vehicle / fly-by templates) — the batches grew mid-fight
+     otherwise (optimize / setGeometrySize copy and upload a whole batch: a stall). Instances: 1024 a batch from the
+     start. A batch resized once drawn must rebind: its render object keeps the textures / geometry it was built with
+     (r187 re-reads the cache key — which holds the textures' uuids — only when the material's version changes), so
+     the growth branches above bump the material (needsUpdate): without it the batch went on drawing from its old
+     matrices texture, the models frozen where they were at the resize while their (sprite) lights moved on */
   prefill(root) { root.traverse(o => { if (o.isMesh && o.userData.batched) this.geoId(this.group(o), o.geometry); }); },
-  reserve() {
-    for (const G of this.groups.values()) {
-      const n = G.bm._instanceInfo.filter(i => i.active).length, want = Math.max(256, n * 2 + 64);
-      if (G.bm.maxInstanceCount < want) G.bm.setInstanceCount(want);
-    }
-  },
   /* draw calls / instances / vertices in the batches (tests, the measurements in CLAUDE.md) */
   stats() { let n = 0, v = 0; for (const G of this.groups.values()) { n += G.bm._instanceInfo.filter(i => i.active).length; v += G.bm._maxVertexCount; } return { batches: this.groups.size, instances: n, vertices: v, live: this.live.length }; }
 };

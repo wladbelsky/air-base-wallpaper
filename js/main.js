@@ -228,7 +228,7 @@ async function warmShaders() {
   scene.add(g); warmFrame(); if (!SHADERS_READY) { flip(); warmFrame(); flip(); } scene.remove(g);
   for (const m of fly) m.group.removeFromParent();
   spots.forEach(l => { l.visible = GPU.clustered || ENV.lightsOn > 0; });
-  BATCH.reserve(); renderFrame();
+  renderFrame();
   SHADERS_READY = true;
 }
 

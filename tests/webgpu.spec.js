@@ -116,3 +116,21 @@ test('WebGPU: after the warm-up a scramble, a fly-by and a fight build no new pr
   expect(r.p, `render pipelines after a scramble and a fight (${r.kinds})`).toBe(p0);
   expect(r.ev).toEqual(ev0);
 });
+
+
+// a batch resized once drawn must rebind (BATCH: bm.material.needsUpdate): its render object kept the textures it was
+// built with — the warm-up's last resize once froze every batch's matrices at the warm-up frames: in WE the models
+// stood where the templates had been (a cluster of vehicles mid-screen) while their sprite lights moved on
+test('WebGPU: after the warm-up and a scramble every batch draws from its current matrices texture (no frozen models)', async ({ wp }) => {
+  await wp.boot({ gl: 'webgpu', warm: true, query: '?hour=12&season=summer' });
+  await wp.run(() => { __t.render(); AIRCRAFT.forEach(a => a.canLaunch() && a.requestLaunch()); });
+  for (let i = 0; i < 4; i++) { await wp.sim(5); await wp.run(() => __t.render()); }
+  const r = await wp.run(() => {
+    // force one batch to grow once drawn too (the fallback): it must rebind as well
+    const G = [...BATCH.groups.values()][0], gid = G.geos.values().next().value.id;
+    while (G.bm._instanceInfo.filter(i => i.active).length < G.bm.maxInstanceCount) { const i = G.bm.addInstance(gid); G.bm.setVisibleAt(i, false); }
+    const m = [...BATCH.live].find(r => r.G === G).m, twin = m.clone(); scene.add(twin); __t.render(); scene.remove(twin); __t.render();
+    return [...BATCH.groups.values()].filter(G => !(renderer.backend.get(G.bm._matricesTexture) || {}).texture).length;
+  });
+  expect(r, 'batches drawing from a stale (replaced) matrices texture').toBe(0);
+});

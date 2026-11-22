@@ -55,7 +55,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=56`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=57`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -155,7 +155,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   spot-light states — `compileAsync` builds for its own context, the scene pass draws in the RenderPipeline's, and on
   WebGPU a pipeline made later is a blocking `createRenderPipeline` (a fight's stalls: tracers, a wreck, a scramble out
   of the shelters). The warm group also holds a wreck of every armour type and one fly-by jet per type (`FLYBY_MODELS`,
-  built here, no longer lazily); `BATCH.prefill` / `reserve` (see "Batched drawing"). `GPU.pipes` counts the render
+  built here, no longer lazily); `BATCH.prefill` (see "Batched drawing"). `GPU.pipes` counts the render
   pipelines made (`renderer.info.memory.programs` counts shader modules shared by code: it barely moves); the
   webgpu.spec test checks a scramble, a fly-by and a fight after the warm-up make none. The loop draws nothing until `SHADERS_READY` (15 s fallback), the
   splash waits for it. A new kind of object that first appears in a fight must be in the scene (hidden is fine) or in
@@ -544,9 +544,14 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   batch (`BATCH.sync`: `remove` + `add`).
   Only what is drawn gets an instance (an aircraft behind a shut door gets one when it comes out), but every geometry is
   in its batch from the warm-up (`BATCH.prefill`: hidden meshes too, the templates, the fly-by jets) and the batches
-  start at 256 instances, `reserve()`d to twice those in use: growth (`optimize` / `setGeometrySize` copy and upload a
-  whole batch, `setInstanceCount` new textures) and a new batch (a new pipeline) mid-fight were stalls — counted in
-  `BATCH.ev` (perfReport's hitch log).
+  start at 1024 instances: growth (`optimize` / `setGeometrySize` copy and upload a whole batch, `setInstanceCount` new
+  textures) and a new batch (a new pipeline) mid-fight were stalls — counted in `BATCH.ev` (perfReport's hitch log).
+  **A batch resized once drawn must rebind** (`bm.material.needsUpdate` in the growth branches): on WebGPU its render
+  object keeps the textures / geometry it was built with (r187 re-reads its cache key, which holds the textures'
+  uuids, only when the material's version changes) — a resize at the end of the warm-up once left the plain-colour
+  batch drawing from its old matrices texture: in WE the aircraft and the base stood where the warm-up had put them
+  while their sprite lights moved on (webgpu.spec checks every batch draws from its current texture). Nothing may
+  resize a batch after the first frame except these fallbacks.
 - Many repeated objects are one `InstancedMesh` (vegetation, fence posts, stand marks, helicopter pads, scorch marks, tracers).
 - `shade()` sets `castShadow`/`receiveShadow` per mesh; don't blanket-enable shadows with `traverse`.
 - Shared scratch vectors (`_v`, `_p`, `_d`, `_al`…) must not be passed into a function that also
