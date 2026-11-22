@@ -55,7 +55,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=58`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=59`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -182,7 +182,9 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   as at the base rate). `default` mode has no gusts. `wet` darkens `PLAIN_MAT` / the ground and raises their gloss (uniforms only).
 
 ## Airfield (`js/airfield.js`, `js/aircraft.js`)
-- **Rooftops**: the builders in `base.js` list the buildings' boxes in `OBSTACLES` (`obstacle(p, x, z, w, d, top)`:
+- **Rooftops**: the builders in `base.js` list the buildings' boxes in `OBSTACLES` (`obstacle(p, x, z, w, d, top, rotY, shape)`;
+  `o[6]` = the roof's shape `(x, z)` → its height or 0 — the rotated rectangle, the hangars' barrel, the HAS arch and lintel, a
+  circle for the tower cab and the fuel tanks (`roundRoof`); `roofAt(x, z)` the roof surface there:
   hangars to the barrel roof's crown, shelters, the tower to its cab roof, buildings, sheds, the radar, the floodlight
   masts; one in a hidden group doesn't count); `obstacleTop(x, z)`. In flight
   (`followPath`, `orbitStep`) `clearRoofs` looks ahead along the way (≥ 6, ~1.5 s) and eases the aircraft up to
@@ -391,7 +393,11 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   radius is now never below the stop's). Dogfight bandits (`duel`)
   fly a pass path and are left to the fighters.
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
-  site rows show DAMAGED; on its roof (`obstacleTop`), the blast too; 30–40 s: flame tongues over `r` of it, a tall black
+  site rows show DAMAGED; on its roof, the blast too: `roofBox` — the obstacle under the hit, else the nearest within 4 (a
+  bomb beside the building, the OPS aim point between its two buildings, the FUEL one between the tanks) — the point is
+  moved onto its roof shape, no roof near (the Patriot site): on the ground; every flame / glow / ember / smoke puff is
+  placed by `fireSpot` over that roof's shape (an arch's eaves are lower), narrow roofs get narrower tongues (`f.wk`) —
+  they once spread over a square at the crown's height and hung in the air around the tower's cab; 30–40 s: flame tongues over `r` of it, a tall black
   smoke column, dying down over the last 8 s, spawned by time accumulators (`fl`, `sm`); a hit near a burning one spreads
   that fire instead of stacking another; the smoke pool is 420 for it). **Flames** are `FX.fire` (`FlameFX`, effects.js):
   one instanced Sprite anchored at its base, each instance a tall tongue whose colour is TSL noise, not a texture — a

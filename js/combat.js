@@ -273,14 +273,40 @@ function damageEnemy(e, dmg, src) {
 /* something got through: an impact on the base — explosion, scorch, a fire on the structure for a while (r: how far
    over its roof the flames spread) */
 function baseImpact(p, s, name) {
-  const q = p.clone(); q.y = Math.max(q.y, obstacleTop(q.x, q.z));   // on its roof (the aim point is inside: the roof hid the blast and the flames)
+  // on its roof (the aim point is inside: the roof hid the blast and the flames); a bomb beside the building, or an aim
+  // point between two (OPS) or between the fuel tanks, burns on the nearest roof — it once hung in the air at the aim
+  // point's height; no roof within reach (the Patriot site): on the ground
+  const q = p.clone(), o = roofBox(q);
+  if (o) { q.x = clamp(q.x, o[0] + 0.3, o[1] - 0.3); q.z = clamp(q.z, o[2] + 0.3, o[3] - 0.3); for (let i = 0; i < 8 && !o[6](q.x, q.z); i++) q.lerp(_rc.set((o[0] + o[1]) / 2, 0, (o[2] + o[3]) / 2), 0.35); q.y = o[6](q.x, q.z) || o[4]; } else q.y = groundH(q.x, q.z);
   explosion(q, s * 1.4); FX.scorch.spawn(p, 2.2 * s, 90);
-  // a fire already burning there spreads and burns on (stacked fires on one roof churned the smoke / flash pools)
-  const t = 30 + s * 10, r = 0.6 + 0.6 * s, f = BASE_FIRES.find(o => Math.hypot(o.p.x - q.x, o.p.z - q.z) < o.r + 1.5);
-  if (f) { f.t = Math.max(f.t, t); f.r = Math.min(f.r + 0.4, 2.6); } else BASE_FIRES.push({ p: q, t, r, name: name || 'BASE', fl: 0, sm: 0 });
+  // a fire already burning on that roof spreads and burns on (stacked fires on one roof churned the smoke / flash pools)
+  const t = 30 + s * 10, r = 0.6 + 0.6 * s, f = BASE_FIRES.find(e => e.o === o && Math.hypot(e.p.x - q.x, e.p.z - q.z) < e.r + 1.5);
+  if (f) { f.t = Math.max(f.t, t); f.r = Math.min(f.r + 0.4, 2.6); }
+  else BASE_FIRES.push({ p: q, t, r, o, wk: o ? clamp(Math.min(o[1] - o[0], o[3] - o[2]) / 4, 0.4, 1) : 1, name: name || 'BASE', fl: 0, sm: 0 });
   sayOnce('hit', 5, () => RADIO.say(RADIO_NAMES.tower, radioLine(COMBAT.baseHit), { role: 'tower', cat: 'combat', prio: 4 }));
   if (Math.random() < 0.6) { const b = ENEMIES.find(o => o.kind === 'bandit' && !o.duel && enemyAlive(o)); enemySay(b ? b.cs : ENEMY_NAMES.hq, ENEMY_LINES.baseHit, null, { delay: 1.4 }); }
   if (CFG.shake) camShake = 1;
+}
+/* the structure a hit belongs to: the obstacle whose roof is under p (the highest), else the nearest box within 4 */
+const _rc = new V3();
+function roofBox(p) {
+  let best = null, bh = 0, bd = 4;
+  for (const o of OBSTACLES) {
+    if (!o[5].visible) continue;
+    const dx = Math.max(o[0] - p.x, 0, p.x - o[1]), dz = Math.max(o[2] - p.z, 0, p.z - o[3]), d = Math.hypot(dx, dz);
+    const h = d === 0 ? o[6](p.x, p.z) : 0;
+    if (h > bh) { bh = h; best = o; bd = 0; } else if (!bh && d < bd) { bd = d; best = o; }   // (inside a box off its shape: the gap under a HAS's front)
+  }
+  return best;
+}
+/* a random point of a structure fire (±r·k around it, over its roof's shape — an arch's eaves are lower), dy above the
+   surface; null when nothing of the roof was hit in a few tries */
+function fireSpot(f, out, k, dy) {
+  const r = f.r * k, o = f.o;
+  if (!o) return out.set(f.p.x + rand(-r, r), groundH(f.p.x, f.p.z) + dy, f.p.z + rand(-r, r));
+  const x0 = Math.max(f.p.x - r, o[0] + 0.25), x1 = Math.min(f.p.x + r, o[1] - 0.25), z0 = Math.max(f.p.z - r, o[2] + 0.25), z1 = Math.min(f.p.z + r, o[3] - 0.25);
+  for (let i = 0; i < 4; i++) { const x = rand(Math.min(x0, x1), Math.max(x0, x1)), z = rand(Math.min(z0, z1), Math.max(z0, z1)), h = o[6](x, z); if (h > 0) return out.set(x, h + dy, z); }
+  return null;
 }
 /* an enemy bomb on the ground (Tracers.onSplash): a structure within its footprint takes the hit (fire, the panel), else a
    crater; whatever it lands on is knocked out for a while (DAMAGE) */
@@ -446,14 +472,15 @@ function updateCombat(dt) {
   for (let i = BASE_FIRES.length - 1; i >= 0; i--) {
     const f = BASE_FIRES[i]; f.t -= dt;
     if (f.t <= 0) { BASE_FIRES.splice(i, 1); continue; }
-    const k = Math.min(1, f.t / 8), r = f.r || 1;
-    // tongues of flame (FlameFX: each licks and flickers on its own), a hot glow at their roots, sparks going up
-    for (f.fl += dt * 14; f.fl >= 1; f.fl--) FX.fire.spawn(_bf.set(f.p.x + rand(-r, r), f.p.y + rand(-0.15, 0.1), f.p.z + rand(-r, r)),
-      { w: rand(1.5, 2.4) * (0.55 + 0.45 * k), w1: rand(1.9, 2.8) * (0.55 + 0.45 * k), h: rand(1.2, 1.8), life: rand(0.7, 1.1), a0: 0.85 * k, v: _bv.set(WIND.x * 0.25, rand(0.3, 0.7), WIND.z * 0.25) });
-    for (f.gl = (f.gl || 0) + dt * 5; f.gl >= 1; f.gl--) FX.flash.spawn(_bf.set(f.p.x + rand(-r, r) * 0.7, f.p.y + 0.3, f.p.z + rand(-r, r) * 0.7),
-      { s0: rand(1.6, 2.4) * k, s1: rand(2.2, 3) * k, life: rand(0.3, 0.5), a0: 0.5 * k, color: pick(FIRE_COLS) });
-    for (f.em = (f.em || 0) + dt * 5 * k; f.em >= 1; f.em--) ember(_bf.set(f.p.x + rand(-r, r), f.p.y + 0.8, f.p.z + rand(-r, r)), 1);
-    for (f.sm += dt * 12; f.sm >= 1; f.sm--) FX.smoke.spawn(_bf.set(f.p.x + rand(-r, r) * 0.6, f.p.y + 1.2, f.p.z + rand(-r, r) * 0.6),
+    const k = Math.min(1, f.t / 8), wk = (f.wk || 1) * (0.55 + 0.45 * k);
+    // tongues of flame (FlameFX: each licks and flickers on its own) over the roof's shape, a hot glow at their roots,
+    // sparks going up (fireSpot: only where there is roof — over a narrow one they once hung in the air beside it)
+    for (f.fl += dt * 14; f.fl >= 1; f.fl--) if (fireSpot(f, _bf, 1, rand(-0.15, 0.1))) FX.fire.spawn(_bf,
+      { w: rand(1.5, 2.4) * wk, w1: rand(1.9, 2.8) * wk, h: rand(1.2, 1.8), life: rand(0.7, 1.1), a0: 0.85 * k, v: _bv.set(WIND.x * 0.25, rand(0.3, 0.7), WIND.z * 0.25) });
+    for (f.gl = (f.gl || 0) + dt * 5; f.gl >= 1; f.gl--) if (fireSpot(f, _bf, 0.7, 0.3)) FX.flash.spawn(_bf,
+      { s0: rand(1.6, 2.4) * k * (f.wk || 1), s1: rand(2.2, 3) * k * (f.wk || 1), life: rand(0.3, 0.5), a0: 0.5 * k, color: pick(FIRE_COLS) });
+    for (f.em = (f.em || 0) + dt * 5 * k; f.em >= 1; f.em--) if (fireSpot(f, _bf, 1, 0.8)) ember(_bf, 1);
+    for (f.sm += dt * 12; f.sm >= 1; f.sm--) if (fireSpot(f, _bf, 0.6, 1.2)) FX.smoke.spawn(_bf,
       { s0: 1.6, s1: 7, life: rand(4, 5.5), a0: 0.85 * k, color: 0x1a1a1a, v: drift(1.4, rand(1.8, 2.8)), drag: 0.15 });
   }
 }

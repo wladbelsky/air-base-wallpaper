@@ -112,6 +112,29 @@ test('the base fires back: tanks at the armour, SAMs and guns into the air; hits
   expect(r.scorch, 'scorch marks on the ground').toBeGreaterThan(0);
 });
 
+test('a structure fire burns on its roof: flames over the roof shape (arches, the tower cab, the fuel tanks), never in the air beside it', async ({ wp }) => {
+  await wp.run(() => { DAMAGE.hit = () => {}; window.__fl = []; const sp = FX.fire.spawn.bind(FX.fire); FX.fire.spawn = (p, o) => { __fl.push([p.x, p.y, p.z]); return sp(p, o); }; });
+  const cases = await wp.run(() => BASE.targets.filter(t => t.name !== 'RUNWAY').flatMap((t, i) => [[0, 0], [2.5, 0], [0, 2.5], [-2.5, -2.5]].map(d => [i, d[0], d[1]])));
+  for (const [i, dx, dz] of cases) {
+    await wp.run(([i, dx, dz]) => { BASE_FIRES.length = 0; const t = BASE.targets.filter(t => t.name !== 'RUNWAY')[i];
+      if (dx || dz) enemyBomb(new V3(t.p.x + dx, 0, t.p.z + dz)); else baseImpact(t.p.clone(), 1.3, t.name); __fl.length = 0; }, [i, dx, dz]);
+    expect((await wp.sim(1.5)).violations).toEqual([]);
+    const r = await wp.run(() => {
+      const f = BASE_FIRES[0], bad = [];
+      if (!f) return { none: true };
+      for (const [x, y, z] of __fl) {
+        const own = f.o ? f.o[6](x, z) : 0, top = roofAt(x, z);
+        if ((f.o && !(own > 0)) || Math.abs(y - own) > 0.3 || y > top + 0.3) bad.push([x, y, z, own, top].map(v => +v.toFixed(2)));
+      }
+      return { name: f.name, n: __fl.length, roof: !!f.o, p: [f.p.x, f.p.y, f.p.z], bad: bad.slice(0, 5) };
+    });
+    if (r.none) continue;   // a bomb that missed the structure (a crater)
+    expect(r.n, `${r.name}: flames`).toBeGreaterThan(5);
+    expect(r.bad, `${r.name} at ${r.p}: flames off its roof`).toEqual([]);
+    if (r.name !== 'PATRIOT') expect(r.roof, `${r.name}: burns on a roof`).toBe(true);
+  }
+});
+
 test('sky searchlights slew: with bandits coming and going, and the fight ending, no beam ever jumps', async ({ wp }) => {
   await wp.boot();
   await wp.run(() => { __t.forceFight(); STRESS.level = 0.8; window.__sk = { prev: null, max: 0, tracked: 0 }; });

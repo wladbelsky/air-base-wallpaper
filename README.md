@@ -171,7 +171,7 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
 - **Our fighters** fly passes across the screen: chasing a bandit, chased by one (flares, the wingman saves them), or
   sweeping; the A-10 (and now and then an F-15E with bombs) on close air support runs.
 - **Hits:** a projectile that reaches its target scores on the **next beat** of the music. What gets through hits the
-  base: explosions, a structure hit burns for half a minute (tongues of flame licking over its roof and lighting it up,
+  base: explosions, a structure hit burns for half a minute (tongues of flame licking over its roof — following its shape: the hangars' barrel, a shelter's arch, the tower cab, a fuel tank — and lighting it up,
   sparks rising, a tall column of black smoke) and
   craters in the ground (a second hit on a crater widens it rather than piling on; every
   crater shrinks away in the end). Aircraft in flight always pass above the buildings' roofs.
