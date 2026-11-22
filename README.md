@@ -175,8 +175,10 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
   craters in the ground (a second hit on a crater widens it rather than piling on; every
   crater shrinks away in the end). Aircraft in flight always pass above the buildings' roofs.
   Knocked-out armour burns black, smokes, then settles into the ground.
-- **Damage:** whatever a bomb or missile lands on is out for a while. An AA gun, C-RAM, Avenger, tank, launcher or the
-  Patriot radar stops tracking and firing for one to two minutes, burning and then smoking, until it is back on line.
+- **Damage:** whatever a bomb or missile lands on is out for a while. An AA gun, C-RAM or tank stops tracking and
+  firing for one to two minutes, burning and then smoking, until it is back on line. LANCER (the Patriot battery, the
+  NASAMS and the Avengers) is dug in: it has to be hit closer, is back in about half a minute to a minute, and only one
+  part of the Patriot battery (the radar or a launcher) is out at a time.
   An aircraft hit on its stand is DAMAGED: a crash tender foams it, then a maintenance truck (the same green 10x10
   with a workshop body) sets a spare engine down beside it with its crane while the crew works on it — repaired, it
   gets the usual fuel truck (in a shelter or hangar it is repaired out of sight, in up to two minutes). A crater on a runway closes it: a green 10x10 repair truck drives out, its crane lowers repair mats into
@@ -193,7 +195,8 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
 ## Heavy music
 
 Hits are detected both by loudness jumps and by spectral flux, so riffs and drums are caught even in dense mixes.
-A "heaviness" meter drives the bigger weapons: Patriot and NASAMS launches on the biggest hits, Stingers, flak
+A "heaviness" meter drives the bigger weapons: Patriot and NASAMS launches and Stingers from moderately heavy
+passages on (only at an enemy in range; a SAM that reaches a cruise or ballistic missile scores at once), flak
 barrages from the AA guns, the C-RAM's bursts, and subtle camera shake (**Camera shake on heavy hits**).
 
 ## Stress / threat

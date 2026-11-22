@@ -72,13 +72,47 @@ test('a real light keeps its meshed beam in a clear night (the thin haze barely 
   await wp.boot({ gl: 'webgpu', query: '?hour=23&season=summer' });
   await wp.run(() => { __t.render(); AIRCRAFT.filter(a => a.lit).forEach(a => a.requestLaunch()); });
   await wp.sim(40);
-  const beam = () => wp.run(() => { updateLights(); const s = AIRCRAFT.find(a => a.lit && a.state === 'orbit').searchlights[0]; return { live: VOLUME.live(), cone: s.cone.visible, op: s.cone.material.uOpacity.value }; });
+  const beam = () => wp.run(() => { updateLights(); const s = AIRCRAFT.find(a => a.lit && a.searchlights[0].enabled > 0.9).searchlights[0]; return { live: VOLUME.live(), cone: s.cone.visible, op: s.cone.material.uOpacity.value }; });
   const clear = await beam();
   expect(clear.live).toBe(true);
   expect(clear.cone, 'a helicopter\'s beam in a clear night (only a light pool, cut off, without it)').toBe(true);
   expect(clear.op).toBeGreaterThan(0.2);
   await wp.run(() => { __t.props({ weathermode: 'fog' }); });
-  await wp.sim(240);
+  await wp.sim(200);
+  await wp.run(() => { AIRCRAFT.filter(a => a.lit).forEach(a => a.canLaunch() && a.requestLaunch()); });
+  await wp.sim(40);
   const fog = await beam();
   expect(fog.cone, 'in fog the volume draws it').toBe(false);
+});
+
+test('night: a lit helicopter hidden and shown again (a combat pass, a mission) compiles nothing — its light is pooled in the scene', async ({ wp }) => {
+  await wp.boot({ gl: 'webgpu', query: '?hour=23&season=summer' });
+  await wp.run(() => { __t.render(); AIRCRAFT.filter(a => a.lit).forEach(a => a.requestLaunch()); });
+  await wp.sim(40);
+  const r = await wp.run(() => {
+    __t.render(); __t.render();
+    const a = AIRCRAFT.find(a => a.lit && a.state === 'orbit'), s = a.searchlights[0], p0 = renderer.info.memory.programs;
+    const lit0 = s.light.intensity, inScene = s.light.parent === scene;
+    a.mesh.visible = false; updateLights(); __t.render(); const dark = s.light.intensity;
+    a.mesh.visible = true; updateLights(); __t.render(); __t.render();
+    return { inScene, lit0, dark, d: renderer.info.memory.programs - p0, pos: s.light.position.distanceTo(s.holder.getWorldPosition(new THREE.Vector3())) };
+  });
+  expect(r.inScene, 'the light lives in the scene, not in the helicopter').toBe(true);
+  expect(r.lit0).toBeGreaterThan(0);
+  expect(r.dark, 'dark while its helicopter is hidden').toBe(0);
+  expect(r.d, 'no new programs').toBe(0);
+  expect(r.pos, 'it follows the searchlight').toBeLessThan(0.01);
+});
+
+test('WebGPU: after the warm-up a scramble, a fly-by and a fight build no new programs and grow no batch (once: a stall mid-fight)', async ({ wp }) => {
+  await wp.boot({ gl: 'webgpu', warm: true, query: '?hour=12&season=summer' });
+  const p0 = await wp.run(() => (__t.render(), GPU.pipes || renderer.info.memory.programs)), ev0 = await wp.run(() => ({ ...(BATCH.ev || {}) }));
+  await wp.run(() => { AIRCRAFT.forEach(a => a.canLaunch() && a.requestLaunch()); FLYBYS.push(new Flyby()); });
+  for (let i = 0; i < 6; i++) { await wp.sim(5); await wp.run(() => __t.render()); }
+  await wp.run(() => { __t.forceFight(); STRESS.level = 0.8; });
+  for (let i = 0; i < 10; i++) { await wp.sim(5, { audio: true }); await wp.run(() => __t.render()); }
+  const r = await wp.run(() => ({ p: GPU.pipes || renderer.info.memory.programs, kinds: [...new Set(ENEMIES.map(e => e.kind))], ev: { ...(BATCH.ev || {}) } }));
+  expect(r.kinds.length, 'the fight is on').toBeGreaterThan(0);
+  expect(r.p, `render pipelines after a scramble and a fight (${r.kinds})`).toBe(p0);
+  expect(r.ev).toEqual(ev0);
 });

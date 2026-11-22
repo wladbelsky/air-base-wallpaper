@@ -17,7 +17,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   `ShaderMaterial` / `onBeforeCompile` / `PointsMaterial` with a size: own shading is TSL node materials (`SpriteFX`, the
   beams), sized points are instanced `Sprite`s with a `PointsNodeMaterial` (WebGPU draws Points 1 px wide: nav lights,
   seasonal particles). Toggling a light's `castShadow` rebuilds materials: shadows switch by `shadow.intensity` /
-  `shadow.autoUpdate`. The renderer advances its node frame in its own rAF loop (a pass renders once per frame).
+  `shadow.needsUpdate` (`autoUpdate` is off: `renderFrame` asks for the map every second frame at ≥ 50 fps —
+  `frameAvg`, ms between drawn frames — and every frame below; the map and its matrix are updated together). The renderer advances its node frame in its own rAF loop (a pass renders once per frame).
   A new release gets a new file name (CEF caches the vendored file: it has no `?v=`; `repo.spec.js` checks the name
   against `package.json`).
 - `index.html` loads scripts in dependency order (later files use globals of earlier ones):
@@ -54,7 +55,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=55`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=56`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -134,7 +135,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   showed as a checkerboard in the floodlights' beams (`gaussianBlur` is an addon not in the vendored bundle). Built with
   the pipeline when `VOLUME.on()`; `VOLUME.live()` (built and `CFG.volumetric`) gates the mesh and the cone swap, and
   switching it on when it wasn't built drops the pipeline (`dropPipeline`: rebuilt next frame). With its mesh hidden (no
-  haze, switched off) the pass clears once and is skipped. A real light's meshed cone hands its beam to the volume only
+  haze — density ≤ 0.03, a clear night included: the meshed cones draw the beams there — switched off) the pass clears
+  once and is skipped. A real light's meshed cone hands its beam to the volume only
   as far as the haze shows it (`VOLUME.cover()`: smoothstep of the density 0.03 → 0.09 — clear night none, rain about
   half, fog all; in a clear night's thin haze the volume's beam was barely there: a light pool with no beam, the
   helicopters' lights looked cut off) and draws the lamps' share beyond `ENV.lightsOn` (by day in fog its spot light is
@@ -148,7 +150,14 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   ones for the call; both states of the night-only spot lights. Never `setRenderTarget` a pass's target around it: the
   target is 1×1 until the pass's first frame, and on WebGPU that broke the scene pass for good (destroyed textures, then
   `output` as attachment and binding every frame — nothing drawn in WE). Frames under the splash make the pass
-  variants, the shadow-pass and post-processing programs and the batches for the templates. The loop draws nothing until `SHADERS_READY` (15 s fallback), the
+  variants, the shadow-pass and post-processing programs and the batches for the templates: `warmFrame` draws them
+  through the real pipeline with every hidden object shown and every empty instanced pool drawing one instance, in both
+  spot-light states — `compileAsync` builds for its own context, the scene pass draws in the RenderPipeline's, and on
+  WebGPU a pipeline made later is a blocking `createRenderPipeline` (a fight's stalls: tracers, a wreck, a scramble out
+  of the shelters). The warm group also holds a wreck of every armour type and one fly-by jet per type (`FLYBY_MODELS`,
+  built here, no longer lazily); `BATCH.prefill` / `reserve` (see "Batched drawing"). `GPU.pipes` counts the render
+  pipelines made (`renderer.info.memory.programs` counts shader modules shared by code: it barely moves); the
+  webgpu.spec test checks a scramble, a fly-by and a fight after the warm-up make none. The loop draws nothing until `SHADERS_READY` (15 s fallback), the
   splash waits for it. A new kind of object that first appears in a fight must be in the scene (hidden is fine) or in
   the template group. Turning a light's `visible` (or adding a light) recompiles every program. `?warm=0` skips it
   (the harness does, unless `boot({ warm: true })`: SwiftShader compiles synchronously, ~4 s a boot).
@@ -394,7 +403,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   `STICK_DT` (0.15 s), its middle on the aim point (a row of craters, not a pile). Ballistic missiles spread ±3.
 - **Damage** (`DAMAGE`, `combat.js`; `update` from `updateCombat`): `hit(p, R)` for every enemy bomb (2.6), cruise (3),
   ballistic (3.5) and a bandit / helicopter crashing (2). Air-defence units (`units()`: AA, Avengers, C-RAM, tanks,
-  SAM launchers, `BASE.patriotRadar`) within R + 0.8 get `downT` 60–120 s: no tracking (`knockedOut` in
+  SAM launchers, `BASE.patriotRadar`) within R + 0.8 get `downT` 60–120 s — LANCER (`DAMAGE.hard`: the radar, the
+  Patriot / NASAMS launchers, the Avengers) within R + 0.3 and 35–70 s, and one of the Patriot battery (`battery`:
+  the radar or a launcher) down at a time: no tracking (`knockedOut` in
   `updateMounts`: gun barrels droop), no fire (guards in `fireAA` / `fireFlak` / `fireTank` / `startCIWS` /
   `launchSAM` — the Patriot radar down stops the Patriots — / `launchStinger`, the CIWS last-ditch loop), search
   antennas / the radar head still; fire then smoke (`DAMAGE.smoke`), back with its crater repaired. Aircraft `parked`
@@ -440,6 +451,12 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   rad/s while `AUD.armed` and run down after; the tracking dish is on `pitchG` (follows the aim). The Patriot radar
   (`BASE.patriotRadar`) has a turntable head (`.head`, dynamic) that slews at 0.35 rad/s toward the nearest live air
   threat (`.tgt`, kept while it lives), holds in a lull, and goes back to 0 in peace; its angle is kept wrapped.
+- **LANCER** (`RADIO_NAMES.patriot`: Patriot / NASAMS `launchSAM`, Avenger Stingers `launchStinger`) on the beat from
+  `AUD.heavy` > 0.35 (Patriot vs bandits also `strength` > 1.2; at an incoming ballistic missile on any low beat), only
+  at an enemy in range when enemies are on (no cooldown burnt on the empty sky; with them off: the show as before),
+  `SAM_PK` 0.9 / 0.85 / 0.78. Guided missiles steer at a lead point (≤ 1.5 s) and arrive within what the two close in a
+  step (≥ 3) — a pure chase with a fixed 3 never caught a ballistic missile (they passed through each other between
+  steps); a SAM's hit on a cruise / ballistic missile is rolled on arrival (`queueHit` `now`), not on the next beat.
 - Base weapons on the beat (`onBeat`): tanks (`fireTank`: at armour in range (110), else far out past the wire;
   with nothing to shoot their turrets look around now and then, `scanT`), AA guns
   (`fireAA`, `fireFlak`), C-RAM bursts (`startCIWS`), Patriot / NASAMS (`launchSAM`; always at an incoming ballistic
@@ -525,7 +542,11 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   enters its batch once (clones share it) and leaves it when disposed; an instance whose mesh left the scene for ~1 s of
   sim time is freed; an empty batch is disposed; a mesh whose material is swapped (`wreckArmor`) moves to that material's
   batch (`BATCH.sync`: `remove` + `add`).
-  Only what is drawn gets an instance (an aircraft behind a shut door gets one when it comes out).
+  Only what is drawn gets an instance (an aircraft behind a shut door gets one when it comes out), but every geometry is
+  in its batch from the warm-up (`BATCH.prefill`: hidden meshes too, the templates, the fly-by jets) and the batches
+  start at 256 instances, `reserve()`d to twice those in use: growth (`optimize` / `setGeometrySize` copy and upload a
+  whole batch, `setInstanceCount` new textures) and a new batch (a new pipeline) mid-fight were stalls — counted in
+  `BATCH.ev` (perfReport's hitch log).
 - Many repeated objects are one `InstancedMesh` (vegetation, fence posts, stand marks, helicopter pads, scorch marks, tracers).
 - `shade()` sets `castShadow`/`receiveShadow` per mesh; don't blanket-enable shadows with `traverse`.
 - Shared scratch vectors (`_v`, `_p`, `_d`, `_al`…) must not be passed into a function that also
@@ -538,7 +559,11 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - The sun's shadow camera is fitted to the visible ground every frame (`fitShadow`, `main.js`; one 2048² map):
   don't set fixed shadow bounds.
 - Searchlight `SpotLight`s are hidden by day (`updateLights`): every visible light costs every lit
-  fragment even at zero intensity. Only two apron floodlights and the first four helicopters have a real light; the
+  fragment even at zero intensity. **The set of lights must never change while the wallpaper runs** (beyond the dusk /
+  dawn toggle the warm-up covers): r187 gathers lights from visible subtrees only and a changed set rebuilds every
+  render object and recompiles every lit pipeline. So the helicopters' real lights are a scene-level pool
+  (`HELI_LIGHTS`, 4, built in `init`) that follows their searchlight (`s.follow`, `followLight`) and is dark while the
+  helicopter is hidden — as children of the helicopter, every combat pass (`cbt_wait` hides it) was a stall at night. Only two apron floodlights and the first four helicopters have a real light; the
   guard-tower and sky searchlights are beams (`noLight`).
 - Main loop (`frame`): FPS limit keeps cadence via `frameDue`; simulation runs in ≤50 ms sub-steps
   (stalls capped at 0.25 s). `onBeat` does nothing while `paused`.
@@ -562,7 +587,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
 - **Performance on a real GPU** (also inside Wallpaper Engine: Settings → General → "CEF devtools port", then
   `http://localhost:<port>` in Chrome → the wallpaper's console): `perfReport(60)` (main.js) logs and returns frame / CPU
   (`simMs` the steps + `renderMs` renderFrame's CPU side) / GPU times, hitches, WE pauses (not counted as frames), draw
-  calls, lit point / spot lights, batches, memory, the backend and the settings in effect (on WebGPU a `BatchedMesh` is
+  calls, lit point / spot lights, batches, memory, the backend and the settings in effect, `made` (render pipelines /
+  programs / batch growth / new batches made while measuring: after the warm-up each is a likely stall) and `hitchLog`
+  (the worst frames > 50 ms with what they and the frame before made) (on WebGPU a `BatchedMesh` is
   one draw per geometry, not one multi-draw: the draw calls stay high, the state changes are what batching saves);
   `perfFlags({ gputime: true })` / `perfFlags({ gl: 'webgl2' })` / `perfFlags({ clustered: true })` / `perfFlags({})`
   store debug switches in `localStorage` (`fab-perf`, read at load: `PERF.flags`) since WE passes no URL parameters.

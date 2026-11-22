@@ -460,19 +460,29 @@ class FixedWing extends Aircraft {
 }
 
 /* ======================= Helicopter (vertical from its pad) ======================= */
-const HELI_LIGHTS = { n: 0 };   // only the first few helicopters cast real light (GPU budget)
+/* only the first few helicopters cast real light (GPU budget). Their SpotLights are a pool in the scene, not children
+   of the helicopter: r187 gathers the lights from visible subtrees only, so a helicopter hidden / shown (cbt_wait,
+   missions, tanker passes) changed the scene's set of lights — every render object was rebuilt and every lit pipeline
+   compiled again, a stall in every night fight. A pooled light follows its searchlight (updateLights: `follow`) and is
+   dark while its helicopter is hidden. With clustered lighting every helicopter has a light of its own (as before). */
+const HELI_LIGHTS = { N: 4, pool: [], free: [],
+  build(sc) { for (let i = 0; i < this.N; i++) { const l = new THREE.SpotLight(0xfff1d6, 0, 14 * 2.2, 0.2, 0.45, 2); l.layers.enable(2); sc.add(l, l.target); this.pool.push(l); this.free.push(l); } },
+  take() { return this.free.shift() || null; },
+  give(l) { if (l && this.pool.includes(l) && !this.free.includes(l)) { l.intensity = 0; this.free.push(l); } }
+};
 const _hz = new V3(), _hf = new V3();
 class Helicopter extends Aircraft {
   static spec = Object.assign({}, Aircraft.spec, { turnR: 5, bankMax: 0.35, park: 'heli', len: 1.9, span: 1.6 });
   constructor(o) {
     super(o);
     const sp = this.model.searchPos || new V3(0.7, 0.2, 0);
-    this.lit = GPU.clustered || HELI_LIGHTS.n < 4; if (this.lit) HELI_LIGHTS.n++;   // (clustered lighting: every one)
-    const sl = makeSearchlight(this.mesh, sp.x, sp.y, sp.z, { angle: 0.2, len: 14, intensity: 2.4, coneOpacity: 0.32, housing: false, noLight: !this.lit });
+    const pooled = GPU.clustered ? null : HELI_LIGHTS.take();
+    this.lit = GPU.clustered || !!pooled;   // (clustered lighting: every one)
+    const sl = makeSearchlight(this.mesh, sp.x, sp.y, sp.z, { angle: 0.2, len: 14, intensity: 2.4, coneOpacity: 0.32, housing: false, noLight: !this.lit, light: pooled });
     sl.holder.quaternion.setFromUnitVectors(new V3(0, 0, 1), new V3(1, -1.1, 0).normalize());
     sl.fixed = true; sl.enabled = 0; this.searchlights.push(sl);
   }
-  dispose() { if (this.lit) HELI_LIGHTS.n--; super.dispose(); }      // its real light can go to the next helicopter
+  dispose() { HELI_LIGHTS.give(this.searchlights[0].light); super.dispose(); }      // its real light can go to the next helicopter
   get onGround() { return false; }                                   // pads are their own: no ground traffic rules
   beginLaunch() { this.state = 'spinup'; this.t = 0; this.needsService = false; }
   orientFlight(dir, bankT, dt) {

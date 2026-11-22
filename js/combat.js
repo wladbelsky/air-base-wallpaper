@@ -204,7 +204,7 @@ function leadPoint(e, from, speed) { const tt = e.p.distanceTo(from) / speed; re
 /* ---- hits, resolved on the beat ---- */
 function queueHit(e, o) {
   const ready = T + (o.delay || 0);
-  PENDING.push({ e, chance: o.chance, dmg: o.dmg || 1, src: o.src, missile: o.missile || null, readyAt: ready, deadline: ready + 0.7 });
+  PENDING.push({ e, chance: o.chance, dmg: o.dmg || 1, src: o.src, missile: o.missile || null, readyAt: ready, deadline: ready + (o.now ? 0 : 0.7) });
 }
 function resolveHits(onBeat) {
   for (let i = PENDING.length - 1; i >= 0; i--) {
@@ -218,7 +218,7 @@ function resolveHits(onBeat) {
     else airburst(h.e.p.clone().add(new V3(rand(-2.5, 2.5), rand(-1.5, 1.5), rand(-2.5, 2.5))), 0.7);
   }
 }
-const drift = (k, up) => new V3(WIND.x * k, up, WIND.z * k);
+const _drift = new V3(), drift = (k, up) => _drift.set(WIND.x * k, up, WIND.z * k);   // (a scratch vector: only ever an FX spawn's `v`, which spawn copies — a new V3 per sprite was garbage)
 function airburst(p, s) {
   FX.flash.spawn(p, { s0: 2.2 * s, s1: 3.8 * s, life: 0.15, a0: 1 });
   FX.smoke.spawn(p.clone(), { s0: 1.2 * s, s1: 3.6 * s, life: 2.4, a0: 0.6, color: 0x2e3034, v: drift(0.6, 0.15), drag: 0.6 });
@@ -307,19 +307,24 @@ const DAMAGE = {
   openAt: -1e9,         // when the last closure ended
   units() { return this.list || (this.list = [...ALL_AA, ...ALL_SHORAD, ...ALL_CIWS, ...ALL_TANKS, ...ALL_SAMS, BASE.patriotRadar]); },
   kindOf: u => u === BASE.patriotRadar ? 'radar' : u.sam || (ALL_AA.includes(u) ? 'aa' : ALL_CIWS.includes(u) ? 'ciws' : ALL_TANKS.includes(u) ? 'tank' : 'shorad'),
+  /* LANCER (the Patriot battery, NASAMS, the Avengers): dug in — hit only within R + 0.3 (others R + 0.8), back sooner
+     (35–70 s, others 60–120 s), and never more than one of the Patriot battery (radar or a launcher) down at once */
+  hard(u) { const k = this.kindOf(u); return k === 'radar' || k === 'patriot' || k === 'nasams' || k === 'shorad'; },
+  battery: u => u === BASE.patriotRadar || u.sam === 'patriot',
   at(u) { return u.at || (u.at = (u.yawG || u).getWorldPosition(new V3()).setY(0)); },
   closed(L) { return !!this.rwy && this.rwy.L === L; },
   patriotDown() { return BASE.patriotRadar.downT > 0; },
   nasamsDown(but) { return ALL_SAMS.filter(m => m.sam === 'nasams' && m !== but).every(m => m.downT > 0); },
   canDown(u) {
     const all = this.units(); if (all.filter(o => o.downT > 0).length + 1 > DMG_UNITS * all.length) return false;
+    if (this.battery(u) && all.some(o => o.downT > 0 && this.battery(o))) return false;
     if (u === BASE.patriotRadar) return !this.nasamsDown();
     return !(u.sam === 'nasams' && this.patriotDown() && this.nasamsDown(u));
   },
   /* an enemy hit at p (blast radius R) */
   hit(p, R) {
     if (!BASE) return;
-    for (const u of this.units()) { if (u.downT > 0) continue; const q = this.at(u); if (Math.hypot(q.x - p.x, q.z - p.z) < R + 0.8 && this.canDown(u)) this.knockOut(u); }
+    for (const u of this.units()) { if (u.downT > 0) continue; const q = this.at(u); if (Math.hypot(q.x - p.x, q.z - p.z) < R + (this.hard(u) ? 0.3 : 0.8) && this.canDown(u)) this.knockOut(u); }
     const cap = Math.max(1, Math.floor(AIRCRAFT.length * 0.25)); let n = AIRCRAFT.filter(a => a.dmgT > 0).length;
     for (const a of AIRCRAFT) {
       if (n >= cap || a.dmgT > 0 || a.state !== 'parked') continue;
@@ -332,7 +337,7 @@ const DAMAGE = {
     else this.patches.push({ p: p.clone(), t: 8 });
   },
   knockOut(u) {
-    u.downT = rand(60, 120); u.burnT = 25; u.track = null; u.burst = 0;
+    u.downT = this.hard(u) ? rand(35, 70) : rand(60, 120); u.burnT = 25; u.track = null; u.burst = 0;
     const name = DMG_NAMES[this.kindOf(u)];
     sayOnce('unitDown', 6, () => RADIO.say(u.radio || RADIO_NAMES.patriot, radioLine(COMBAT.unitDown, { M: name }), { role: 'ground', cat: 'combat', prio: 3 }));
   },

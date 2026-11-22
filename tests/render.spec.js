@@ -90,17 +90,21 @@ test('bloom: the night lights glow; toggling it renders without GL errors, count
   expect(r.true.tex, 'the bloom targets are kept, not rebuilt').toBe(await wp.run(() => { __t.props({ bloom: false }); __t.props({ bloom: true }); __t.render(); return renderer.info.memory.textures; }));
 });
 
-test('the shaders are compiled under the splash: the first frame and a fight add no programs', async ({ wp }) => {
+test('the shaders are compiled under the splash: the first frame, a scramble, a fly-by and a fight add no programs and grow no batch', async ({ wp }) => {
   await wp.boot({ warm: true });
-  const p0 = await wp.run(() => renderer.info.memory.programs);
+  const p0 = await wp.run(() => renderer.info.memory.programs), ev0 = await wp.run(() => ({ ...BATCH.ev }));
   await wp.run(() => __t.render());
   expect(await wp.run(() => renderer.info.memory.programs), 'the first frame').toBe(p0);
-  // a fight: waves, armour, helicopters, missiles, tracers, flashes, smoke, craters, fires (as at night, the lamps on)
+  // everyone out of the shelters / hangars (geometry never drawn before), a fly-by, then a fight: waves, armour,
+  // helicopters, missiles, tracers, flashes, smoke, craters, fires, wrecks
+  await wp.run(() => { AIRCRAFT.forEach(a => a.canLaunch() && a.requestLaunch()); FLYBYS.push(new Flyby()); });
+  for (let i = 0; i < 6; i++) { await wp.sim(5); await wp.run(() => __t.render()); }
   await wp.run(() => { __t.forceFight(); STRESS.level = 0.8; });
   for (let i = 0; i < 12; i++) { await wp.sim(5, { audio: true }); await wp.run(() => __t.render()); }
-  const r = await wp.run(() => ({ p: renderer.info.memory.programs, kinds: [...new Set(ENEMIES.map(e => e.kind))] }));
+  const r = await wp.run(() => ({ p: renderer.info.memory.programs, kinds: [...new Set(ENEMIES.map(e => e.kind))], ev: { ...BATCH.ev } }));
   expect(r.kinds.length, 'the fight is on').toBeGreaterThan(0);
-  expect(r.p, `programs after a fight (${r.kinds})`).toBeLessThanOrEqual(p0 + 2);
+  expect(r.p, `programs after a scramble and a fight (${r.kinds})`).toBe(p0);
+  expect(r.ev, 'no batch grew or was made after the splash').toEqual(ev0);
 });
 
 test('batching: the merged meshes draw through a few BatchedMeshes that follow them; a rebuild frees what it drops', async ({ wp }) => {
@@ -230,6 +234,17 @@ test('perfReport: averages frames, CPU, draw calls and lights; perfFlags keeps i
     return p;
   });
   expect([q.frames, q.pauses, q.frameMsMax]).toEqual([4, 1, 16.7]);
+  // a long frame goes into the hitch log, with what it and the frame before it made
+  const h = await wp.run(async () => {
+    const f = ms => { renderer._nodes.nodeFrame.update(); frame(ms); };
+    const p = perfReport(0.1); f(5000); f(5016.7); f(5216.7); f(5233.4);
+    return p;
+  });
+  expect(h.hitches).toBe(1);
+  expect(h.hitchLog.length).toBe(1);
+  expect(h.hitchLog[0].ms).toBe(200);
+  expect(Object.keys(h.hitchLog[0].made).sort()).toEqual(['batchGrow', 'newBatch', 'pipes', 'programs']);
+  expect(h.made.batchGrow).toBe(0);
   const f = await wp.run(() => { perfFlags({ gl: 'webgl2' }); const a = localStorage.getItem('fab-perf'); perfFlags({}); return [a, localStorage.getItem('fab-perf')]; });
   expect(f).toEqual(['{"gl":"webgl2"}', '{}']);
 });

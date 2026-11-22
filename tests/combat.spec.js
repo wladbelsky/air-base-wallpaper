@@ -243,3 +243,60 @@ test("fixed guns fire along the nose: a jet's rounds leave within a few degrees 
   expect(g.b, 'bandits fired theirs').toBeGreaterThan(20);
   expect(g.bad.slice(0, 5)).toEqual([]);
 });
+
+// LANCER (the Patriot battery, NASAMS, the Avengers' Stingers): from moderately loud music on, only at targets in range,
+// a ballistic missile mostly intercepted; dug in against hits (a smaller radius, back sooner, one of the battery at a time)
+test('LANCER: fires from moderately loud music, never into the empty sky', async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => { __t.forceFight(); CFG.enemies = true; });
+  await wp.sim(1, { audio: true });
+  const r = await wp.run(() => {
+    for (const e of ENEMIES.slice()) { scene.remove(e.mesh); } ENEMIES.length = 0; MISSILES.length = 0;
+    ALL_SAMS.concat(ALL_SHORAD).forEach(m => { m.cd = 0; m.downT = 0; });
+    launchSAM('nasams'); launchStinger();
+    const empty = { n: MISSILES.length, cd: ALL_SAMS.concat(ALL_SHORAD).filter(m => m.cd > 0).length };
+    const ns = ALL_SAMS.find(m => m.sam === 'nasams'), q = DAMAGE.at(ns);
+    spawnCruise(new V3(q.x + 50, 3, q.z));
+    for (let i = 0; i < 40; i++) { AUD.heavy = 0.4; onBeat(i % 2 ? 'mid' : 'high', 1.3); ALL_SAMS.concat(ALL_SHORAD).forEach(m => { m.cd = 0; }); }
+    return { empty, fired: MISSILES.filter(m => m.src && (m.src.sam === 'nasams' || ALL_SHORAD.includes(m.src))).length };
+  });
+  expect(r.empty, 'nothing in range: no launch, the launchers stay ready').toEqual({ n: 0, cd: 0 });
+  expect(r.fired, 'NASAMS / Stingers at heavy 0.4').toBeGreaterThan(3);
+});
+
+test('LANCER: a ballistic missile is intercepted more often than not', async ({ wp }) => {
+  await wp.boot();
+  await wp.run(() => {
+    __t.forceFight(); CFG.enemies = true; STRESS.level = 0.3;
+    window.__bal = spawnBallistic; for (const k of ['spawnBandits', 'spawnCruiseSalvo', 'spawnColumn', 'spawnBallistic']) window[k] = () => {};
+    window.__kills = 0; const de = damageEnemy; window.damageEnemy = (e, d, s) => { if (e.kind === 'ballistic' && e.hp - d <= 0) __kills++; return de(e, d, s); };
+  });
+  const N = 10;
+  for (let i = 0; i < N; i++) {
+    await wp.run(() => { ALL_SAMS.forEach(m => { m.downT = 0; }); BASE.patriotRadar.downT = 0; __bal(1); });
+    const s = await wp.sim(6, { audio: true });
+    expect(s.violations).toEqual([]);
+  }
+  const k = await wp.run(() => __kills);
+  expect(k, `${k} of ${N} intercepted`).toBeGreaterThan(N / 2);
+});
+
+test('LANCER is dug in: hit only close by, back sooner, never two of the Patriot battery down', async ({ wp }) => {
+  await wp.boot();
+  const r = await wp.run(() => {
+    __t.forceFight();
+    const clear = () => DAMAGE.units().forEach(u => { u.downT = 0; });
+    const off = (u, d) => { const q = DAMAGE.at(u); return new V3(q.x + d, 0, q.z); };
+    const ns = ALL_SAMS.find(m => m.sam === 'nasams'), pat = ALL_SAMS.find(m => m.sam === 'patriot'), aa = ALL_AA[0], R = 2.6;
+    clear(); DAMAGE.hit(off(ns, R + 0.5), R); const samNear = ns.downT;
+    clear(); DAMAGE.hit(off(aa, R + 0.5), R); const aaNear = aa.downT;
+    clear(); DAMAGE.hit(off(ns, 0), R); const samDown = ns.downT;
+    clear(); DAMAGE.knockOut(BASE.patriotRadar); DAMAGE.hit(off(pat, 0), R); const second = pat.downT;
+    clear();
+    return { samNear, aaNear, samDown, second };
+  });
+  expect(r.samNear, 'a SAM launcher R + 0.5 from a bomb: still up').toBe(0);
+  expect(r.aaNear, 'an AA gun there: down').toBeGreaterThan(59);
+  expect(r.samDown).toBeGreaterThanOrEqual(35); expect(r.samDown).toBeLessThanOrEqual(70);
+  expect(r.second, 'the radar down: its launchers stay up').toBe(0);
+});

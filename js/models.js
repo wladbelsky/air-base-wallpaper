@@ -78,11 +78,13 @@ function mergeStatic(root, dynamic) {
 const BATCH_LAYER = 1;
 const BATCH = {
   groups: new Map(), recs: new WeakMap(), live: [], frame: 0, gcT: 0,
+  ev: { grow: 0, batch: 0 },   // growth (a whole-buffer copy + upload) / new batches (a new pipeline) — perfReport's hitch log
   key(m) { const mo = m.material.userData.mopts; return (mo != null ? 'M' + mo : m.material.uuid) + '|' + m.castShadow + '|' + m.receiveShadow + '|' + !!m.geometry.attributes.color; },
   group(m) {
     const k = this.key(m); let G = this.groups.get(k);
     if (!G) {
-      const mo = m.material.userData.mopts, bm = new THREE.BatchedMesh(64, 32768, 0, mo != null ? M(0xffffff, mo ? JSON.parse(mo) : undefined) : m.material);
+      this.ev.batch++;
+      const mo = m.material.userData.mopts, bm = new THREE.BatchedMesh(256, 32768, 0, mo != null ? M(0xffffff, mo ? JSON.parse(mo) : undefined) : m.material);
       bm.castShadow = m.castShadow; bm.receiveShadow = m.receiveShadow;
       bm.frustumCulled = false; bm.perObjectFrustumCulled = true; bm.sortObjects = false;   // (instances move: no whole-batch bounds; opaque, unsorted)
       bm.userData.batch = true; scene.add(bm);
@@ -98,7 +100,7 @@ const BATCH = {
     let id;
     try { id = bm.addGeometry(geo); }
     catch (err) {
-      bm.optimize();
+      this.ev.grow++; bm.optimize();
       try { id = bm.addGeometry(geo); }
       catch (err2) { bm.setGeometrySize(Math.max(bm._maxVertexCount * 2, bm._maxVertexCount + n * 2), 0); id = bm.addGeometry(geo); }
     }
@@ -117,7 +119,7 @@ const BATCH = {
     const G = this.group(m), e = this.geoId(G, m.geometry), bm = G.bm;
     let inst;
     try { inst = bm.addInstance(e.id); }
-    catch (err) { bm.setInstanceCount(bm.maxInstanceCount * 2); inst = bm.addInstance(e.id); }
+    catch (err) { this.ev.grow++; bm.setInstanceCount(bm.maxInstanceCount * 2); inst = bm.addInstance(e.id); }
     if (G.tint) bm.setColorAt(inst, m.material.color);
     const r = { m, G, e, inst, mat: m.material, seen: 0, seenT: T, vis: true, dead: false };
     e.recs.add(r); this.recs.set(m, r); this.live.push(r);
@@ -147,6 +149,16 @@ const BATCH = {
       if (gc && T - r.seenT > 1) { let p = r.m; while (p.parent) p = p.parent; if (p !== scene) dead = true, (this.gone || (this.gone = [])).push(r); }
     }
     if (dead) for (const r of this.gone) this.remove(r);   // (not while iterating: remove() takes it off `live`)
+  },
+  /* the warm-up (under the splash): every merged mesh's geometry into its batch now, hidden ones too (an aircraft in a
+     shut shelter, the enemy / vehicle / fly-by templates) — the batches grew mid-fight otherwise (optimize /
+     setGeometrySize copy and upload a whole batch: a stall) — then room for twice the instances in use */
+  prefill(root) { root.traverse(o => { if (o.isMesh && o.userData.batched) this.geoId(this.group(o), o.geometry); }); },
+  reserve() {
+    for (const G of this.groups.values()) {
+      const n = G.bm._instanceInfo.filter(i => i.active).length, want = Math.max(256, n * 2 + 64);
+      if (G.bm.maxInstanceCount < want) G.bm.setInstanceCount(want);
+    }
   },
   /* draw calls / instances / vertices in the batches (tests, the measurements in CLAUDE.md) */
   stats() { let n = 0, v = 0; for (const G of this.groups.values()) { n += G.bm._instanceInfo.filter(i => i.active).length; v += G.bm._maxVertexCount; } return { batches: this.groups.size, instances: n, vertices: v, live: this.live.length }; }
@@ -234,7 +246,8 @@ function makeSearchlight(parent, x, y, z, opts) {
   const o = Object.assign({ color: 0xfff1d6, angle: 0.16, len: 22, intensity: 2.2, cone: true, coneOpacity: 0.35, housing: true }, opts || {});
   const holder = new THREE.Object3D(); holder.position.set(x, y, z); parent.add(holder);
   let light = null;
-  if (!o.noLight || GPU.clustered) {   // real light is optional: many spotlights get expensive on the GPU (not with clustered lighting)
+  if (o.light) light = o.light;   // a pooled light in the scene, following the holder (HELI_LIGHTS)
+  else if (!o.noLight || GPU.clustered) {   // real light is optional: many spotlights get expensive on the GPU (not with clustered lighting)
     light = new THREE.SpotLight(o.color, 0, o.len * 2.2, o.angle, 0.45, 2);   // (intensity × SPOT_K: updateLights)
     light.layers.enable(2);   // (VOL_LAYER: it lights the haze, main.js VOLUME)
     holder.add(light);
@@ -248,7 +261,7 @@ function makeSearchlight(parent, x, y, z, opts) {
     cone = new THREE.Mesh(g, coneMaterial(o.color, o.len)); cone.renderOrder = 4; cone.frustumCulled = false;
     holder.add(cone);
   }
-  const s = { holder, light, cone, o, enabled: 1 };
+  const s = { holder, light, cone, o, enabled: 1, follow: !!o.light };
   SEARCHLIGHTS.push(s);
   return s;
 }
