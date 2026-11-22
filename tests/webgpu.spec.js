@@ -67,3 +67,18 @@ test('perfReport on WebGPU with GPU timing (?gputime=1: timestamp queries) — n
   expect(r.drawCalls).toBeGreaterThan(50);
   expect(typeof r.gpuMs, 'GPU timing on').toBe('number');
 });
+
+test('a real light keeps its meshed beam in a clear night (the thin haze barely shows it), hands it to the volume in fog', async ({ wp }) => {
+  await wp.boot({ gl: 'webgpu', query: '?hour=23&season=summer' });
+  await wp.run(() => { __t.render(); AIRCRAFT.filter(a => a.lit).forEach(a => a.requestLaunch()); });
+  await wp.sim(40);
+  const beam = () => wp.run(() => { updateLights(); const s = AIRCRAFT.find(a => a.lit && a.state === 'orbit').searchlights[0]; return { live: VOLUME.live(), cone: s.cone.visible, op: s.cone.material.uOpacity.value }; });
+  const clear = await beam();
+  expect(clear.live).toBe(true);
+  expect(clear.cone, 'a helicopter\'s beam in a clear night (only a light pool, cut off, without it)').toBe(true);
+  expect(clear.op).toBeGreaterThan(0.2);
+  await wp.run(() => { __t.props({ weathermode: 'fog' }); });
+  await wp.sim(240);
+  const fog = await beam();
+  expect(fog.cone, 'in fog the volume draws it').toBe(false);
+});

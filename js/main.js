@@ -319,9 +319,14 @@ const VOLUME = {
     return at(0, 0).mul(4).add(at(1, 0).add(at(-1, 0)).add(at(0, 1)).add(at(0, -1)).mul(2))
       .add(at(1, 1).add(at(-1, 1)).add(at(1, -1)).add(at(-1, -1))).div(16);
   },
+  dens() { return (0.025 + 0.09 * WEATHER.fog + 0.03 * WEATHER.rain) * Math.max(ENV.lamps, ENV.lightsOn); },
+  /* how much of a real light's beam the volume draws: in a clear night's thin haze its beam is barely there (a light
+     pool on the ground with no beam to it — the helicopters' lights looked cut off), the meshed cone stays; it hands
+     over as the haze thickens (rain: about half, fog: all) */
+  cover() { return this.live() ? smoothstep(0.03, 0.09, this.dens()) : 0; },
   update() {
     if (!this.active) return;
-    const d = (0.025 + 0.09 * WEATHER.fog + 0.03 * WEATHER.rain) * Math.max(ENV.lamps, ENV.lightsOn);
+    const d = this.dens();
     this.density.value = d; this.mesh.visible = CFG.volumetric && d > 1e-4;
     const rt = this.vp.renderTarget; this.texel.value.set(1 / Math.max(1, rt.width), 1 / Math.max(1, rt.height));
   }
@@ -838,9 +843,9 @@ function updateLights() {
     // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn);
     // clustered (WebGPU): always shown — a light out of its cluster costs nothing, and no toggle rebuilds the lights
     if (s.light) { s.light.intensity = s.o.intensity * on * SPOT_K; s.light.visible = GPU.clustered || ENV.lightsOn > 0; }
-    // a real light's beam: the volume draws what the light gives (ENV.lightsOn); the cone only the lamps' share beyond it
-    // (by day in fog the spot light is hidden: its beam was gone altogether)
-    const vol = VOLUME.live() && s.light, k = vol ? beam * (1 - ENV.lightsOn / Math.max(1e-3, ENV.lamps)) : beam;
+    // a real light's beam: the volume draws its covered share of what the light gives (ENV.lightsOn: VOLUME.cover, by the
+    // haze); the cone the rest, and the lamps' share beyond the light (by day in fog the spot light is hidden)
+    const vol = VOLUME.live() && s.light, k = vol ? beam * (1 - VOLUME.cover() * ENV.lightsOn / Math.max(1e-3, ENV.lamps)) : beam;
     if (s.cone) { s.cone.material.uOpacity.value = s.o.coneOpacity * k * (0.45 + 0.55 * Math.max(ENV.night, WEATHER.fog * 0.6)); s.cone.visible = !vol || k > 1e-3; }
   }
   VOLUME.update();

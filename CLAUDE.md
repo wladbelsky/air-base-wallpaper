@@ -54,7 +54,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=54`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=55`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
@@ -134,8 +134,11 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   showed as a checkerboard in the floodlights' beams (`gaussianBlur` is an addon not in the vendored bundle). Built with
   the pipeline when `VOLUME.on()`; `VOLUME.live()` (built and `CFG.volumetric`) gates the mesh and the cone swap, and
   switching it on when it wasn't built drops the pipeline (`dropPipeline`: rebuilt next frame). With its mesh hidden (no
-  haze, switched off) the pass clears once and is skipped. A real light's meshed cone draws the lamps' share beyond
-  `ENV.lightsOn` (by day in fog its spot light is hidden). Known gap: the rays aren't stopped at the scene's depth (the
+  haze, switched off) the pass clears once and is skipped. A real light's meshed cone hands its beam to the volume only
+  as far as the haze shows it (`VOLUME.cover()`: smoothstep of the density 0.03 → 0.09 — clear night none, rain about
+  half, fog all; in a clear night's thin haze the volume's beam was barely there: a light pool with no beam, the
+  helicopters' lights looked cut off) and draws the lamps' share beyond `ENV.lightsOn` (by day in fog its spot light is
+  hidden). Known gap: the rays aren't stopped at the scene's depth (the
   glow of a beam behind a roof shows over it). Its
   pass clears to black (its `updateBefore` is wrapped): with the renderer's clear colour (the sky) it was added over the
   whole frame.
