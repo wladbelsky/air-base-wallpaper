@@ -157,6 +157,28 @@ test('volumetric light (forced on the WebGL 2 backend): the searchlights light t
   expect(r.hidden).toBe(true);
 });
 
+test('night: the helicopters\' real lights go to the ones on screen with their searchlight on, the nearest the centre first', async ({ wp }) => {
+  await wp.boot({ query: '?hour=23&season=summer' });
+  await wp.run(() => { __t.render(); AIRCRAFT.filter(a => a instanceof Helicopter).forEach(a => a.requestLaunch()); });
+  const n = await wp.run(() => [HELI_LIGHTS.sls.length, HELI_LIGHTS.N]);
+  expect(n[0], 'more helicopters than lights').toBeGreaterThan(n[1]);
+  let moved = 0, prev = null;
+  for (let i = 0; i < 30; i++) {
+    await wp.sim(4);
+    const r = await wp.run(() => {
+      __t.render(); updateLights();
+      const on = HELI_LIGHTS.sls.filter(s => s.off <= 1), lit = HELI_LIGHTS.sls.filter(s => s.light);
+      return { on: on.length, onLit: on.filter(s => s.light).length, off: lit.filter(s => s.off > 1.15).length, lights: lit.length,
+        uniq: new Set(lit.map(s => s.light)).size, free: HELI_LIGHTS.free.length, owners: lit.map(s => HELI_LIGHTS.sls.indexOf(s)).join() };
+    });
+    expect(r.onLit, `every helicopter on screen with its light on has a real one, up to N: ${JSON.stringify(r)}`).toBe(Math.min(4, r.on));
+    expect(r.off, 'none off screen keeps one').toBe(0);
+    expect([r.uniq, r.lights + r.free], 'each light has one owner or is free').toEqual([r.lights, 4]);
+    if (prev !== null && prev !== r.owners) moved++; prev = r.owners;
+  }
+  expect(moved, 'the lights move between helicopters').toBeGreaterThan(0);
+});
+
 test('shadows darken the ground, and the shadow camera covers the whole screen', async ({ wp }) => {
   await wp.boot();
   await wp.sim(3);

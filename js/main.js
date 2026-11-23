@@ -335,8 +335,8 @@ const VOLUME = {
     const m = new THREE.VolumeNodeMaterial({ steps: GPU.webgpu ? 20 : 12 });
     m.offsetNode = interleavedGradientNoise(screenCoordinate);   // (dithered start: no banding)
     m.scatteringNode = Fn(({ positionRay }) => vec3(this.density.mul(smoothstep(42, 2, positionRay.y))));   // thinner with height
-    this.rd = uniform(new THREE.Vector3(0, -1, 0)); this.ird = uniform(new THREE.Vector3(1, -1, 1));
-    m.setupLightingModel = () => new VolumeModel(this.rd, this.ird, new THREE.Vector3(-120, 0, -89), new THREE.Vector3(120, 44, 81));
+    this.rd = uniform(new THREE.Vector3(0, -1, 0)); this.ird = uniform(new THREE.Vector3(1, -1, 1)); this.top = uniform(44);
+    m.setupLightingModel = () => new VolumeModel(this.rd, this.ird, this.top, new THREE.Vector3(-120, 0, -89), new THREE.Vector3(120, 44, 81));
     this.mesh = new THREE.Mesh(new THREE.BoxGeometry(240, 44, 170), m); this.mesh.position.set(0, 22, -4);
     this.mesh.layers.set(VOL_LAYER); this.mesh.frustumCulled = false; scene.add(this.mesh);
     // its pass clears to black / transparent: with the renderer's clear colour (the sky) it was added over the whole frame
@@ -370,26 +370,35 @@ const VOLUME = {
     const rt = this.vp.renderTarget; this.texel.value.set(1 / Math.max(1, rt.width), 1 / Math.max(1, rt.height));
     const rd = camera.getWorldDirection(this.rd.value), inv = v => 1 / (Math.abs(v) < 1e-5 ? 1e-5 : v);
     this.ird.value.set(inv(rd.x), inv(rd.y), inv(rd.z));
+    // the march's ceiling: the highest light that is on + 6 (the lamps are 5–11 up: the rays' 44 to the box's top were
+    // ~3× the steps through the beams; a flak burst's flash lifts it while it lasts)
+    if (!this.lights) { this.lights = []; scene.traverse(o => { if (o.isLight && o.layers.isEnabled(VOL_LAYER)) this.lights.push(o); }); }
+    let top = 0; for (const l of this.lights) if (l.visible && l.intensity > 0) top = Math.max(top, _vt.setFromMatrixPosition(l.matrixWorld).y);
+    this.top.value = clamp(top + 6, 8, 44);
   }
 };
+const _vt = new V3();
 /* the volume's ray march (r187's VolumetricLightingModel, adapted to our camera): r187 marches from the camera's position
    to the box's far side — 160 away, its 20 steps were ~11 long, a beam ~2 wide by its lamp fell between them and the
    dithered starts lit it in some low-res texels only (a grid of blocks by the floodlights' and the helicopters' lamps).
    Here the rays are parallel (orthographic: along the view) and marched only through the box (~4 a step), and a light is
    softened within ~1.5 of it (1/d² → 1/(d² + 1.5²): the spike at the lamp itself showed as bright blocks). */
-const VOL_R0 = 1.5;
+const VOL_R0 = 2;
 class VolumeModel extends THREE.LightingModel {
-  constructor(rd, ird, bmin, bmax) { super(); Object.assign(this, { rd, ird, bmin, bmax }); this.scat = THREE.TSL.property('vec3'); }
+  constructor(rd, ird, top, bmin, bmax) { super(); Object.assign(this, { rd, ird, top, bmin, bmax }); this.scat = THREE.TSL.property('vec3'); }
   start(builder) {
     const { float, vec3, vec4, min, max, property, Loop, positionWorld, cameraViewMatrix } = THREE.TSL, { material } = builder;
     const { rd, ird, scat } = this, out = this.out = property('vec3');
-    // the box's near side on the ray through this far-side point (slab test; ird = 1 / the view direction)
-    const P = positionWorld, t1 = vec3(this.bmin).sub(P).mul(ird), t2 = vec3(this.bmax).sub(P).mul(ird), tn = min(t1, t2);
-    const len = max(max(tn.x, tn.y), tn.z).negate().max(0).toVar(), from = P.sub(rd.mul(len)).toVar();
-    const dt = len.div(material.steps).toVar(), dist = float(0).toVar(), trans = vec3(1).toVar();
+    // the ray through this far-side point, clipped to the box below the lights' ceiling `top` (slab test; ird = 1 / the
+    // view direction; P is its far end: t ≤ 0)
+    const P = positionWorld, hi = vec3(this.bmax.x, this.top, this.bmax.z), t1 = vec3(this.bmin).sub(P).mul(ird), t2 = hi.sub(P).mul(ird);
+    const a = min(t1, t2), b = max(t1, t2), tn = max(max(a.x, a.y), a.z), tf = min(min(b.x, b.y), b.z).min(0);
+    const len = tf.sub(tn).max(0).toVar(), from = P.add(rd.mul(tn)).toVar();
+    const steps = THREE.TSL.uniform('int').onRenderUpdate(({ material }) => material.steps);   // (a uniform as in r187: changed without a rebuild)
+    const dt = len.div(float(steps)).toVar(), dist = float(0).toVar(), trans = vec3(1).toVar();
     if (material.offsetNode) dist.addAssign(material.offsetNode.mul(dt));
     out.assign(vec3(0));
-    Loop(material.steps, () => {
+    Loop(steps, () => {
       const pr = from.add(rd.mul(dist)).toVar();
       builder.context.positionWorld = pr; builder.context.shadowPositionWorld = pr; builder.context.positionView = cameraViewMatrix.mul(vec4(pr, 1)).xyz;
       scat.assign(vec3(0));
@@ -953,8 +962,9 @@ function updateLights() {
   }
   const spotsOn = GPU.clustered || ENV.lightsOn > 0;
   for (const l of HELI_LIGHTS.pool) { l.visible = spotsOn; l.intensity = 0; }   // (the ones in use: below)
+  if (!GPU.clustered) HELI_LIGHTS.assign();
   for (const s of SEARCHLIGHTS) {
-    if (s.follow) followLight(s);
+    if (s.follow && s.light) followLight(s);
     const on = ENV.lightsOn * s.enabled * (s.follow && !shownTree(s.holder) ? 0 : 1), beam = Math.max(ENV.lamps, ENV.lightsOn) * s.enabled * (1 + 1.2 * WEATHER.fog + 0.5 * WEATHER.rain);   // (beams thicker in fog and rain)
     // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn);
     // clustered (WebGPU): always shown — a light out of its cluster costs nothing, and no toggle rebuilds the lights

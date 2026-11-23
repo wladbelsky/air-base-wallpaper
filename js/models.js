@@ -244,7 +244,7 @@ function makeSearchlight(parent, x, y, z, opts) {
   const o = Object.assign({ color: 0xfff1d6, angle: 0.16, len: 22, intensity: 2.2, cone: true, coneOpacity: 0.35, housing: true }, opts || {});
   const holder = new THREE.Object3D(); holder.position.set(x, y, z); parent.add(holder);
   let light = null;
-  if (o.light) light = o.light;   // a pooled light in the scene, following the holder (HELI_LIGHTS)
+  if (o.light) light = o.light;   // a light in the scene, following the holder
   else if (!o.noLight || GPU.clustered) {   // real light is optional: many spotlights get expensive on the GPU (not with clustered lighting)
     light = new THREE.SpotLight(o.color, 0, o.len * 2.2, o.angle, 0.45, 2);   // (intensity × SPOT_K: updateLights)
     light.layers.enable(2);   // (VOL_LAYER: it lights the haze, main.js VOLUME)
@@ -259,7 +259,7 @@ function makeSearchlight(parent, x, y, z, opts) {
     cone = new THREE.Mesh(g, coneMaterial(o.color, o.len)); cone.renderOrder = 4; cone.frustumCulled = false;
     holder.add(cone);
   }
-  const s = { holder, light, cone, o, enabled: 1, follow: !!o.light };
+  const s = { holder, light, cone, o, enabled: 1, follow: !!(o.light || o.pool) };   // (pool: a HELI_LIGHTS light comes and goes)
   SEARCHLIGHTS.push(s);
   return s;
 }

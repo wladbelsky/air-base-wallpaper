@@ -55,7 +55,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=61`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=62`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain, season & rendering (shadows, bloom, volumetric), 30–39 panel, 40–49 air wing, 50–59 base).
@@ -123,7 +123,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 - **Clustered lighting** (`GPU.clustered`: experimental, off — `?clustered=1` on WebGPU; `renderer.lighting =
   ClusteredLighting`, ceiling `LIGHT_MAX` 128): would make every searchlight a real light, 24 flash lights, 12
   `FireLights`. Off because its clusters don't fit our orthographic camera: the spot lights lit nothing. Both backends
-  run the rationed lights: 4 flash lights, 4 helicopter lights, 2 apron floodlights, spot lights hidden by day.
+  run the rationed lights: 4 flash lights, 4 helicopter lights (handed to the ones on screen), 2 apron floodlights, spot lights hidden by day.
 - **WebGPU safety net** (`watchGpuErrors` / `gpuFellBack`, main.js): 20 uncaptured GPU errors in the first 30 s →
   `localStorage` `fab.gl = { v: <cache-buster>, gl: 'webgl2' }` and a reload on the WebGL 2 backend; the next release
   (another `?v`) tries WebGPU again. A lost device / context (a GPU reset, a driver update, sleep: WebGPURenderer stops
@@ -137,10 +137,12 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   Its output is blurred (3×3 Gaussian in TSL, `VOLUME.texel`): the dithered ray starts at a quarter of the resolution
   showed as a checkerboard in the floodlights' beams (`gaussianBlur` is an addon not in the vendored bundle). The march
   is our own `VolumeModel` (r187's `VolumetricLightingModel` adapted, `setupLightingModel`): parallel rays along the
-  orthographic view (`VOLUME.rd` / `ird`) marched only through the box (a slab test from its far side), and a light is
-  softened within `VOL_R0` (1.5) of its lamp (1/d² → 1/(d² + r0²)) — r187 marched from the camera's position, 160 away:
-  steps ~11 long, a beam ~2 wide by its lamp fell between them, and the dither lit it in some low-res texels only (a grid
-  of blocks by the floodlights' and the helicopters' lamps; webgpu.spec measures the volume's own blockiness). Built with
+  orthographic view (`VOLUME.rd` / `ird`) marched only through the box under the lights' ceiling (`VOLUME.top`: the highest
+  lit light on `VOL_LAYER` + 6, 8–44 — a slab test from the far side), and a light is softened within `VOL_R0` (2) of its
+  lamp (1/d² → 1/(d² + r0²)) — r187 marched from the camera's position, 160 away: steps ~11 long, a beam ~2 wide by its
+  lamp fell between them, and the dither lit it in some low-res texels only (a grid of blocks by the floodlights' and the
+  helicopters' lamps); through the whole box (44 high) the grid was smaller but still there. `steps` is a uniform:
+  webgpu.spec compares the volume's light with a 200-step march (noise 22 % → 4.4 % → ~0.8 %). Built with
   the pipeline when `VOLUME.on()`; `VOLUME.live()` (built and `CFG.volumetric`) gates the mesh and the cone swap, and
   switching it on when it wasn't built drops the pipeline (`dropPipeline`: rebuilt next frame). With its mesh hidden (no
   haze — density ≤ 0.03, a clear night included: the meshed cones draw the beams there — switched off) the pass clears
@@ -590,7 +592,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   dawn toggle the warm-up covers): r187 gathers lights from visible subtrees only and a changed set rebuilds every
   render object and recompiles every lit pipeline. So the helicopters' real lights are a scene-level pool
   (`HELI_LIGHTS`, 4, built in `init`) that follows their searchlight (`s.follow`, `followLight`) and is dark while the
-  helicopter is hidden — as children of the helicopter, every combat pass (`cbt_wait` hides it) was a stall at night. Two fire lights (`FireLights`) are a fixed pair the same way. Only two apron floodlights and the first four helicopters have a real light; the
+  helicopter is hidden; `HELI_LIGHTS.assign` (every `updateLights`) hands them to the helicopters on screen with their
+  searchlight on, the nearest the centre first (kept while on screen, taken by one half a screen nearer) — once the
+  first four built kept them for good and the rest flew with the meshed cone only — as children of the helicopter, every combat pass (`cbt_wait` hides it) was a stall at night. Two fire lights (`FireLights`) are a fixed pair the same way. Only two apron floodlights and four helicopters at a time have a real light; the
   guard-tower and sky searchlights are beams (`noLight`).
 - Main loop (`frame`): FPS limit keeps cadence via `frameDue`; simulation runs in ≤50 ms sub-steps
   (stalls capped at 0.25 s). `onBeat` does nothing while `paused`.
