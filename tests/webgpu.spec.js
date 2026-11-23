@@ -68,6 +68,29 @@ test('perfReport on WebGPU with GPU timing (?gputime=1: timestamp queries) — n
   expect(typeof r.gpuMs, 'GPU timing on').toBe('number');
 });
 
+test('the volume\'s beams are smooth by the lamps (no grid of low-res blocks) in the rain on WebGPU', async ({ wp }) => {
+  await wp.boot({ gl: 'webgpu', query: '?hour=23&season=summer&weather=rain' });
+  await wp.run(() => __t.render());
+  await wp.sim(200);
+  // the volume's own share of the frame (drawn with and without it) at a floodlight mast; its blockiness = what a 9×9 box
+  // blur takes away, over its light (r187's march from the camera's position: 0.069, a grid by the lamp; now ~0.03)
+  const r = await wp.run(() => {
+    CFG.zoom = 250; const m = BASE_LAYOUT.masts[0]; CAM_TGT.set(m[0], 0, m[1]); updateCamera();
+    const c = renderer.domElement, W = c.width, H = c.height;
+    const grab = () => { __t.render(); const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const g = cv.getContext('2d'); g.drawImage(c, 0, 0); return g.getImageData(0, 0, W, H).data; };
+    const a = grab(); VOLUME.mesh.visible = false; VOLUME.blank = false; const b = grab(); VOLUME.mesh.visible = true;
+    const D = new Float32Array(W * H), S = new Float64Array((W + 1) * (H + 1)), w = W + 1;
+    for (let i = 0; i < W * H; i++) D[i] = Math.max(0, a[i * 4] + a[i * 4 + 1] + a[i * 4 + 2] - b[i * 4] - b[i * 4 + 1] - b[i * 4 + 2]);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) S[(y + 1) * w + x + 1] = D[y * W + x] + S[y * w + x + 1] + S[(y + 1) * w + x] - S[y * w + x];
+    const box = (x, y) => (S[(y + 5) * w + x + 5] - S[(y - 4) * w + x + 5] - S[(y + 5) * w + x - 4] + S[(y - 4) * w + x - 4]) / 81;
+    let res = 0, sum = 0, n = 0;
+    for (let y = 5; y < H - 5; y++) for (let x = 5; x < W - 5; x++) { const v = D[y * W + x]; if (v < 30) continue; res += Math.abs(v - box(x, y)); sum += v; n++; }
+    return { k: res / sum, n };
+  });
+  expect(r.n, 'the beam is there').toBeGreaterThan(5000);
+  expect(r.k, 'blockiness of the volume\'s light').toBeLessThan(0.05);
+});
+
 test('a real light keeps its meshed beam in a clear night (the thin haze barely shows it), hands it to the volume in fog', async ({ wp }) => {
   await wp.boot({ gl: 'webgpu', query: '?hour=23&season=summer' });
   await wp.run(() => { __t.render(); AIRCRAFT.filter(a => a.lit).forEach(a => a.requestLaunch()); });

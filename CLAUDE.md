@@ -55,7 +55,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=60`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=61`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain, season & rendering (shadows, bloom, volumetric), 30–39 panel, 40–49 air wing, 50–59 base).
@@ -135,7 +135,12 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   are marched and every light on `VOL_LAYER` (spot / flash / fire lights enable it; not the sun or the sky) scatters by
   the haze's density (night × weather: thick in fog and rain). The meshed beams of real lights are hidden meanwhile.
   Its output is blurred (3×3 Gaussian in TSL, `VOLUME.texel`): the dithered ray starts at a quarter of the resolution
-  showed as a checkerboard in the floodlights' beams (`gaussianBlur` is an addon not in the vendored bundle). Built with
+  showed as a checkerboard in the floodlights' beams (`gaussianBlur` is an addon not in the vendored bundle). The march
+  is our own `VolumeModel` (r187's `VolumetricLightingModel` adapted, `setupLightingModel`): parallel rays along the
+  orthographic view (`VOLUME.rd` / `ird`) marched only through the box (a slab test from its far side), and a light is
+  softened within `VOL_R0` (1.5) of its lamp (1/d² → 1/(d² + r0²)) — r187 marched from the camera's position, 160 away:
+  steps ~11 long, a beam ~2 wide by its lamp fell between them, and the dither lit it in some low-res texels only (a grid
+  of blocks by the floodlights' and the helicopters' lamps; webgpu.spec measures the volume's own blockiness). Built with
   the pipeline when `VOLUME.on()`; `VOLUME.live()` (built and `CFG.volumetric`) gates the mesh and the cone swap, and
   switching it on when it wasn't built drops the pipeline (`dropPipeline`: rebuilt next frame). With its mesh hidden (no
   haze — density ≤ 0.03, a clear night included: the meshed cones draw the beams there — switched off) the pass clears
