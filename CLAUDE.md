@@ -50,12 +50,12 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/settings.js` | browser-only settings drawer, demo beat, audio-file player (returns early inside WE) |
 | `tools/gen_properties.py` | regenerates `js/properties.js` |
 | `tools/vendor_three.js`, `tools/three-entry.js` | rebuild the vendored three.js bundle (`npm run vendor:three`) |
-| `tools/preview.spec.js` | renders image candidates (`powershell -ExecutionPolicy Bypass -File tools/test.ps1 -c tools/preview.config.js [-g gif]` → `test-results/gif-<seed>.gif` animated 256², scene only, + `-sheet.png` stills: the Workshop preview `preview.gif` from `project.json` — WE takes ≤ 256 px, < 1 MB (aim < 500 KB), encoded with the `gifenc` devDependency; `test-results/<scene>-<seed>.jpg` 1280x720 for each of `SCENES` (dogfight / night / refuel / storm / emergency, each with its hour and season; `-g "refuel,"` for one), `screenshots/<scene>.jpg` in README.md; copy the best over them) |
+| `tools/preview.spec.js` | renders image candidates (`powershell -ExecutionPolicy Bypass -File tools/test.ps1 -c tools/preview.config.js [-g gif]` → `test-results/gif-<seed>.gif` animated 256², scene only, + `-sheet.png` stills: the Workshop preview `preview.gif` from `project.json` — WE takes ≤ 256 px, < 1 MB (aim < 500 KB), encoded with the `gifenc` devDependency; `test-results/<scene>-<seed>.jpg` 1280x720 for each of `SCENES` (dogfight / night / refuel / storm / emergency, each with its hour and season; `-g "refuel,"` for one), `screenshots/<scene>.jpg` in README.md; copy the best over them; rendered on WebGPU (the tests' webgpu browser, `xvfb-run -a`) unless `PREVIEW_GL=webgl2`, `PREVIEW_SEEDS=N` fewer candidates) |
 | `tests/`, `playwright.config.js`, `package.json` | automated tests (Playwright Test) — see "Running & testing"; `tools/test.ps1` runs them in Docker, `.github/workflows/tests.yml` in CI |
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=63`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=64`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
   (0–9 camera/time, 10–19 audio/combat, 20–29 terrain, season & rendering (shadows, bloom, volumetric), 30–39 panel, 40–49 air wing, 50–59 base).
@@ -150,7 +150,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   as far as the haze shows it (`VOLUME.cover()`: smoothstep of the density 0.03 → 0.09 — clear night none, rain about
   half, fog all; in a clear night's thin haze the volume's beam was barely there: a light pool with no beam, the
   helicopters' lights looked cut off) and draws the lamps' share beyond `ENV.lightsOn` (by day in fog its spot light is
-  hidden). Known gap: the rays aren't stopped at the scene's depth (the
+  hidden). Its material has `fog: false` (with the scene's fog the pass added the fog colour over the whole frame: a grey
+  veil on a foggy day, +25 of 255) and the mesh starts hidden (`update` shows it). Known gap: the rays aren't stopped at the scene's depth (the
   glow of a beam behind a roof shows over it). Its
   pass clears to black (its `updateBefore` is wrapped): with the renderer's clear colour (the sky) it was added over the
   whole frame.

@@ -89,6 +89,19 @@ test('the volume\'s beams are smooth by the lamps (no grid of low-res blocks) in
   expect(r.noise, 'the march\'s noise in the volume\'s light').toBeLessThan(0.02);
 });
 
+test('a foggy day: the volume adds no veil over the frame (it once took the scene\'s fog: the fog colour over everything)', async ({ wp }) => {
+  await wp.boot({ gl: 'webgpu', query: '?hour=12&season=summer&weather=fog' });
+  await wp.run(() => __t.render());
+  await wp.sim(150);
+  const r = await wp.run(() => {
+    const mean = () => { __t.render(); const c = renderer.domElement, cv = document.createElement('canvas'); cv.width = c.width; cv.height = c.height; const g = cv.getContext('2d'); g.drawImage(c, 0, 0); const d = g.getImageData(0, 0, cv.width, cv.height).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2]; return s / (d.length / 4) / 3; };
+    const vis = VOLUME.mesh.visible, on = mean(); VOLUME.mesh.visible = false; VOLUME.blank = false; const off = mean(); VOLUME.mesh.visible = vis;
+    return { vis, d: on - off };
+  });
+  expect(r.vis, 'the volume is on (the lamps in fog)').toBe(true);
+  expect(r.d, 'what the volume adds to the mean level (0–255; with the fog: +25)').toBeLessThan(2);
+});
+
 test('a real light keeps its meshed beam in a clear night (the thin haze barely shows it), hands it to the volume in fog', async ({ wp }) => {
   await wp.boot({ gl: 'webgpu', query: '?hour=23&season=summer' });
   await wp.run(() => { __t.render(); AIRCRAFT.filter(a => a.lit).forEach(a => a.requestLaunch()); });

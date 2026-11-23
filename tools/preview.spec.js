@@ -12,7 +12,11 @@ const { test, expect } = require('../tests/support/harness');
 
 test.setTimeout(8 * 60 * 1000);
 
-const SEEDS = 6;
+const SEEDS = +(process.env.PREVIEW_SEEDS || 6);
+/* the backend: WebGPU by default (what Wallpaper Engine runs: the volumetric beams, its grade) — a headed browser like
+   the tests' webgpu project (run under xvfb-run -a; tools/test.ps1 does); PREVIEW_GL=webgl2 for the WebGL 2 backend.
+   PREVIEW_SEEDS=N: fewer candidates */
+const GL = process.env.PREVIEW_GL || 'webgpu';   // (its browser options: preview.config.js)
 const GIF = { size: 256, render: 1024, zoom: 130, season: 'autumn', frames: 32, fps: 10, colors: 64 };
 
 /* the README screenshots. Each: hour, season, `before` (in the page, right after boot), `fight` (stress level: the music
@@ -62,7 +66,7 @@ const SCENES = {
 
 /* boot, let flights get up and missions go; then start the music (combat at `fight` stress) or run `after` */
 async function warmUp(wp, seed, query, { before, fight, after } = {}) {
-  await wp.boot({ seed, query });
+  await wp.boot({ seed, query, gl: GL });
   // __seen(p, margin): p is on screen (AIRWAR.onScreen margins) and not hidden under the panel
   await wp.run(() => { const v = new V3(); window.__seen = (p, m = 0) => {
     if (!AIRWAR.onScreen(p, m)) return false;

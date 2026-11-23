@@ -332,13 +332,15 @@ const VOLUME = {
   build() {
     const { uniform, Fn, vec2, vec3, smoothstep, screenCoordinate, screenUV, interleavedGradientNoise } = THREE.TSL;
     this.density = uniform(0);
-    const m = new THREE.VolumeNodeMaterial({ steps: GPU.webgpu ? 20 : 12 });
+    // fog off: with the scene's fog the pass added the fog colour over the whole frame, whatever it scattered (a grey veil
+    // on a foggy day, haze on a rainy night; a pale screenshot when the pipeline was built on its frame)
+    const m = new THREE.VolumeNodeMaterial({ steps: GPU.webgpu ? 20 : 12, fog: false });
     m.offsetNode = interleavedGradientNoise(screenCoordinate);   // (dithered start: no banding)
     m.scatteringNode = Fn(({ positionRay }) => vec3(this.density.mul(smoothstep(42, 2, positionRay.y))));   // thinner with height
     this.rd = uniform(new THREE.Vector3(0, -1, 0)); this.ird = uniform(new THREE.Vector3(1, -1, 1)); this.top = uniform(44);
     m.setupLightingModel = () => new VolumeModel(this.rd, this.ird, this.top, new THREE.Vector3(-120, 0, -89), new THREE.Vector3(120, 44, 81));
     this.mesh = new THREE.Mesh(new THREE.BoxGeometry(240, 44, 170), m); this.mesh.position.set(0, 22, -4);
-    this.mesh.layers.set(VOL_LAYER); this.mesh.frustumCulled = false; scene.add(this.mesh);
+    this.mesh.layers.set(VOL_LAYER); this.mesh.frustumCulled = false; this.mesh.visible = false; scene.add(this.mesh);   // (shown by update)
     // its pass clears to black / transparent: with the renderer's clear colour (the sky) it was added over the whole frame
     const vp = THREE.TSL.pass(scene, camera, { depthBuffer: false }), up = vp.updateBefore, cc = new THREE.Color();
     // nothing in the haze (a clear day, switched off): cleared once, then not drawn (its target stays black)
