@@ -93,11 +93,14 @@ test('a real light keeps its meshed beam in a clear night (the thin haze barely 
   await wp.boot({ gl: 'webgpu', query: '?hour=23&season=summer' });
   await wp.run(() => { __t.render(); AIRCRAFT.filter(a => a.lit).forEach(a => a.requestLaunch()); });
   await wp.sim(40);
-  const beam = () => wp.run(() => { updateLights(); const s = AIRCRAFT.find(a => a.lit && a.searchlights[0].enabled > 0.9 && a.searchlights[0].light).searchlights[0]; return { live: VOLUME.live(), cone: s.cone.visible, op: s.cone.material.uOpacity.value }; });
+  // a helicopter's light on screen, else a floodlight mast's (every one is real)
+  const beam = () => wp.run(() => { updateLights(); const h = AIRCRAFT.find(a => a.lit && a.searchlights[0].enabled > 0.9 && a.searchlights[0].light), s = h ? h.searchlights[0] : BASE.floods[0];
+    return { heli: !!h, live: VOLUME.live(), cone: s.cone.visible, op: s.cone.material.uOpacity.value / s.o.coneOpacity }; });
   const clear = await beam();
   expect(clear.live).toBe(true);
+  expect(clear.heli, 'a lit helicopter up').toBe(true);
   expect(clear.cone, 'a helicopter\'s beam in a clear night (only a light pool, cut off, without it)').toBe(true);
-  expect(clear.op).toBeGreaterThan(0.2);
+  expect(clear.op, 'its cone at most of its opacity').toBeGreaterThan(0.6);
   await wp.run(() => { __t.props({ weathermode: 'fog' }); });
   await wp.sim(200);
   await wp.run(() => { AIRCRAFT.filter(a => a.lit).forEach(a => a.canLaunch() && a.requestLaunch()); });

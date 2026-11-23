@@ -161,6 +161,7 @@ test('night: the helicopters\' real lights go to the ones on screen with their s
   await wp.boot({ query: '?hour=23&season=summer' });
   await wp.run(() => { __t.render(); AIRCRAFT.filter(a => a instanceof Helicopter).forEach(a => a.requestLaunch()); });
   const n = await wp.run(() => [HELI_LIGHTS.sls.length, HELI_LIGHTS.N]);
+  expect(await wp.run(() => BASE.floods.filter(f => !f.light).length), 'every floodlight mast has a real light (a light pool on the ground)').toBe(0);
   expect(n[0], 'more helicopters than lights').toBeGreaterThan(n[1]);
   let moved = 0, prev = null;
   for (let i = 0; i < 30; i++) {

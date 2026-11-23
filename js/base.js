@@ -27,9 +27,10 @@ const BASE_LAYOUT = {
   // door]: the crew depots west / east (the cargo yard) and the heliport's; ground vehicles set off from inside and drive
   // back in (groundops: garageDepot)
   garages: [[-70.6, -5.8, 3.6, 3.6, 'e', 2.6], [41.2, -9.2, 3.4, 3.6, 's', 1.6], [2.8, 30.4, 3.4, 3.4, 'e', 1.0]],
-  // floodlight masts [x, z, aim x, aim z, a real SpotLight]: clear of every taxiing wingtip (units.spec checks it)
-  masts: [[-30.1, -12.6, -32, -4, true], [30.9, -12.6, 28, -4, true],   // (behind the front row, in the gaps between stands: on the taxiway's edge a heavy's wing hit them)
-    [-48, -12, -54, -14, false], [62.3, -12, 56, -8, false], [34.5, 31, 22, 38, false]],
+  // floodlight masts [x, z, aim x, aim z], each a real SpotLight (once only the first two: the rest were cones with no
+  // light pool on the ground, in rain / fog no volume's beam): clear of every taxiing wingtip (units.spec checks it)
+  masts: [[-30.1, -12.6, -32, -4], [30.9, -12.6, 28, -4],   // (behind the front row, in the gaps between stands: on the taxiway's edge a heavy's wing hit them)
+    [-48, -12, -54, -14], [62.3, -12, 56, -8], [34.5, 31, 22, 38]],
   fireStation: [-4, 32, 6, 4.5]                             // x, z, w, d: three roll-up doors on its north side
 };
 const BL = BASE_LAYOUT;
@@ -250,10 +251,10 @@ function buildBuilding(p, x, z, w, d, h, win, rotY, c) {
   box(g, 0.5, 0.3, 0.4, 0x7a7d80, w * 0.25, h + 0.27, 0);                                    // AC unit
   return g;
 }
-/* light mast with floodlights (one real SpotLight on the first `real` masts, cones only on the rest) */
-function buildLightMast(p, x, z, aimX, aimZ, real) {
+/* light mast with floodlights: one real SpotLight and its cone */
+function buildLightMast(p, x, z, aimX, aimZ) {
   cyl(p, 0.08, 0.12, 5.2, 5, 0x8a8c8e, x, 2.6, z); box(p, 0.9, 0.12, 0.2, 0x55585b, x, 5.25, z); obstacle(p, x, z, 1.2, 1.2, 5.4);
-  const sl = makeSearchlight(p, x, 5.15, z, { angle: 0.55, len: 14, intensity: 1.4, coneOpacity: 0.07, color: 0xffe2b8, noLight: !real });
+  const sl = makeSearchlight(p, x, 5.15, z, { angle: 0.55, len: 14, intensity: 1.4, coneOpacity: 0.07, color: 0xffe2b8 });
   sl.holder.lookAt(aimX, 0, aimZ); sl.mast = true;
   return sl;
 }
@@ -415,7 +416,7 @@ function buildBase() {
   for (let x = TW.x0; x <= TW.x1; x += 4) for (const sz of [-1, 1]) lines.push([x, 0.1, TW.z + sz * (TW.w / 2 + 0.2), 0x4a7cff]);
   const navs = [navLights(g, lines, null, 0.8), ...tower.lights];
   const floods = [];
-  for (const [x, z, ax, az, real] of BL.masts) floods.push(buildLightMast(g, x, z, ax, az, real));
+  for (const [x, z, ax, az] of BL.masts) floods.push(buildLightMast(g, x, z, ax, az));
   const skyLights = [[-30, 52], [60, -36], [-62, 30], [40, 52]].map(([x, z]) => buildSkyLight(g, x, z));
   dyn.push(...floods.map(f => f.holder), ...guards.map(s => s.holder), ...skyLights.map(s => s.holder), ...GARAGE_DOORS.map(o => o.g));
   mergeStatic(g, dyn);
