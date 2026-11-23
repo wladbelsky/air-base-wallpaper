@@ -88,7 +88,7 @@ test('takeoff: the roll uses half the runway or more, it keeps accelerating afte
 
 test('nav lights and beacons are off while an aircraft or helicopter is parked and shut down, on with the engines', async ({ wp }) => {
   await quietBase(wp);
-  const lit = () => wp.run(() => __f.map(a => { let n = 0, on = 0; a.mesh.traverse(o => { if (o.isPoints) { n++; if (o.visible) on++; } }); return [a.spec.key, n, on]; }));
+  const lit = () => wp.run(() => __f.map(a => { let n = 0, on = 0; a.mesh.traverse(o => { if (o.userData.nav) { n++; if (o.visible) on++; } }); return [a.spec.key, n, on]; }));
   await wp.run(() => { window.__f = ['c130', 'c17', 'e3', 'kc46', 'uh60'].map(k => AIRCRAFT.find(a => a.spec.key === k)); });
   await wp.sim(1);
   for (const [k, n, on] of await lit()) { expect(n, `${k} has nav lights`).toBeGreaterThan(0); expect(on, `${k} parked: lights off`).toBe(0); }

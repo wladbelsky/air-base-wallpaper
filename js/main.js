@@ -5,13 +5,14 @@ let AIRCRAFT = [], FLYBYS = [], ALL_CIWS = [], ALL_AA = [], ALL_TANKS = [], ALL_
 const FX = {};
 let airWingDirty = false;
 let T = 0, paused = false, fpsLimit = 0, lastMs = 0, ready = false;
-const ENV = { elev: 30, lightsOn: 0, night: 0, ppu: 10, smokeTint: new THREE.Color(0xbbbbbb), dustTint: new THREE.Color(0xa89878) };
+const ENV = { elev: 30, lightsOn: 0, lamps: 0, night: 0, hemiI: 1, ppu: 10, fogTint: new THREE.Color(0x9fc0da), smokeTint: new THREE.Color(0xbbbbbb), dustTint: new THREE.Color(0xa89878) };
 
 /* ---- URL test parameters (for browser preview) ---- */
 const QS = new URLSearchParams(location.search);
 if (QS.has('hour')) { CFG.timeMode = 'fixed'; CFG.fixedHour = parseFloat(QS.get('hour')); }
 if (QS.has('zoom')) CFG.zoom = parseFloat(QS.get('zoom'));
 if (QS.has('season')) CFG.season = QS.get('season');
+if (QS.has('weather')) CFG.weatherMode = QS.get('weather');
 
 /* ---- Wallpaper Engine properties ---- */
 function rgbFromWE(str) { return str.split(' ').map(c => Math.round(clamp(parseFloat(c), 0, 1) * 255)).join(','); }
@@ -29,11 +30,14 @@ window.wallpaperPropertyListener = {
     if (has('flybyfrequency')) CFG.flyby = p.flybyfrequency.value;
     if (has('autoflight')) CFG.auto = p.autoflight.value;
     if (has('shadows')) CFG.shadows = p.shadows.value;
+    if (has('bloom')) CFG.bloom = p.bloom.value;
+    if (has('volumetric')) CFG.volumetric = p.volumetric.value;
     if (has('showpanel')) CFG.showPanel = p.showpanel.value;
     if (has('panelposition')) CFG.panelPos = p.panelposition.value;
     if (has('panelscale')) CFG.panelScale = p.panelscale.value;
     if (has('season') && !QS.has('season')) CFG.season = p.season.value;
     if (has('weather')) CFG.weather = p.weather.value;
+    if (has('weathermode') && !QS.has('weather')) CFG.weatherMode = p.weathermode.value;
     if (has('uicolor')) CFG.uiColor = rgbFromWE(p.uicolor.value);
     if (has('subtitles')) CFG.subtitles = p.subtitles.value;
     if (has('savestate')) { CFG.saveState = p.savestate.value; if (!CFG.saveState) PERSIST.clear(); }
@@ -60,22 +64,53 @@ function applySettings() {
   const title = document.querySelector('#panel .title'); if (title) title.textContent = `◆ ${CFG.baseName} · BASE OPS`;
   if (!ready) return;
   for (const s of SITES) if (s.ui) s.ui.nm.textContent = s.name();
-  sunLight.castShadow = CFG.shadows;
+  sunLight.shadow.needsUpdate = CFG.shadows;   // (off: no shadow pass, intensity 0 — toggling castShadow would rebuild every material; on: renderFrame)
   updateCamera(); updateEnvironment();
+  if (pipeline && VOLUME.on() && !VOLUME.active) dropPipeline();   // volumetric switched on: the next frame builds the pipeline with it
 }
 
 /* ---- init ---- */
-function init() {
+/* WebGPURenderer: WebGPU where the browser has it (Wallpaper Engine's CEF does), else (or ?gl=webgl2) its WebGL 2 backend;
+   the same node materials and passes on both. init() waits for the device: `ready` comes after it. */
+async function init() {
   const canvas = document.getElementById('c');
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, precision: 'highp', powerPreference: 'high-performance' });
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', trackTimestamp: GPU.timing,
+    forceWebGL: QS.get('gl') === 'webgl2' || PERF.flags.gl === 'webgl2' || gpuFellBack() });
+  // the device / context lost (a GPU reset, a driver update, sleep): WebGPURenderer stops drawing for good (WebGLRenderer
+  // restored its context) — reload (PERSIST saves on pagehide); lost on WebGPU early on, or a second time within 10 min
+  // (a driver resetting on our shaders: it reloaded on WebGPU for ever): WebGL 2 for this release
+  const lost = renderer.onDeviceLost;
+  renderer.onDeviceLost = (info) => {
+    lost.call(renderer, info);                                     // (logs it, stops drawing)
+    if (GPU.reloading) return; GPU.reloading = true;
+    if (renderer.backend && renderer.backend.isWebGPUBackend) try {   // (not GPU.webgpu: unset while init() waits)
+      const now = Date.now(), d = JSON.parse(localStorage.getItem(LOST_KEY) || 'null'), ts = (d && d.v === GL_VER ? d.t : []).filter(t => now - t < 600000);
+      ts.push(now); localStorage.setItem(LOST_KEY, JSON.stringify({ v: GL_VER, t: ts }));
+      if (performance.now() < 30000 || ts.length >= 2) localStorage.setItem(GL_KEY, JSON.stringify({ v: GL_VER, gl: 'webgl2' }));
+    } catch (e) {}
+    setTimeout(() => location.reload(), 2000);
+  };
+  await renderer.init();
+  GPU.webgpu = !!renderer.backend.isWebGPUBackend;
+  if (GPU.webgpu) watchGpuErrors();
+  // render pipelines made (GPU.pipes): on WebGPU one made outside compileAsync blocks the GPU process — the fight's stalls
+  // (renderer.info.memory.programs counts shader modules, shared by code: it barely moves). perfReport's hitch log, tests
+  const crp = renderer.backend.createRenderPipeline; renderer.backend.createRenderPipeline = function () { GPU.pipes++; return crp.apply(this, arguments); };
+  // Forward+ clustered lighting (WebGPU only: a compute pass bins the point / spot lights per screen tile and depth slice,
+  // a fragment loops over its cluster's): many real lights are cheap — every searchlight, more flashes, the fires. On
+  // the WebGL 2 backend the lights stay rationed (4 flash lights, 4 helicopter lights, spot lights hidden by day).
+  GPU.clustered = GPU.webgpu && (QS.get('clustered') === '1' || PERF.flags.clustered === true);   // (experimental: its clusters don't fit our orthographic camera — the spots lit nothing)
+  if (GPU.clustered) renderer.lighting = new THREE.ClusteredLighting(LIGHT_MAX);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x9fc0da, 300, 800);
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.toneMapping = THREE.NeutralToneMapping;   // bright lights / flashes roll off instead of clipping; colours below ~0.8 untouched
+  renderer.info.autoReset = false;                   // counted per frame (renderFrame), not per pass
+  scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x9fc0da, 300, 800); scene.matrixWorldAutoUpdate = false;   // (renderFrame updates them, then BATCH.sync)
   camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 700);
 
   hemi = new THREE.HemisphereLight(0xffffff, 0x333333, 0.6); scene.add(hemi);
   sunLight = new THREE.DirectionalLight(0xffffff, 1);
-  sunLight.castShadow = CFG.shadows;
+  sunLight.castShadow = true; sunLight.shadow.autoUpdate = false;   // (renderFrame asks for the map: SHADOW_EVERY)
   sunLight.shadow.mapSize.set(2048, 2048);
   Object.assign(sunLight.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: -100, far: 400 });   // bounds: fitShadow()
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.03;
@@ -91,10 +126,14 @@ function init() {
   TERRAIN.build(seasonNow());
 
   FX.tracers = new Tracers(scene, 1200);
-  FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);
+  FX.flash = new SpriteFX(scene, TEX.flash, THREE.AdditiveBlending, 160);   // (HDR with bloom: updateBloom, uK)
   FX.smoke = new SpriteFX(scene, TEX.smoke, THREE.NormalBlending, 420, true);   // (a burning structure keeps ~50 up)
   FX.scorch = new Scorch(scene, 120);
-  FX.lights = new FlashLights(scene, 4);
+  FX.lights = new FlashLights(scene, GPU.clustered ? 24 : 4);
+  FX.fire = new FlameFX(scene, 240);   // (structures, wrecks, units, crashes, explosions at once: ~25 a burning roof)
+  FX.fireLights = new FireLights(scene, GPU.clustered ? 12 : 2);   // (2 without clustering: fixed, always in the scene — the light set never changes)
+  if (!GPU.clustered) HELI_LIGHTS.build(scene);   // (before the air wing: the scene's lights are fixed from the start)
+  WEATHER.build();
   // shells, rockets and bombs that reach the ground: dust, or a bomb hitting a structure
   FX.tracers.onSplash = (p, big) => {
     if (big >= 2.3) enemyBomb(p); else groundHit(p, big);
@@ -106,14 +145,98 @@ function init() {
   warmShaders();
   requestAnimationFrame(frame);
 }
-/* compile now, under the start-up splash, every shader a fight needs (enemy models, tracers, flashes, smoke…): the first
-   fight would otherwise stall on ~a dozen compiles (tens to hundreds of ms each in Wallpaper Engine's ANGLE / D3D) right
-   as the music starts. renderer.compile covers invisible objects too (the idle FX pools); the enemy templates are built
-   here (enemyMesh caches them) and their clones only borrowed for it — no GPU buffers are made, nothing to dispose. */
-function warmShaders() {
+/* compile now, under the start-up splash, every shader the scene and a fight need (enemy models, tracers, flashes,
+   smoke…): the first frame and the first fight would otherwise stall on dozens of compiles (tens to hundreds of ms each in
+   Wallpaper Engine's ANGLE / D3D). compileAsync hands them to the driver at once and waits for them off the main thread
+   (KHR_parallel_shader_compile; without it they compile as before, one by one): the splash keeps moving meanwhile.
+   compile() only takes visible objects (since r158): the idle FX pools, the hidden aircraft and the rest are shown for
+   the call (compileVisible). The programs depend on the lights in view: the spot lights shown by night only are flipped
+   for a second round (no stall at dusk / dawn). A program is made for where it draws: the bloom's HDR target or the
+   screen — the active path only (toggling bloom compiles the other once). The enemy templates are built here (enemyMesh caches them) and only
+   borrowed (targetScene: lit like the scene, not added to it) — no GPU buffers are made, nothing to dispose. The frame
+   loop draws nothing until SHADERS_READY (a draw with a program still compiling would wait for it); frames under the
+   splash make the shadow pass's programs (compile() doesn't) and the post-processing passes (bloom). */
+let SHADERS_READY = false;
+// perfReport() state and the debug switches kept in localStorage (see perfReport, below frame())
+const PERF = { recs: [],
+  flags: (() => { try { return JSON.parse(localStorage.getItem('fab-perf') || '{}') || {}; } catch (e) { return {}; } })(),
+  /* what a frame made: render pipelines (GPU.pipes), shader programs, batch growth / new batches (BATCH.ev) */
+  counts() { return [GPU.pipes, renderer.info.memory.programs, BATCH.ev.grow, BATCH.ev.batch]; },
+  gap() { return fpsLimit > 0 ? 1000 / fpsLimit : 1000 / 60; },   // the frame interval expected (at an FPS limit of 25 every frame was a 'hitch')
+  sample(ms, sim, draw, c0) {   // into every report running (each perfReport() call has its own record)
+    let lit = 0; scene.traverseVisible(o => { if ((o.isPointLight || o.isSpotLight) && o.intensity > 0) lit++; });
+    const c = this.counts(), d = { pipes: c[0] - c0[0], programs: c[1] - c0[1], batchGrow: c[2] - c0[2], newBatch: c[3] - c0[3] };
+    for (const r of this.recs) {
+      for (const k in d) r.made[k] += d[k];
+      // a hitch (> 50 ms since the last frame, or two frame intervals of a lower FPS limit): what this frame and the one before it made (a pipeline built in one frame
+      // blocks the GPU process: the gap shows before the next) — the worst ones go into the report's hitchLog
+      if (r.last && ms - r.last > Math.max(50, 2 * this.gap())) r.hitches.push({ at: +(T - r.T0).toFixed(1), ms: Math.round(ms - r.last), simMs: +sim.toFixed(1), renderMs: +draw.toFixed(1), made: d, before: r.pd, enemies: ENEMIES.length, combat: AUD.fighting });
+      r.pd = d;
+      if (r.last) r.frame.push(ms - r.last); r.last = ms;
+      r.cpu.push(sim + draw); r.sim.push(sim); r.draw.push(draw); r.calls.push(renderer.info.render.drawCalls); r.lights.push(lit);
+      if (GPU.timing) { r.gpu.push(GPU.ms.render); r.comp.push(GPU.ms.compute); }
+    }
+  }
+};
+const GPU = { webgpu: false, clustered: false, pipes: 0,   // which backend WebGPURenderer runs on (renderer.backend), clustered lights
+  // ?gputime=1 / perfFlags({ gputime: true }) (debug): GPU time of the last frame's render / compute passes in ms, measured
+  // twice a second (GPU.ms; timestamp queries)
+  timing: QS.get('gputime') === '1' || PERF.flags.gputime === true, ms: { render: 0, compute: 0 }, tsT: 0 };
+const LIGHT_MAX = 128;
+/* safety net: WebGPU failing (a stream of validation errors in the first 30 s — once a nothing-drawn screen in WE) →
+   remember it for this release (the cache-buster) and reload on the WebGL 2 backend; the next release tries WebGPU again */
+const GL_KEY = 'fab.gl', LOST_KEY = 'fab.lost', GL_VER = ((document.querySelector('script[src*="main.js"]') || {}).src || '').replace(/^.*[?&]v=(\d+).*$/, '$1');
+function gpuFellBack() { try { const d = JSON.parse(localStorage.getItem(GL_KEY) || 'null'); return !!d && d.v === GL_VER && d.gl === 'webgl2'; } catch (e) { return false; } }
+function watchGpuErrors() {
+  const dev = renderer.backend.device, t0 = performance.now(); let n = 0;
+  if (dev && dev.addEventListener) dev.addEventListener('uncapturederror', () => {
+    if (++n < 20 || performance.now() - t0 > 30000 || GPU.fellBack) return;
+    GPU.fellBack = true; console.warn('WebGPU keeps failing: reloading on WebGL 2 for this release');
+    try { localStorage.setItem(GL_KEY, JSON.stringify({ v: GL_VER, gl: 'webgl2' })); } catch (e) {}
+    location.reload();
+  });
+}   // the clustered lighting's ceiling (point + spot lights in the scene)
+function compileVisible(root, target) {
+  const hid = [], bat = []; root.traverse(o => { if (!o.visible && !o.isLight) { hid.push(o); o.visible = true; } if (o.userData.batched && o.visible) bat.push(o); });
+  for (const o of bat) o.visible = false;   // (drawn by their batches: no program of their own)
+  // (for the default target: setting the scene pass's target here, while it was still 1×1, broke that pass for good on
+  // WebGPU — its textures were destroyed on the resize; the frames under the splash make the pass's variants)
+  const p = renderer.compileAsync(root, camera, target);   // (it collects the objects now: they can hide again)
+  for (const o of bat) o.visible = true; for (const o of hid) o.visible = false;
+  return p;
+}
+/* one frame through the pipeline with every hidden object shown and every empty instanced pool drawing one instance */
+function warmFrame() {
+  const hid = [], cnt = [];
+  scene.traverse(o => { if (!o.visible && !o.isLight) { hid.push(o); o.visible = true; } if ((o.isInstancedMesh || o.isSprite) && o.count === 0) { cnt.push(o); o.count = 1; } });
+  renderFrame();
+  for (const o of hid) o.visible = false; for (const o of cnt) o.count = 0;
+}
+async function warmShaders() {
+  if (QS.get('warm') === '0') { SHADERS_READY = true; return; }   // (the tests skip it: SwiftShader compiles synchronously, ~4 s a boot)
   const g = new THREE.Group();
   for (const k of ['cruise', 'ballistic', ...Object.keys(ENEMY_TYPES), ...Object.keys(HELI_TYPES), ...Object.keys(ARMOR_TYPES)]) g.add(enemyMesh(k));
-  scene.add(g); renderer.compile(scene, camera); scene.remove(g);
+  for (const k of Object.keys(ARMOR_TYPES)) { const w = enemyMesh(k); w.traverse(o => { if (o.isMesh) o.material = M(0x2c2a26); }); g.add(w); }   // the wrecks' batch (wreckArmor)
+  for (const k of Object.keys(VEH_BUILD)) g.add((VEH_TEMPLATES[k] || (VEH_TEMPLATES[k] = VEH_BUILD[k]())).clone());   // the ground vehicles (crane parts, hoses: drawn on their own)
+  const fly = Object.keys(FLYBY_JETS).flatMap(k => [0, 1, 2].map(() => { const m = FLYBY_JETS[k](); FLYBY_MODELS[k].push(m); m.setFold(0); g.add(m.group); return m; }));   // fly-by jets built now, 3 a type (a fly-by takes 1–3; once lazily, mid-fight)
+  BATCH.prefill(scene); BATCH.prefill(g);
+  scene.updateMatrixWorld(); BATCH.sync();   // the batches exist (their programs are compiled with the rest)
+  const spots = [...new Set([...SEARCHLIGHTS.filter(s => s.light).map(s => s.light), ...HELI_LIGHTS.pool])], flip = () => spots.forEach(l => { l.visible = !l.visible; });
+  try {
+    await compileVisible(scene); await compileVisible(g, scene);   // (one at a time: WebGPURenderer.compileAsync isn't re-entrant)
+    if (!SHADERS_READY) { flip(); await compileVisible(scene); await compileVisible(g, scene); }   // (not once the loop runs — the 15 s fallback: its updateLights sets them)
+  } catch (e) { console.warn('shader warm-up', e); }
+  spots.forEach(l => { l.visible = GPU.clustered || ENV.lightsOn > 0; });   // as updateLights has them (a flip back after the loop had set them left them wrong)
+  // frames of the real pipeline with the enemies in view (the camera's middle) and everything hidden or empty shown
+  // (warmFrame), in both states of the night-only spot lights: what compileAsync made for its own context, the scene
+  // pass draws in the RenderPipeline's — its variants, the shadow-pass (depth) programs and the post-processing passes
+  // were otherwise built the first time each was drawn (mid-fight: the first tracers, a wreck, a scramble)
+  g.position.copy(CAM_TGT); g.children.forEach((m, i) => m.position.set((i % 6 - 2.5) * 4, 6, Math.floor(i / 6) * 4 - 4));
+  if (!SHADERS_READY) { scene.add(g); warmFrame(); flip(); warmFrame(); flip(); scene.remove(g); }   // (not once the loop runs — the 15 s fallback: the frame with every hidden thing shown would be on screen)
+  for (const m of fly) m.group.removeFromParent();
+  spots.forEach(l => { l.visible = GPU.clustered || ENV.lightsOn > 0; });
+  renderFrame();
+  SHADERS_READY = true;
 }
 
 /* ---- air wing from the per-type counts (a fresh build: everything starts at its home) ---- */
@@ -121,7 +244,6 @@ let airWingBuiltAt = 0;
 function buildAirWing() {
   airWingDirty = false; airWingBuiltAt = T;
   AIRCRAFT.forEach(a => a.dispose()); AIRCRAFT = []; AIRWAR.passes.length = 0; missionWorldReset();
-  HELI_LIGHTS.n = 0;
   AIRFIELD.reset();
   // homes go round-robin across types (the shelters are shared out between the fighter types)
   const plan = [];
@@ -168,13 +290,167 @@ function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   updateCamera();
 }
+/* ---- one frame on screen: a RenderPipeline — the scene pass (half-float, multisampled: HDR), + the bloom of what is
+   brighter than its threshold (lights, flashes, fire, tracers, lightning: HDR colours > 1) when CFG.bloom; the pipeline
+   tone maps / encodes the result. The scene is always drawn into the linear target (bloom on or off), so the sprite
+   and beam curves (SPRITE_AG / SPRITE_CP / BEAM_G) are fixed. Built on first use; toggling bloom swaps the output node. */
+let pipeline = null, bloomNode = null, sceneOut = null, pipeBloom = null, scenePass = null;
+/* the final grade, on screen colours (after the tone mapping and the sRGB encoding): the linear light made the picture
+   more contrasty and saturated than before r187 (the shade side and the ground darker, the sunlit side warmer) — halfway
+   back: saturation × sat toward the luminance, contrast × con around mid. Day and night have their own (updateBloom
+   eases between them by ENV.night): by day measured on WE screenshots (spread 0.116 → 0.143, saturation 0.063 →
+   0.111); at night on three night scenes rendered with the pre-r187 code and now (mean 0.21 → 0.18, spread 0.072 →
+   0.099, saturation 0.070 → 0.109, the darkest 5 % 0.11 → 0.055: darker and harder) — the night's pivot 0.33 lifts
+   the mean a little too, to the midpoint */
+const GRADE = { day: { sat: 0.87, con: 0.9, mid: 0.44 }, night: { sat: 0.8, con: 0.87, mid: 0.33 }, u: null };
+function gradeOut(n) {
+  const { renderOutput, luminance, mix, vec3, uniform } = THREE.TSL;
+  if (!GRADE.u) GRADE.u = { sat: uniform(GRADE.day.sat), con: uniform(GRADE.day.con), mid: uniform(GRADE.day.mid) };
+  const U = GRADE.u, c = renderOutput(n), rgb = c.rgb, l = luminance(rgb);
+  const s = mix(vec3(l), rgb, U.sat), g = s.sub(U.mid).mul(U.con).add(U.mid);
+  return THREE.TSL.vec4(g, c.a);
+}
+function buildPipeline() {
+  pipeline = new THREE.RenderPipeline(renderer); pipeline.outputColorTransform = false;   // (gradeOut does it, then grades)
+  const sp = scenePass = THREE.TSL.pass(scene, camera, { samples: 4 });
+  sceneOut = sp.getTextureNode('output');
+  if (VOLUME.on()) sceneOut = sceneOut.add(VOLUME.build());   // light shafts in the haze, added before the bloom
+  bloomNode = THREE.bloom(sceneOut, 0.5, 0.45, 1);
+  updateBloom();
+}
+function dropPipeline() { pipeline.dispose(); scenePass.dispose(); bloomNode.dispose(); pipeline = bloomNode = sceneOut = scenePass = pipeBloom = null; }
+/* ---- volumetric light (WebGPU; ?vol=1 forces it on the WebGL 2 backend): the searchlights' beams lit in the haze ----
+   A box over the base (VOL_LAYER: only its own low-res pass draws it) with a VolumeNodeMaterial: the ray through it is
+   marched in steps and every light (clustered, WebGPU: cheap) scatters into it by the haze's density — beams from the
+   real spot lights, glow around flashes and fires. Density by the hour and the weather (thick in fog and rain, none by a
+   clear day); the meshed beams (coneMaterial) are hidden meanwhile. Rendered at a quarter of the resolution. */
+const VOL_LAYER = 2;
+const VOLUME = {
+  mesh: null, density: null, active: false, blank: false,
+  on() { return CFG.volumetric && (GPU.webgpu || QS.get('vol') === '1'); },
+  live() { return this.active && CFG.volumetric; },   // built and switched on (switched off later: hidden, its pass idle)
+  build() {
+    const { uniform, Fn, vec2, vec3, smoothstep, screenCoordinate, screenUV, interleavedGradientNoise } = THREE.TSL;
+    this.density = uniform(0);
+    const m = new THREE.VolumeNodeMaterial({ steps: GPU.webgpu ? 20 : 12 });
+    m.offsetNode = interleavedGradientNoise(screenCoordinate);   // (dithered start: no banding)
+    m.scatteringNode = Fn(({ positionRay }) => vec3(this.density.mul(smoothstep(42, 2, positionRay.y))));   // thinner with height
+    this.rd = uniform(new THREE.Vector3(0, -1, 0)); this.ird = uniform(new THREE.Vector3(1, -1, 1)); this.top = uniform(44);
+    m.setupLightingModel = () => new VolumeModel(this.rd, this.ird, this.top, new THREE.Vector3(-120, 0, -89), new THREE.Vector3(120, 44, 81));
+    this.mesh = new THREE.Mesh(new THREE.BoxGeometry(240, 44, 170), m); this.mesh.position.set(0, 22, -4);
+    this.mesh.layers.set(VOL_LAYER); this.mesh.frustumCulled = false; scene.add(this.mesh);
+    // its pass clears to black / transparent: with the renderer's clear colour (the sky) it was added over the whole frame
+    const vp = THREE.TSL.pass(scene, camera, { depthBuffer: false }), up = vp.updateBefore, cc = new THREE.Color();
+    // nothing in the haze (a clear day, switched off): cleared once, then not drawn (its target stays black)
+    vp.updateBefore = function (frame) {
+      if (!VOLUME.mesh.visible && VOLUME.blank) return;
+      VOLUME.blank = !VOLUME.mesh.visible;
+      renderer.getClearColor(cc); const a = renderer.getClearAlpha(); renderer.setClearColor(0x000000, 0); try { return up.call(this, frame); } finally { renderer.setClearColor(cc, a); }   // (a throw left the sky black)
+    };
+    vp.setLayers(new THREE.Layers()); vp.getLayers().set(VOL_LAYER); vp.setResolutionScale(0.25);
+    this.vp = vp; this.active = true;
+    // blurred back up (3×3 Gaussian, one low-res texel apart, bilinear): the dithered ray starts (a texel = 4×4 pixels)
+    // showed as a checkerboard in the floodlights' beams
+    const t = vp.getTextureNode('output'), tx = this.texel = uniform(new THREE.Vector2(1, 1));
+    const at = (x, y) => t.sample(screenUV.add(vec2(x, y).mul(tx)));
+    return at(0, 0).mul(4).add(at(1, 0).add(at(-1, 0)).add(at(0, 1)).add(at(0, -1)).mul(2))
+      .add(at(1, 1).add(at(-1, 1)).add(at(1, -1)).add(at(-1, -1))).div(16);
+  },
+  dens() { return (0.025 + 0.09 * WEATHER.fog + 0.03 * WEATHER.rain) * Math.max(ENV.lamps, ENV.lightsOn); },
+  /* how much of a real light's beam the volume draws: in a clear night's thin haze its beam is barely there (a light
+     pool on the ground with no beam to it — the helicopters' lights looked cut off), the meshed cone stays; it hands
+     over as the haze thickens (rain: about half, fog: all) */
+  cover() { return this.live() ? smoothstep(0.03, 0.09, this.dens()) : 0; },
+  update() {
+    if (!this.active) return;
+    const d = this.dens();
+    // drawn from where it shows (cover > 0; a clear night's 0.025 is a faint haze the meshed cones draw for it): below,
+    // the mesh hidden and the pass idle — a scene traversal and a full-screen clear less every night frame
+    this.density.value = d; this.mesh.visible = CFG.volumetric && d > 0.03;
+    const rt = this.vp.renderTarget; this.texel.value.set(1 / Math.max(1, rt.width), 1 / Math.max(1, rt.height));
+    const rd = camera.getWorldDirection(this.rd.value), inv = v => 1 / (Math.abs(v) < 1e-5 ? 1e-5 : v);
+    this.ird.value.set(inv(rd.x), inv(rd.y), inv(rd.z));
+    // the march's ceiling: the highest light that is on + 6 (the lamps are 5–11 up: the rays' 44 to the box's top were
+    // ~3× the steps through the beams; a flak burst's flash lifts it while it lasts)
+    if (!this.lights) { this.lights = []; scene.traverse(o => { if (o.isLight && o.layers.isEnabled(VOL_LAYER)) this.lights.push(o); }); }
+    let top = 0; for (const l of this.lights) if (l.visible && l.intensity > 0) top = Math.max(top, _vt.setFromMatrixPosition(l.matrixWorld).y);
+    this.top.value = clamp(top + 6, 8, 44);
+  }
+};
+const _vt = new V3();
+/* the volume's ray march (r187's VolumetricLightingModel, adapted to our camera): r187 marches from the camera's position
+   to the box's far side — 160 away, its 20 steps were ~11 long, a beam ~2 wide by its lamp fell between them and the
+   dithered starts lit it in some low-res texels only (a grid of blocks by the floodlights' and the helicopters' lamps).
+   Here the rays are parallel (orthographic: along the view) and marched only through the box (~4 a step), and a light is
+   softened within ~1.5 of it (1/d² → 1/(d² + 1.5²): the spike at the lamp itself showed as bright blocks). */
+const VOL_R0 = 2;
+class VolumeModel extends THREE.LightingModel {
+  constructor(rd, ird, top, bmin, bmax) { super(); Object.assign(this, { rd, ird, top, bmin, bmax }); this.scat = THREE.TSL.property('vec3'); }
+  start(builder) {
+    const { float, vec3, vec4, min, max, property, Loop, positionWorld, cameraViewMatrix } = THREE.TSL, { material } = builder;
+    const { rd, ird, scat } = this, out = this.out = property('vec3');
+    // the ray through this far-side point, clipped to the box below the lights' ceiling `top` (slab test; ird = 1 / the
+    // view direction; P is its far end: t ≤ 0)
+    const P = positionWorld, hi = vec3(this.bmax.x, this.top, this.bmax.z), t1 = vec3(this.bmin).sub(P).mul(ird), t2 = hi.sub(P).mul(ird);
+    const a = min(t1, t2), b = max(t1, t2), tn = max(max(a.x, a.y), a.z), tf = min(min(b.x, b.y), b.z).min(0);
+    const len = tf.sub(tn).max(0).toVar(), from = P.add(rd.mul(tn)).toVar();
+    const steps = THREE.TSL.uniform('int').onRenderUpdate(({ material }) => material.steps);   // (a uniform as in r187: changed without a rebuild)
+    const dt = len.div(float(steps)).toVar(), dist = float(0).toVar(), trans = vec3(1).toVar();
+    if (material.offsetNode) dist.addAssign(material.offsetNode.mul(dt));
+    out.assign(vec3(0));
+    Loop(steps, () => {
+      const pr = from.add(rd.mul(dist)).toVar();
+      builder.context.positionWorld = pr; builder.context.shadowPositionWorld = pr; builder.context.positionView = cameraViewMatrix.mul(vec4(pr, 1)).xyz;
+      scat.assign(vec3(0));
+      const sn = material.scatteringNode({ positionRay: pr });
+      super.start(builder);
+      scat.mulAssign(sn);
+      out.addAssign(scat.mul(0.01).mul(trans).mul(dt));   // in-scattered light, front to back (Beer's law as r187)
+      trans.mulAssign(scat.mul(-0.01).mul(dt).exp());
+      dist.addAssign(dt);
+    });
+  }
+  direct({ lightNode, lightColor }, builder) {
+    if (lightNode.isAnalyticLightNode !== true || lightNode.light.distance === undefined) return;   // (the sun, the sky: no)
+    const { dot, lightPosition } = THREE.TSL, l = lightColor.xyz.toVar();
+    if (lightNode.shadowNode !== null) l.mulAssign(lightNode.shadowNode);
+    const d = builder.context.positionWorld.sub(lightPosition(lightNode.light)), d2 = dot(d, d);
+    this.scat.addAssign(l.mul(d2.div(d2.add(VOL_R0 * VOL_R0))));
+  }
+  finish(builder) { builder.context.outgoingLight.assign(this.out); }
+}
+/* the glow follows the light: stronger at night (the lamps, the windows, a flash in the dark), a high threshold by day
+   (sunlit snow / white roofs stay out of it). The emitters are HDR (colours > 1: what glows) only with bloom on — without
+   it they would just be brighter than they always were. */
+let HDR = 1;
+function updateBloom() {
+  HDR = CFG.bloom ? 1 : 0;
+  const k = HDR * (0.35 + 0.65 * ENV.lightsOn);   // (by day a flame stays a flame, not a red ball)
+  FX.flash.uK.value = 1 + 1.1 * k; FX.fire.uK.value = 1 + 1.3 * k; FX.tracers.mesh.material.color.setScalar(1 + 1.2 * k);
+  if (WEATHER.bolt) WEATHER.bolt.material.color.setRGB(0.75, 0.8, 1).multiplyScalar(1 + 3 * HDR);   // the lightning bolt: HDR white with bloom, white without
+  if (!pipeline) return;
+  if (pipeBloom !== CFG.bloom) { pipeBloom = CFG.bloom; pipeline.outputNode = gradeOut(CFG.bloom ? sceneOut.add(bloomNode) : sceneOut); pipeline.needsUpdate = true; }
+  const D = GRADE.day, N = GRADE.night, kn = ENV.night; GRADE.u.sat.value = lerp(D.sat, N.sat, kn); GRADE.u.con.value = lerp(D.con, N.con, kn); GRADE.u.mid.value = lerp(D.mid, N.mid, kn);
+  bloomNode.strength.value = lerp(0.5, 0.7, ENV.night); bloomNode.threshold.value = lerp(1.4, 0.55, ENV.lightsOn); bloomNode.radius.value = 0.55;   // (BloomNode: a weaker scale than the old UnrealBloomPass)
+}
+/* the shadow map is drawn every second frame while the wallpaper runs at 50 fps or more (frameAvg, ms between drawn
+   frames): its pass is about a third of the draw calls; the map and its matrix are updated together (ShadowNode), so a
+   frame between them just reuses the last one. Below 50 fps (and in the tests, which draw no frame()) every frame. */
+let frameAvg = 0, shadowN = 0;
+function renderFrame() {
+  renderer.info.reset();
+  if (CFG.shadows && (++shadowN % 2 === 0 || !(frameAvg > 0 && frameAvg < 20))) { fitShadow(); sunLight.shadow.needsUpdate = true; }
+  scene.updateMatrixWorld(); BATCH.sync();   // (the renderer doesn't update the matrices again: matrixWorldAutoUpdate off)
+  if (!pipeline) buildPipeline();
+  pipeline.render();
+}
 function updateCamera() {
   const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
   const viewH = 60 * 100 / CFG.zoom;
   camera.left = -viewH * aspect / 2; camera.right = viewH * aspect / 2; camera.top = viewH / 2; camera.bottom = -viewH / 2;
   camera.updateProjectionMatrix();
   ENV.ppu = h / viewH;
-  scene.fog.near = CAM_D - 30; scene.fog.far = CAM_D + 260;
+  WEATHER.applyFog();
   updateCameraPose();
 }
 const CAM_D = 160, CAM_TGT = new V3(0, 2.5, -4);
@@ -196,21 +472,26 @@ function updateEnvironment() {
   const S = SEASONS[season];
   const sp = sunPosition(getNow(), CFG.lat, CFG.lon);
   ENV.elev = sp.elev;
-  const k = skyAt(sp.elev);
+  const k = skyAt(sp.elev); WEATHER.apply(k, sp.elev);
   const dirOf = (az, el) => new V3(Math.sin(az * DEG) * Math.cos(el * DEG), Math.sin(el * DEG), -Math.cos(az * DEG) * Math.cos(el * DEG));
   const sunDir = dirOf(sp.az, Math.max(sp.elev, 7)), moonDir = dirOf(sp.az + 160, 42);
   const dir = sunDir.lerp(moonDir, smoothstep(-2, -7, sp.elev)).normalize();
   sunLight.position.copy(dir).multiplyScalar(150); sunLight.target.position.set(0, 0, 0);
-  sunLight.color.copy(k.sun); sunLight.intensity = k.si;
+  sunLight.color.copy(k.sun); sunLight.intensity = sunLightK(k.si, k.hi);
   // the ground's bounce light takes the season's colour (snow: bright), as dark as the hour wants
   _hg.setHex(S.hg).multiplyScalar(lerp(0.35, 1, smoothstep(-8, 12, sp.elev)));
-  hemi.color.copy(k.hs); hemi.groundColor.copy(k.hg).lerp(_hg, 0.6); hemi.intensity = k.hi;
-  scene.fog.color.copy(k.fog); renderer.setClearColor(k.fog);
+  hemi.color.copy(k.hs); hemi.groundColor.copy(k.hg).lerp(_hg, 0.6); hemi.intensity = ENV.hemiI = skyLight(k.hi);
+  // shadows: crisp under a high sun, soft and long at dusk; fainter by moonlight
+  sunLight.shadow.radius = lerp(3.5, 1.3, smoothstep(4, 35, sp.elev)) + 4 * WEATHER.oc;                  // (overcast: soft
+  sunLight.shadow.intensity = lerp(0.8, 1, smoothstep(-7, 2, sp.elev)) * (1 - 0.75 * WEATHER.oc) * (CFG.shadows ? 1 : 0);       //  and faint)
+  scene.fog.color.copy(k.fog); renderer.setClearColor(k.fog); ENV.fogTint.copy(k.fog);
   ENV.smokeTint.copy(k.smoke);
   ENV.dustTint.setHex(S.ground).lerp(k.smoke, 0.45);
   ENV.lightsOn = 1 - smoothstep(-3, 5, sp.elev);
+  ENV.lamps = Math.max(ENV.lightsOn, WEATHER.lamps());   // lamps on in the fog / a storm by day too (not the real spot lights: ENV.lightsOn)
   ENV.night = 1 - smoothstep(-10, 1, sp.elev);
-  BASE.winMat.emissive.setHex(0xffc27a).multiplyScalar(0.75 * ENV.lightsOn);
+  updateBloom();
+  BASE.winMat.emissive.setHex(0xffc27a).multiplyScalar((0.75 + 0.85 * HDR) * ENV.lamps);   // HDR: lit windows glow (bloom)
 }
 
 /* ---- audio ---- */
@@ -359,33 +640,48 @@ function updateFlak(dt) {
     FLAK.splice(i, 1);
   }
 }
+/* LANCER's kill probabilities (a hit = 2 damage: one kills a fighter, a helicopter or a missile; bombers take 2–3) */
+const SAM_PK = { patriot: 0.9, nasams: 0.85, stinger: 0.78 };
 function spawnGuidedMissile(p, v, turnAt, dir, speed, life, big, target, chance, src) {
   MISSILES.push({ p, v, life, smokeT: 0, guided: { turnAt, dir, speed, age: 0 }, big, target: target || null, chance: chance || 0.75, dmg: 2, src, speed });
 }
-/* Patriot (ballistic missiles first, then bombers / bandits) or NASAMS (cruise missiles, helicopters, bandits): out of a canister */
+/* Patriot (ballistic missiles first, then bombers / bandits) or NASAMS (cruise missiles, helicopters, bandits): out of a
+   canister. With enemies on, only at a target in range (a launch into the empty sky burnt the launcher's cooldown);
+   with them off the launches are the show they always were */
 function launchSAM(kind) {
   if (kind === 'patriot' && DAMAGE.patriotDown()) return;                                   // its radar knocked out
   const cands = ALL_SAMS.filter(m => m.sam === kind && (m.cd || 0) <= 0 && !(m.downT > 0)); if (!cands.length) return;
-  const m = pick(cands); m.cd = kind === 'patriot' ? 3.2 : 2.2;
+  // a ready launcher with a target in range (picking the launcher first sat out a target only another one reached)
+  const kinds = kind === 'patriot' ? [['ballistic'], ['bandit']] : [['cruise', 'heli'], ['bandit']];
+  let m = null, tgt = null;
+  if (CFG.enemies) {
+    for (let i = 0, i0 = randi(0, cands.length - 1); i < cands.length; i++) { const c = cands[(i0 + i) % cands.length], q = mountPos(c), t = nearestEnemy(q, kinds[0], 160) || nearestEnemy(q, kinds[1], 120); if (t) { m = c; tgt = t; break; } }
+    if (!m) return;
+  } else m = pick(cands);
   m.muzzle = pick(m.cells); mountMuzzle(m, _p, _d);
   const p = _p.clone(), out = _d.clone();
-  const kinds = kind === 'patriot' ? [['ballistic'], ['bandit']] : [['cruise', 'heli'], ['bandit']];
-  const tgt = CFG.enemies ? nearestEnemy(p, kinds[0], 160) || nearestEnemy(p, kinds[1], 120) : null;
+  m.cd = kind === 'patriot' ? 3.2 : 2.2;
   const dir = tgt ? tgt.p.clone().sub(p).normalize() : out.clone();
-  spawnGuidedMissile(p, out.clone().multiplyScalar(18), kind === 'patriot' ? 0.6 : 0.35, dir, kind === 'patriot' ? 55 : 48, 6, kind === 'patriot', tgt, kind === 'patriot' ? 0.85 : 0.78, m);
+  spawnGuidedMissile(p, out.clone().multiplyScalar(18), kind === 'patriot' ? 0.6 : 0.35, dir, kind === 'patriot' ? 55 : 48, 6, kind === 'patriot', tgt, kind === 'patriot' ? SAM_PK.patriot : SAM_PK.nasams, m);
   for (let i = 0; i < 6; i++) FX.smoke.spawn(p.clone().add(new V3(rand(-0.5, 0.5), rand(-0.3, 0.3), rand(-0.5, 0.5))), { s0: 1.2, s1: 4.5, life: 2.6, a0: 0.7, smoke: true, v: out.clone().multiplyScalar(-rand(1, 3)).add(new V3(WIND.x, 0.5, WIND.z)), drag: 0.8 });
   FX.flash.spawn(p, { s0: 3, s1: 4, life: 0.25, a0: 1 }); FX.lights.flash(p, 4, 0.4);
   if (Math.random() < 0.5) RADIO.say(m.radio, radioLine(COMBAT.patriot), { role: 'ground', cat: 'combat', prio: 0 });
 }
 /* Avenger: a Stinger at the nearest helicopter / cruise missile / low bandit */
 function launchStinger() {
-  const m = ALL_SHORAD.filter(s => (s.cd || 0) <= 0 && !(s.downT > 0)).sort((a, b) => !!b.track - !!a.track)[0]; if (!m) return;
-  m.cd = 1.4; m.mi = (m.mi + 1) % 2; m.muzzle = m.muzzles[m.mi];
+  const ready = ALL_SHORAD.filter(s => (s.cd || 0) <= 0 && !(s.downT > 0)).sort((a, b) => !!b.track - !!a.track); if (!ready.length) return;
+  // the first ready Avenger with a target (tracking first): the first in the list alone once sat out a helicopter the
+  // other one had in range; nothing in range: all kept ready
+  let m = ready[0], tgt = null;
+  if (CFG.enemies) { m = null; for (const c of ready) { const t = c.track || nearestEnemy(mountPos(c), ['heli', 'cruise', 'bandit'], 80); if (t) { m = c; tgt = t; break; } } if (!m) return; }
+  m.mi = (m.mi + 1) % 2; m.muzzle = m.muzzles[m.mi];
   mountMuzzle(m, _p, _d);
-  const p = _p.clone(), dir = _d.clone(), tgt = CFG.enemies ? m.track || nearestEnemy(p, ['heli', 'cruise', 'bandit'], 80) : null;
-  spawnGuidedMissile(p, dir.clone().multiplyScalar(20), 0.2, dir, 60, 4, false, tgt, 0.72, m);
+  const p = _p.clone(), dir = _d.clone();
+  m.cd = 1.4;
+  spawnGuidedMissile(p, dir.clone().multiplyScalar(20), 0.2, dir, 60, 4, false, tgt, SAM_PK.stinger, m);
   FX.flash.spawn(p, { s0: 1.6, s1: 2.2, life: 0.12, a0: 1 });
 }
+const _mp = new V3(); const mountPos = m => { m.pitchG.updateWorldMatrix(true, false); return _mp.setFromMatrixPosition(m.pitchG.matrixWorld); };   // a mount's pivot (choosing a launcher)
 let ciwsGap = 0;
 function startCIWS(dur) {
   if (RT() < ciwsGap) return;                                           // short pause between new bursts
@@ -405,9 +701,11 @@ function onBeat(band, strength) {
   if (band === 'low' && strength > 1.5 && CFG.shake) camShake = Math.min(1, camShake + 0.35 + heavy * 0.4);
   // heavy passages: Patriot launches on the biggest hits (always at an incoming ballistic missile), NASAMS and Stingers
   const tbm = ENEMIES.some(e => e.kind === 'ballistic' && enemyAlive(e));
-  if (band === 'low' && ((heavy > 0.55 && strength > 1.6 && Math.random() < 0.5 * f) || (tbm && Math.random() < 0.7))) launchSAM('patriot');
-  if (band !== 'low' && heavy > 0.55 && Math.random() < 0.1 * f) launchSAM('nasams');
-  if (band === 'high' && heavy > 0.5 && Math.random() < 0.14 * f) launchStinger();
+  // (LANCER: from moderately loud passages on — heavy > 0.35; it once needed > 0.55 and a big hit, and the base looked
+  // defenceless)
+  if (band === 'low' && ((heavy > 0.35 && strength > 1.2 && Math.random() < 0.5 * f) || (tbm && Math.random() < 0.7))) launchSAM('patriot');
+  if (band !== 'low' && heavy > 0.35 && Math.random() < 0.18 * f) launchSAM('nasams');
+  if (band === 'high' && heavy > 0.35 && Math.random() < 0.22 * f) launchStinger();
   // flak barrage over the base while it's heavy
   if (band === 'mid' && heavy > 0.45 && Math.random() < (0.35 + heavy * 0.5) * f) fireFlak();
   if (band === 'low') {
@@ -585,8 +883,14 @@ function updateFlybys(dt) {
         const to = e.p.clone().sub(m.p), d = to.length(); to.normalize();
         if (m.arrived) { m.p.copy(e.p).addScaledVector(to, -1.2); m.v.copy(e.v); m.life = Math.max(m.life, 0.2); }
         else {
-          m.v.lerp(to.multiplyScalar(Math.max(m.speed || 50, e.v.length() + 25)), Math.min(1, dt * 4));
-          if (d < 3) { m.arrived = true; queueHit(e, { chance: m.chance, dmg: m.dmg, src: m.src, missile: m }); }
+          // steered at where the target will be (a lead of the time to it, ≤ 1.5 s: a pure chase of a ballistic missile
+          // coming down at 40–70 never caught it), and it has arrived within what the two close in one step (≥ 3: closing at
+          // ~100 / s they passed through each other between two steps)
+          const sp = Math.max(m.speed || 50, e.v.length() + 25), lead = e.p.clone().addScaledVector(e.v, Math.min(1.5, d / sp)).sub(m.p).normalize();
+          const reach = Math.max(3, (m.v.length() + e.v.length()) * dt);
+          m.v.lerp(lead.multiplyScalar(sp), Math.min(1, dt * 4));
+          // (a SAM at a cruise / ballistic missile scores on arrival, not on the next beat: the missile had often landed first)
+          if (d < reach) { m.arrived = true; queueHit(e, { chance: m.chance, dmg: m.dmg, src: m.src, missile: m, now: m.src && m.src.radio === RADIO_NAMES.patriot && (e.kind === 'cruise' || e.kind === 'ballistic') }); }
         }
       } else m.target = null;
     }
@@ -644,18 +948,33 @@ function updateSite(dt) {
   }
 }
 const SKY_SLEW = 0.5;   // rad/s: the sky lights' fastest swing (reached gradually: 1 rad/s²)
+/* a pooled light (HELI_LIGHTS) takes its searchlight's place and aim; dark while the helicopter is hidden */
+const shownTree = o => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+function followLight(s) {
+  s.holder.updateWorldMatrix(true, false); const m = s.holder.matrixWorld;
+  s.light.position.setFromMatrixPosition(m); s.light.target.position.set(0, 0, 10).applyMatrix4(m);
+}
 function updateLights() {
   for (const m of NAV_MATS) {
-    let a = m.userData.day ? Math.max(ENV.lightsOn, 0.75) : ENV.lightsOn; const b = m.userData.blink;   // vehicle beacons flash by day too
+    let a = m.userData.day ? Math.max(ENV.lamps, 0.75) : ENV.lamps; const b = m.userData.blink;   // vehicle beacons flash by day too
     if (b) { const ph = ((T / b.period) + (b.phase || 0)) % 1; a *= ((ph + 1) % 1) < b.duty ? 1 : 0; }
-    m.opacity = a; m.size = m.userData.scale * ENV.ppu;
+    m.opacity = a; m.size = m.userData.scale * ENV.ppu; m.color.setScalar(1 + 1.6 * HDR * ENV.lamps);   // HDR at night: the lamps glow (bloom)
   }
+  const spotsOn = GPU.clustered || ENV.lightsOn > 0;
+  for (const l of HELI_LIGHTS.pool) { l.visible = spotsOn; l.intensity = 0; }   // (the ones in use: below)
+  if (!GPU.clustered) HELI_LIGHTS.assign();
   for (const s of SEARCHLIGHTS) {
-    const on = ENV.lightsOn * s.enabled;
-    // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn)
-    if (s.light) { s.light.intensity = s.o.intensity * on; s.light.visible = ENV.lightsOn > 0; }
-    if (s.cone) s.cone.material.uniforms.uOpacity.value = s.o.coneOpacity * on * (0.45 + 0.55 * ENV.night);
+    if (s.follow && s.light) followLight(s);
+    const on = ENV.lightsOn * s.enabled * (s.follow && !shownTree(s.holder) ? 0 : 1), beam = Math.max(ENV.lamps, ENV.lightsOn) * s.enabled * (1 + 1.2 * WEATHER.fog + 0.5 * WEATHER.rain);   // (beams thicker in fog and rain)
+    // hidden by day: a visible spot light costs every lit fragment even at zero intensity (toggles only at dusk/dawn);
+    // clustered (WebGPU): always shown — a light out of its cluster costs nothing, and no toggle rebuilds the lights
+    if (s.light) { s.light.intensity = s.o.intensity * on * SPOT_K; s.light.visible = spotsOn; }
+    // a real light's beam: the volume draws its covered share of what the light gives (ENV.lightsOn: VOLUME.cover, by the
+    // haze); the cone the rest, and the lamps' share beyond the light (by day in fog the spot light is hidden)
+    const vol = VOLUME.live() && s.light, k = vol ? beam * (1 - VOLUME.cover() * ENV.lightsOn / Math.max(1e-3, ENV.lamps)) : beam;
+    if (s.cone) { s.cone.material.uOpacity.value = s.o.coneOpacity * k * (0.45 + 0.55 * Math.max(ENV.night, WEATHER.fog * 0.6)); s.cone.visible = !vol || k > 1e-3; }
   }
+  VOLUME.update();
 }
 
 /* ---- missions beyond the screen edge (only while there is no music) ---- */
@@ -864,18 +1183,66 @@ function updateMeter() {
 let frameDue = 0;
 function frame(ms) {
   requestAnimationFrame(frame);
-  if (paused) { lastMs = ms; return; }
+  if (paused) { lastMs = ms; for (const r of PERF.recs) { if (r.last) r.pauses++; r.last = 0; } return; }   // (a pause isn't one long frame)
+  if (!SHADERS_READY) { if (RT() > 15) SHADERS_READY = true; else { lastMs = ms; return; } }   // (compiling under the splash; never stuck behind it)
   if (fpsLimit > 0) {
     // due times advance in whole intervals, so the limit holds on any refresh rate (75 / 144 Hz…)
     if (ms < frameDue - 2) return;
     frameDue += 1000 / fpsLimit; if (frameDue <= ms) frameDue = ms + 1000 / fpsLimit;
   }
   // simulate the real elapsed time in sub-steps of at most 50 ms: low FPS limits don't slow the world down
+  const gap = ms - lastMs; if (gap > 0 && gap < 250) frameAvg = frameAvg ? frameAvg * 0.95 + gap * 0.05 : gap;
   const el = clamp((ms - lastMs) / 1000, 0, 0.25); lastMs = ms;
   const n = Math.max(1, Math.ceil(el / 0.05)), dt = el / n;
+  const on = PERF.recs.length > 0, t0 = on ? performance.now() : 0, c0 = on ? PERF.counts() : null;
   for (let i = 0; i < n * TIME_SCALE; i++) step(dt);
-  if (CFG.shadows) fitShadow();
-  renderer.render(scene, camera);
+  const t1 = on ? performance.now() : 0;
+  renderFrame();
+  if (on) PERF.sample(ms, t1 - t0, performance.now() - t1, c0);
+  if (GPU.timing && ms - GPU.tsT > 500) {
+    GPU.tsT = ms;
+    renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER).then(v => { GPU.ms.render = v || 0; }, () => {});
+    renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE).then(v => { GPU.ms.compute = v || 0; }, () => {});
+  }
+}
+/* ---- performance report on a real GPU. In Wallpaper Engine: Settings → General → "CEF devtools port" (e.g. 8080),
+   open http://localhost:8080 in Chrome, pick the wallpaper, then in its console:
+     perfReport(60)                   — measures 60 s and logs a summary (frame times, CPU, GPU, draw calls, lights)
+     perfFlags({ gputime: true })     — GPU timing (timestamp queries) from the next load (F5 in the devtools)
+     perfFlags({ gl: 'webgl2' })      — the next load on the WebGL 2 backend (compare with WebGPU)
+     perfFlags({ clustered: true })   — the next load with clustered lighting (experimental, WebGPU)
+     perfFlags({})                    — back to normal
+   The flags live in localStorage (WE passes no URL parameters); ?gputime=1 / ?gl=webgl2 / ?clustered=1 in a browser. ---- */
+function perfFlags(f) { try { localStorage.setItem('fab-perf', JSON.stringify(f || {})); } catch (e) { return 'localStorage unavailable'; } return 'saved — reload to apply: ' + JSON.stringify(f || {}); }
+function perfReport(sec = 30) {
+  const r = { frame: [], cpu: [], sim: [], draw: [], gpu: [], comp: [], calls: [], lights: [], last: 0, pauses: 0, T0: T, t0: performance.now(),
+    hitches: [], pd: null, made: { pipes: 0, programs: 0, batchGrow: 0, newBatch: 0 } }; PERF.recs.push(r);
+  console.log(`perfReport: measuring ${sec} s…`);
+  return new Promise(res => setTimeout(() => {
+    PERF.recs.splice(PERF.recs.indexOf(r), 1);
+    const avg = a => a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(2) : null;
+    const p95 = a => a.length ? +[...a].sort((x, y) => x - y)[Math.floor(a.length * 0.95)].toFixed(2) : null;
+    const b = BATCH.stats();
+    const out = {
+      backend: GPU.webgpu ? 'WebGPU' : 'WebGL 2', fellBack: gpuFellBack(), clustered: GPU.clustered, volumetric: VOLUME.active, bloom: CFG.bloom,
+      shadows: CFG.shadows, fpsLimit, size: `${renderer.domElement.width}x${renderer.domElement.height}`, night: +ENV.night.toFixed(2),
+      combat: AUD.armed, weather: WEATHER.kind, aircraft: AIRCRAFT.length, enemies: ENEMIES.length, frames: r.cpu.length,
+      // simulated seconds per real second: 1 at any frame rate (below 1 only when frames take over 0.25 s, or paused)
+      simRate: +((T - r.T0) / Math.max(1e-3, (performance.now() - r.t0) / 1000)).toFixed(3), fps: r.frame.length ? +(1000 / avg(r.frame)).toFixed(1) : 0,
+      frameMs: avg(r.frame), frameMsP95: p95(r.frame), frameMsMax: r.frame.length ? +Math.max(...r.frame).toFixed(1) : null,
+      hitches: r.frame.filter(t => t > Math.max(33.4, 1.5 * PERF.gap())).length,   // frames longer than two vsyncs (1.5 intervals of a lower FPS limit): visible stutter
+      pauses: r.pauses,   // WE paused the wallpaper (another window in front…): those gaps aren't frames
+      cpuMs: avg(r.cpu), cpuMsP95: p95(r.cpu), cpuMsMax: r.cpu.length ? +Math.max(...r.cpu).toFixed(1) : null,
+      simMs: avg(r.sim), simMsP95: p95(r.sim), renderMs: avg(r.draw), renderMsP95: p95(r.draw),   // (cpuMs = the simulation steps + renderFrame's CPU side)
+      gpuMs: GPU.timing ? avg(r.gpu) : 'perfFlags({ gputime: true }) + reload', gpuComputeMs: GPU.timing ? avg(r.comp) : null,
+      drawCalls: avg(r.calls), lights: avg(r.lights), lightsMax: r.lights.length ? Math.max(...r.lights) : 0,
+      batches: b.batches, batchInstances: b.instances,
+      programs: renderer.info.memory.programs, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
+      made: r.made,   // made while measuring (after the warm-up all should stay 0: each one is a likely stall)
+      hitchLog: r.hitches.sort((a, b) => b.ms - a.ms).slice(0, 10)   // the worst hitches and what was made around them
+    };
+    console.log('perfReport ' + JSON.stringify(out)); res(out);
+  }, sec * 1000));
 }
 /* The sun's shadow camera covers just the visible ground: the light-space bounds of the screen corners at ground level.
    Anything casting onto the screen lies above that area along the light, however far out or high (a jet climbing
@@ -899,7 +1266,7 @@ const TIME_SCALE = Math.max(1, Math.round(parseFloat(QS.get('ts') || '1')));
 let splash = document.getElementById('splash');
 function step(dt) {
   T += dt;
-  if (splash && T > 3.2) { const s = splash; splash = null; s.classList.add('off'); setTimeout(() => s.remove(), 700); }
+  if (splash && T > 3.2 && SHADERS_READY) { const s = splash; splash = null; s.classList.add('off'); setTimeout(() => s.remove(), 700); }
   updateArming();
   updateSite(dt);
   updateMounts(dt);
@@ -918,6 +1285,8 @@ function step(dt) {
   FX.smoke.update(dt, ENV.smokeTint, camera);
   FX.scorch.update(dt);
   FX.lights.update(dt, 0.6 + ENV.night * 0.8);
+  FX.fire.update(dt); FX.fireLights.update(dt, 0.6 + ENV.night * 0.8);
+  WEATHER.update(dt);
   TERRAIN.update(dt);
   STRESS.update(dt);
   updateCombat(dt);

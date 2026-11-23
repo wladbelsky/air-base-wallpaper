@@ -97,7 +97,7 @@ const TERRAIN = {
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i), n = vnoise(x / 38, z / 38, 3) * 0.6 + vnoise(x / 11, z / 11, 7) * 0.4;
       const k = 0.82 + n * 0.32 - (insideFence(x, z) && S.veg !== 'fir' ? 0.06 : 0);
-      col.setXYZ(i, k, k, k);
+      const kl = Math.pow(k, 2.2); col.setXYZ(i, kl, kl, kl);   // (vertex colours are linear: the same patches as an sRGB k)
     }
     col.needsUpdate = true;
     if (this.tex) this.tex.dispose();
@@ -115,7 +115,7 @@ const TERRAIN = {
       g.fillRect(x, y, w, h); if (x + w > 256) g.fillRect(x - 256, y, w, h); if (y + h > 256) g.fillRect(x, y - 256, w, h);
     }
     g.globalAlpha = 1;
-    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(60, 60); t.anisotropy = 4;
+    const t = srgbTex(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(60, 60); t.anisotropy = 4;
     return t;
   },
   buildVeg(season) {
@@ -148,25 +148,30 @@ const TERRAIN = {
   buildWeather(season) {
     const kind = season === 'winter' ? 'snow' : season === 'autumn' ? 'leaves' : null;
     if (!this.weather) {
-      const n = 900, g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
-      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
-      const mat = new THREE.PointsMaterial({ size: 3, map: TEX.soft, vertexColors: true, transparent: true, depthWrite: false, sizeAttenuation: false, opacity: 0.9 });
-      const pts = new THREE.Points(g, mat); pts.frustumCulled = false; pts.renderOrder = 2; scene.add(pts);
-      this.weather = { pts, n, v: new Float32Array(n * 3), life: new Float32Array(n), ph: new Float32Array(n), next: 0, acc: 0, kind: null };
+      // an instanced Sprite with a PointsNodeMaterial (sized points: WebGPU draws Points 1 px wide); room for a winter
+      // storm's heavy snow (update: 900 used at the base rate)
+      const n = 3600, posA = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage), colA = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
+      const { instancedBufferAttribute: iba, vec4, materialColor } = THREE.TSL;
+      const mat = new THREE.PointsNodeMaterial({ size: 3, map: TEX.soft, transparent: true, depthWrite: false, sizeAttenuation: false, opacity: 0.9 });
+      mat.positionNode = iba(posA); mat.colorNode = vec4(iba(colA), 1).mul(materialColor);
+      const pts = new THREE.Sprite(mat); pts.count = n; pts.frustumCulled = false; pts.renderOrder = 2; scene.add(pts);
+      this.weather = { pts, posA, colA, n, hi: 0, v: new Float32Array(n * 3), life: new Float32Array(n), ph: new Float32Array(n), next: 0, acc: 0, kind: null };
     }
-    const w = this.weather; w.kind = kind; w.life.fill(0);
+    const w = this.weather; w.kind = kind; w.life.fill(0); w.hi = 0;
     w.pts.material.size = kind === 'leaves' ? 4 : 3; w.pts.material.blending = kind === 'snow' ? THREE.AdditiveBlending : THREE.NormalBlending;
     w.pts.visible = !!kind;
   },
   update(dt) {
     const w = this.weather; if (!w) return;
-    const on = w.kind && CFG.weather; w.pts.visible = !!on;
+    const wx = WEATHER.rain, on = w.kind && (CFG.weather || (w.kind === 'snow' && wx > 0.05)); w.pts.visible = !!on;   // (winter rain / storms: snow, heavier)
     if (!on) return;
-    const P = w.pts.geometry.attributes.position.array, C = w.pts.geometry.attributes.color.array, snow = w.kind === 'snow';
-    w.acc += dt * (snow ? 220 : 26);
+    const P = w.posA.array, C = w.colA.array, snow = w.kind === 'snow';
+    // the ring grows with the rate (each flake lives as long as at the base rate: a storm's 4x the rate in 900 slots
+    // recycled every flake after ~1 s, high up — the heavy snow was a flickering band, never falling)
+    const rate = snow ? 220 * (1 + 3 * wx) : 26, cap = Math.min(w.n, Math.round(900 * Math.max(1, rate / 220)));
+    w.acc += dt * rate;
     while (w.acc > 1) {
-      w.acc--; const i = w.next; w.next = (w.next + 1) % w.n;
+      w.acc--; const i = w.next % cap; w.next = (i + 1) % cap;
       const p = AIRWAR.groundAt(rand(-1.15, 1.15), rand(-1.2, 1.3), 0);
       P[i * 3] = p.x + rand(-8, 8); P[i * 3 + 1] = rand(14, 30); P[i * 3 + 2] = p.z + rand(-8, 8);
       w.v[i * 3] = WIND.x * (snow ? 0.8 : 1.4); w.v[i * 3 + 1] = snow ? -rand(2.2, 3.4) : -rand(1.2, 2); w.v[i * 3 + 2] = WIND.z * (snow ? 0.8 : 1.4);
@@ -174,13 +179,17 @@ const TERRAIN = {
       const c = snow ? _tc.setRGB(0.8, 0.82, 0.86) : _tc.setHex(pick(SEASONS.autumn.leaf));
       C[i * 3] = c.r; C[i * 3 + 1] = c.g; C[i * 3 + 2] = c.b;
     }
-    for (let i = 0; i < w.n; i++) {
+    // only the slots in use are moved, drawn and uploaded (up to the ring, or a storm's flakes still beyond it): all 3600
+    // were, every step, all autumn and winter
+    let top = 0;
+    for (let i = 0, n = Math.max(cap, w.hi); i < n; i++) {
       if (w.life[i] <= 0) { P[i * 3 + 1] = -50; continue; }
       const sway = Math.sin(T * (snow ? 1.3 : 2.4) + w.ph[i]) * (snow ? 0.6 : 1.6);
       P[i * 3] += (w.v[i * 3] + sway) * dt; P[i * 3 + 1] += w.v[i * 3 + 1] * dt; P[i * 3 + 2] += (w.v[i * 3 + 2] + sway * 0.5) * dt;
-      if (P[i * 3 + 1] < 0.05) w.life[i] = 0;
+      if (P[i * 3 + 1] < 0.05) w.life[i] = 0; else top = i + 1;
     }
-    w.pts.geometry.attributes.position.needsUpdate = true; w.pts.geometry.attributes.color.needsUpdate = true;
+    w.hi = Math.max(cap, top); w.pts.count = Math.max(1, w.hi);
+    for (const a of [w.posA, w.colA]) { a.clearUpdateRanges(); a.addUpdateRange(0, w.hi * 3); a.needsUpdate = true; }
     if (snow) w.pts.material.opacity = lerp(0.55, 0.9, ENV.night);
   }
 };

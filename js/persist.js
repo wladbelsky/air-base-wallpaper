@@ -13,7 +13,7 @@ const PERSIST = {
     const air = [];
     for (const a of AIRCRAFT) { const s = this.state(a); if (s && !a.retiring) air.push({ key: a.spec.key, cs: a.callsign, mission: s === 'mission' }); }
     // stress in 0.05 steps: a change is written about every 10-30 s while it builds or eases, then not at all
-    const json = JSON.stringify({ v: 1, air, stress: Math.round(STRESS.level * 20) / 20 }); if (json === this.last) return;   // only when something changed
+    const json = JSON.stringify({ v: 1, air, stress: Math.round(STRESS.level * 20) / 20, wx: WEATHER.save() }); if (json === this.last) return;   // only when something changed (wx: the auto weather, per minute)
     try { localStorage.setItem(this.KEY, json); this.last = json; } catch (e) {}
   },
   clear() { this.last = null; try { localStorage.removeItem(this.KEY); } catch (e) {} },
@@ -24,6 +24,7 @@ const PERSIST = {
   /* after a fresh build: put back the aircraft that were up / away; true if any was */
   restore() {
     const d = CFG.saveState && this.load(); if (!d) return false;
+    WEATHER.restore(d.wx);                                     // the auto cycle's weather (once per page load)
     if (!this.stressBack && typeof d.stress === 'number') { this.stressBack = true; STRESS.level = clamp(d.stress, 0, 1); }   // once per page load
     const find = e => AIRCRAFT.find(a => a.spec.key === e.key && a.callsign === e.cs);
     const air = [], away = new Map();

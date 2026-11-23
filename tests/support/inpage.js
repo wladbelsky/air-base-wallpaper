@@ -175,6 +175,9 @@
     if (MISSILES.length > 300) v.push(`MISSILES ${MISSILES.length}`);
     if (PENDING.length > 300) v.push(`PENDING ${PENDING.length}`);
     if (FLYBYS.length > 8) v.push(`FLYBYS ${FLYBYS.length}`);
+    // weather (weather.js): a known kind, pools within their size
+    if (!WX_KINDS.includes(WEATHER.kind)) v.push(`weather kind ${WEATHER.kind}`);
+    if (WEATHER.drops.count > RAIN_N || WEATHER.splash.count > SPLASH_N || WEATHER.bolt.count > BOLT_N || FX.mist.live.length > MIST_N) v.push('weather pools over their size');
     if (GROUND_OPS.chutes.length > 40) v.push(`parachutes ${GROUND_OPS.chutes.length}`);
     if (GROUND_OPS.scenes.length > AIRCRAFT.length + 6) v.push(`ground scenes ${GROUND_OPS.scenes.length}`);
     if (GROUND_OPS.emerg && !inWing.has(GROUND_OPS.emerg)) v.push('emergency of an aircraft not in the air wing');
@@ -235,7 +238,9 @@
   H.find = (key, n = 0) => AIRCRAFT.filter(a => a.spec.key === key)[n];
 
   /* ---- rendering ---- */
-  H.render = () => { if (CFG.shadows) fitShadow(); renderer.render(scene, camera); };   // what frame() does after the steps
+  // what frame() does after the steps; WebGPURenderer advances its node frame (a pass renders once per frame) in its own
+  // requestAnimationFrame loop, which the harness has switched off: a frame per render here
+  H.render = () => { renderer._nodes.nodeFrame.update(); renderFrame(); };
   /* average colour [r, g, b] (0..255) of a rectangle in CSS pixels (y from the top), read straight after a render */
   H.sample = (x, y, w, h) => {
     H.render();
@@ -244,6 +249,15 @@
     const buf = new Uint8Array(pw * ph * 4); gl.readPixels(px, py, pw, ph, gl.RGBA, gl.UNSIGNED_BYTE, buf);
     const s = [0, 0, 0]; for (let i = 0; i < buf.length; i += 4) { s[0] += buf[i]; s[1] += buf[i + 1]; s[2] += buf[i + 2]; }
     const n = buf.length / 4; return s.map(x => x / n);
+  };
+  /* the share of pixels (0..1) of a rectangle brighter than `thr` (luma 0..255): lights, glow */
+  H.bright = (x, y, w, h, thr) => {
+    H.render();
+    const gl = renderer.getContext(), c = renderer.domElement, sx = c.width / innerWidth, sy = c.height / innerHeight;
+    const px = Math.round(x * sx), py = Math.round(c.height - (y + h) * sy), pw = Math.max(1, Math.round(w * sx)), ph = Math.max(1, Math.round(h * sy));
+    const buf = new Uint8Array(pw * ph * 4); gl.readPixels(px, py, pw, ph, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    let n = 0; for (let i = 0; i < buf.length; i += 4) if (0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2] > thr) n++;
+    return n / (buf.length / 4);
   };
   /* Geometry leaks. Every geometry reachable at a check (scene + template / pool caches) is remembered; one that later
      is neither reachable nor disposed was dropped without disposeTree — a leak (the wallpaper never restarts).

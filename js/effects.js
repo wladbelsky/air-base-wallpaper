@@ -5,7 +5,7 @@ class Tracers {
   constructor(scene, n) {
     this.n = n;
     const geo = new THREE.BoxGeometry(1, 1, 1); geo.translate(-0.5, 0, 0);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });   // (HDR with bloom: updateBloom)
     this.mesh = new THREE.InstancedMesh(geo, mat, n);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.frustumCulled = false; this.mesh.renderOrder = 6;
@@ -44,43 +44,33 @@ class Tracers {
   }
 }
 
-/* Camera-facing particles (flashes / smoke): the whole pool is one instanced draw call instead of a
-   THREE.Sprite per particle. Same look as SpriteMaterial (quad of `scale` world units rotated in screen
-   space, color × texture, alpha = opacity, scene fog). Normal-blended pools are sorted back to front
-   on the CPU, exactly like three.js sorted the individual sprites.                                   */
-const SPRITE_VS = `attribute vec3 iPos; attribute vec4 iCol; attribute vec2 iSR;
-  varying vec2 vUv; varying vec4 vCol;
-  #include <fog_pars_vertex>
-  void main() {
-    vUv = uv; vCol = iCol;
-    vec4 mvPosition = modelViewMatrix * vec4(iPos, 1.0);
-    vec2 q = position.xy * iSR.x; float c = cos(iSR.y), s = sin(iSR.y);
-    mvPosition.xy += vec2(c * q.x - s * q.y, s * q.x + c * q.y);
-    gl_Position = projectionMatrix * mvPosition;
-    #include <fog_vertex>
-  }`;
-const SPRITE_FS = `uniform sampler2D map; varying vec2 vUv; varying vec4 vCol;
-  #include <fog_pars_fragment>
-  void main() {
-    gl_FragColor = vCol * texture2D(map, vUv);
-    #include <fog_fragment>
-  }`;
+/* Camera-facing particles (flashes / smoke): the whole pool is one instanced Sprite (one draw call) with a node material:
+   per instance its position, colour + alpha and size + rotation (instanced attributes), a quad of `size` world units
+   rotated in screen space, colour × texture, scene fog. Normal-blended pools are sorted back to front on the CPU (the
+   instances are drawn in order).
+   The scene is drawn into the linear HDR target, where sprites don't add up as they did on the old sRGB screen: dark
+   smoke over light ground came out pale, overlapping flames red instead of yellow-hot. SPRITE_AG bends the alpha of the
+   normal-blended pools (smoke: alpha^0.6), SPRITE_CP the colour of the additive ones (flashes, flames: closer to the
+   sRGB value, so the layers add up to yellow). uK: the colour scale (> 1: glows under bloom, updateBloom). */
+const SPRITE_AG = 0.6, SPRITE_CP = 0.6;
 const _sfxFwd = new V3(), farFirst = (a, b) => b.depth - a.depth;
 class SpriteFX {
-  constructor(scene, tex, blending, n, fog) {
+  constructor(scene, tex, blending, n, fog, hdr) {
     this.n = n; this.sorted = blending !== THREE.AdditiveBlending;   // additive blending is order independent
     this.items = []; this.live = [];
     for (let i = 0; i < n; i++) this.items.push({ on: false, p: new V3(), v: new V3(), col: new THREE.Color(), rot: 0, life: 0, max: 1, s0: 1, s1: 1, a0: 1, drag: 0, rise: 0, sc: 1, a: 0, depth: 0 });
-    const quad = new THREE.PlaneGeometry(1, 1), geo = new THREE.InstancedBufferGeometry();
-    geo.index = quad.index; geo.setAttribute('position', quad.attributes.position); geo.setAttribute('uv', quad.attributes.uv);
-    const attr = (k, size) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * size), size).setUsage(THREE.DynamicDrawUsage); geo.setAttribute(k, a); return a; };
-    this.aPos = attr('iPos', 3); this.aCol = attr('iCol', 4); this.aSR = attr('iSR', 2); this.attrs = [this.aPos, this.aCol, this.aSR];
-    geo.instanceCount = 0;
-    const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog]); uniforms.map = { value: tex };
-    const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: SPRITE_VS, fragmentShader: SPRITE_FS, blending, transparent: true, depthWrite: false, fog: !!fog });
-    this.mesh = new THREE.Mesh(geo, mat); this.mesh.frustumCulled = false; this.mesh.visible = false;
+    const attr = (size) => new THREE.InstancedBufferAttribute(new Float32Array(n * size), size).setUsage(THREE.DynamicDrawUsage);
+    this.aPos = attr(3); this.aCol = attr(4); this.aSR = attr(2); this.attrs = [this.aPos, this.aCol, this.aSR];
+    const { instancedBufferAttribute: iba, texture, uv, uniform, vec3, vec4, pow } = THREE.TSL;
+    const col = iba(this.aCol), sr = iba(this.aSR), t = texture(tex, uv());
+    this.uK = uniform(hdr || 1);
+    const mat = new THREE.SpriteNodeMaterial({ blending, transparent: true, depthWrite: false, fog: !!fog });
+    mat.positionNode = iba(this.aPos); mat.scaleNode = sr.x; mat.rotationNode = sr.y;
+    const rgb = col.rgb.mul(t.rgb), a = col.a.mul(t.a);
+    mat.colorNode = vec4(this.sorted ? rgb : pow(rgb, vec3(SPRITE_CP)), this.sorted ? pow(a, SPRITE_AG) : a).mul(vec4(vec3(this.uK), 1));
+    this.mesh = new THREE.Sprite(mat); this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.visible = false;
     this.mesh.renderOrder = blending === THREE.AdditiveBlending ? 7 : 3; scene.add(this.mesh);
-    this.geo = geo; this.next = 0;
+    this.next = 0;
   }
   spawn(p, o) {
     const it = this.items[this.next]; this.next = (this.next + 1) % this.n;
@@ -118,8 +108,71 @@ class SpriteFX {
       C[i * 4] = it.col.r; C[i * 4 + 1] = it.col.g; C[i * 4 + 2] = it.col.b; C[i * 4 + 3] = it.a;
       S[i * 2] = it.sc; S[i * 2 + 1] = it.rot;
     }
-    if (live.length) for (const a of this.attrs) { a.needsUpdate = true; a.updateRange.count = live.length * a.itemSize; }   // upload only the live part
-    this.geo.instanceCount = live.length; this.mesh.visible = live.length > 0;
+    if (live.length) for (const a of this.attrs) { a.clearUpdateRanges(); a.addUpdateRange(0, live.length * a.itemSize); a.needsUpdate = true; }   // upload only the live part
+    this.mesh.count = live.length; this.mesh.visible = live.length > 0;
+  }
+}
+
+/* Flames: tall tongues of procedural fire instead of round blobs. One instanced Sprite (one draw call), anchored at its
+   base (center y 0.12) and stretched up (scale: width, height); per instance its position, size, a seed and its alpha.
+   The colour is noise, not a texture: a teardrop mask (wide at the base, narrowing up, swaying more toward the tip)
+   cut by fractal noise scrolling up through it (by the tongue's own age plus its seed: small numbers that never wrap —
+   three's `time` is wall-clock and loses float precision over days, and T % 600 made every flame jump at the wrap), so every tongue licks and flickers on its own; its "heat" runs from a
+   white-yellow core through orange to a deep red edge and tip. Additive, HDR by uK (bloom) like FX.flash. */
+class FlameFX {
+  constructor(scene, n) {
+    this.n = n; this.items = []; this.live = []; this.next = 0;
+    for (let i = 0; i < n; i++) this.items.push({ on: false, p: new V3(), v: new V3(), life: 0, max: 1, w0: 1, w1: 1, h: 1.8, seed: 0, a0: 1, w: 1, a: 0 });
+    const attr = (size) => new THREE.InstancedBufferAttribute(new Float32Array(n * size), size).setUsage(THREE.DynamicDrawUsage);
+    this.aPos = attr(4); this.aD = attr(4); this.attrs = [this.aPos, this.aD];   // (aPos.w: its age)
+    const { instancedBufferAttribute: iba, uv, uniform, vec2, vec3, vec4, float, abs, mix, smoothstep, clamp, pow, mx_fractal_noise_float: fbm } = THREE.TSL;
+    this.uK = uniform(1);
+    const d = iba(this.aD), ap = iba(this.aPos), seed = d.z, alpha = d.w, q = uv(), y = q.y, t = ap.w.add(seed);
+    const n1 = fbm(vec3(q.x.mul(2.2).add(seed), y.mul(1.6).sub(t.mul(1.9)), seed.mul(1.7)), 3, 2.0, 0.5);
+    const n2 = fbm(vec3(q.x.mul(5).add(seed.mul(3.1)), y.mul(3.4).sub(t.mul(3.6)), seed), 2, 2.0, 0.5);
+    const x = q.x.sub(0.5).add(n1.mul(0.16).mul(y.add(0.15)));                    // sways, more toward the tip
+    const half = mix(float(0.47), float(0.07), pow(y, 0.9));                      // narrows upward
+    const body = smoothstep(half, half.mul(0.25), abs(x));
+    const tip = smoothstep(float(0.97), float(0.35).add(n2.mul(0.25)), y);          // the tip breaks up into tongues
+    const base = smoothstep(float(0), float(0.1), y);
+    const heat = clamp(body.mul(tip).mul(base).mul(n2.mul(0.55).add(0.8)).mul(float(1.05).sub(y.mul(0.55))), 0, 1);
+    const red = vec3(0.6, 0.05, 0.0), orange = vec3(1.0, 0.36, 0.03), core = vec3(1.0, 0.78, 0.38);
+    const col = mix(mix(red, orange, smoothstep(0.1, 0.5, heat)), core, smoothstep(0.68, 0.98, heat));
+    const a = smoothstep(0.04, 0.32, heat).mul(alpha);
+    const mat = new THREE.SpriteNodeMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false });
+    mat.positionNode = ap.xyz; mat.scaleNode = vec2(d.x, d.y);
+    mat.colorNode = vec4(col.mul(this.uK.mul(heat.mul(0.5).add(0.6))), a);   // (the core brightest: it blooms)
+    this.mesh = new THREE.Sprite(mat); this.mesh.center.set(0.5, 0.12); this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.visible = false;
+    this.mesh.renderOrder = 7; scene.add(this.mesh);
+  }
+  /* o: { w (width at birth), w1 (at the end), h (height / width), life, a0, v } */
+  spawn(p, o) {
+    const it = this.items[this.next]; this.next = (this.next + 1) % this.n;
+    it.on = true; it.p.copy(p); it.life = it.max = o.life || 0.8; it.w0 = o.w || 1; it.w1 = o.w1 || it.w0 * 1.15; it.h = o.h || 1.8;
+    it.a0 = o.a0 != null ? o.a0 : 1; it.seed = Math.random() * 50;
+    if (o.v) it.v.copy(o.v); else it.v.set(0, 0, 0);
+    return it;
+  }
+  update(dt) {
+    const live = this.live; live.length = 0;
+    for (const it of this.items) {
+      if (!it.on) continue;
+      it.life -= dt;
+      if (it.life <= 0) { it.on = false; continue; }
+      const k = 1 - it.life / it.max;
+      it.p.addScaledVector(it.v, dt);
+      it.w = lerp(it.w0, it.w1, k);
+      it.a = it.a0 * Math.min(1, k / 0.15) * (1 - k * k);   // grows in, burns, dies away
+      live.push(it);
+    }
+    const P = this.aPos.array, D = this.aD.array;
+    for (let i = 0; i < live.length; i++) {
+      const it = live[i];
+      P[i * 4] = it.p.x; P[i * 4 + 1] = it.p.y; P[i * 4 + 2] = it.p.z; P[i * 4 + 3] = it.max - it.life;
+      D[i * 4] = it.w; D[i * 4 + 1] = it.w * it.h; D[i * 4 + 2] = it.seed; D[i * 4 + 3] = it.a;
+    }
+    if (live.length) for (const a of this.attrs) { a.clearUpdateRanges(); a.addUpdateRange(0, live.length * a.itemSize); a.needsUpdate = true; }
+    this.mesh.count = live.length; this.mesh.visible = live.length > 0;
   }
 }
 
@@ -198,10 +251,30 @@ class Scorch {
   }
 }
 
+/* the burning structures (BASE_FIRES) and wrecks light their surroundings with a flicker: a fixed pool of point lights
+   given to the biggest fires (2; 12 with clustered lighting), always in the scene (the set of lights never changes) */
+class FireLights {
+  constructor(scene, n) { this.items = []; for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xff8a3a, 0, 16, 2); l.layers.enable(2); scene.add(l); this.items.push(l); } this.ph = 0; this.fires = []; this.wr = []; }
+  update(dt, nightBoost) {
+    // the biggest fires: burning structures, then burning wrecks (an armour wreck's flames: `fire`, updateArmor) — in
+    // reused arrays / entries (it ran every step all day: garbage even with nothing burning)
+    this.ph += dt; const fires = this.fires; fires.length = 0; let w = 0;
+    for (const f of BASE_FIRES) fires.push(f);
+    for (const e of ENEMIES) if (e.kind === 'armor' && e.falling && e.fire > 0.05) { const o = this.wr[w] || (this.wr[w] = { p: null, r: 0, t: 8 }); w++; o.p = e.p; o.r = 0.7 * e.fire; fires.push(o); }
+    if (!fires.length) { if (this.lit) { this.lit = false; for (const l of this.items) l.intensity = 0; } return; }
+    this.lit = true;
+    if (fires.length > 1) fires.sort((a, b) => b.r * Math.min(1, b.t / 8) - a.r * Math.min(1, a.t / 8));
+    this.items.forEach((l, i) => {
+      const f = fires[i]; if (!f) { l.intensity = 0; return; }
+      const k = Math.min(1, f.t / 8) * f.r, fl = 0.75 + 0.25 * Math.sin(this.ph * 13 + i * 2.1) * Math.sin(this.ph * 7.3 + i);
+      l.position.set(f.p.x, f.p.y + 1.2, f.p.z); l.intensity = 2.2 * FLASH_K * k * fl * nightBoost * CFG.fire / 100;
+    });
+  }
+}
 class FlashLights {
   constructor(scene, n) {
     this.items = [];
-    for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xffb060, 0, 22, 2); scene.add(l); this.items.push({ l, t: 0, max: 0.1, I: 0 }); }
+    for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xffb060, 0, 22, 2); l.layers.enable(2); scene.add(l); this.items.push({ l, t: 0, max: 0.1, I: 0 }); }
     this.next = 0;
   }
   flash(p, I, dur) {
@@ -209,6 +282,6 @@ class FlashLights {
     it.l.position.copy(p); it.t = it.max = dur; it.I = I;
   }
   update(dt, nightBoost) {
-    for (const it of this.items) { it.t = Math.max(0, it.t - dt); it.l.intensity = it.t > 0 ? it.I * (it.t / it.max) * nightBoost : 0; }
+    for (const it of this.items) { it.t = Math.max(0, it.t - dt); it.l.intensity = it.t > 0 ? it.I * FLASH_K * (it.t / it.max) * nightBoost : 0; }
   }
 }

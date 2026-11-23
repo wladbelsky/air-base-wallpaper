@@ -19,7 +19,7 @@ jobs:
       - name: Run the tests
         env:
           HOME: /root   # the browser in the container expects root's home
-        run: npx playwright test
+        run: xvfb-run -a npx playwright test   # (a virtual display: the webgpu project runs a headed browser)
       - name: Upload the report on failure
         if: failure()
         uses: actions/upload-artifact@v4

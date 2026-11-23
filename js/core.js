@@ -31,12 +31,15 @@ const CFG = {
   baseName: 'SAND ISLAND',   // the base's radio name (tower, panel)
   season: 'auto',     // auto (PC date) / spring / summer / autumn / winter
   weather: true,      // snowfall in winter, falling leaves in autumn
+  weatherMode: 'default',   // 'default' (clear, as always) / 'auto' (a cycle) / 'clear' / 'rain' / 'fog' / 'storm' (weather.js)
   enemies: true,      // enemy aircraft, missiles and armour during combat
   shake: true,        // subtle camera shake on heavy hits
   missions: 5,        // how often flights leave on missions (0 = never)
   subtitles: true,    // Ace Combat style radio subtitles
   saveState: true,    // remember who is in the air / on a mission between sessions (js/persist.js)
   shadows: true,
+  bloom: true,        // glow around lights, fire and flashes (post-processing)
+  volumetric: true,   // searchlight beams as light in the haze (WebGPU only; main.js VOLUME)
   showPanel: true,
   panelPos: 'br',
   panelScale: 100,
@@ -89,6 +92,14 @@ function getNow() {
   return d;
 }
 
+/* ===== Light scale (three.js r155+: physically based lights, linear colour, tone mapping) =====
+   The palette below keeps its old (sRGB-space) meaning: sky light `hi` alone in the shade, sun `si` + sky on lit ground.
+   Lit linearly, a level L in sRGB is L^2.2 — skyLight / sunLight give those (× π: the physical lights' scale), so the
+   shade / lit contrast is the old one. SPOT_K / FLASH_K: the spot / point lights fall off with the square of the
+   distance (decay 2) — their old intensities × these light the ground about as before. */
+const LIGHT_K = Math.PI, SPOT_K = Math.PI * 110, FLASH_K = Math.PI * 15, SUN_COS = 0.7;   // (a typical lit face's cos)
+const skyLight = (hi) => Math.pow(hi, 2.2) * LIGHT_K;
+const sunLightK = (si, hi) => (Math.pow(si * SUN_COS + hi, 2.2) - Math.pow(hi, 2.2)) / SUN_COS * LIGHT_K;
 /* ===== Time-of-day palette keyed by sun elevation ===== */
 const SKY_KEYS = [
   { e: -90, sun: 0x7a90c0, si: 0.45, hs: 0x44557e, hg: 0x141a26, hi: 0.85, fog: 0x0b1424, smoke: 0x3a4250 },
@@ -113,6 +124,8 @@ function skyAt(elev) {
 }
 
 /* ===== Canvas-generated textures ===== */
+/* a canvas is drawn in sRGB colours: the texture says so, three.js decodes it to linear (colour management) */
+function srgbTex(c) { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }
 function radialTex(stops, size) {
   size = size || 64;
   const c = document.createElement('canvas'); c.width = c.height = size;
@@ -120,7 +133,7 @@ function radialTex(stops, size) {
   const gr = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
   stops.forEach(s => gr.addColorStop(s[0], s[1]));
   g.fillStyle = gr; g.fillRect(0, 0, size, size);
-  return new THREE.CanvasTexture(c);
+  return srgbTex(c);
 }
 function smokeTex() {
   const s = 64, c = document.createElement('canvas'); c.width = c.height = s;
@@ -131,7 +144,7 @@ function smokeTex() {
     gr.addColorStop(0, 'rgba(255,255,255,0.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = gr; g.fillRect(0, 0, s, s);
   }
-  return new THREE.CanvasTexture(c);
+  return srgbTex(c);
 }
 const TEX = {
   glow: radialTex([[0, 'rgba(255,255,255,1)'], [0.15, 'rgba(255,255,255,0.9)'], [0.4, 'rgba(255,255,255,0.25)'], [1, 'rgba(255,255,255,0)']]),

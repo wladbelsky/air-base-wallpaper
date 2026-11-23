@@ -10,10 +10,10 @@ test(`two hours of wallpaper life (seed ${SEED})`, async ({ wp }) => {
   await wp.run(() => { CFG.flyby = 8; CFG.missions = 8; });
   const snap = () => wp.run(() => {
     const geo = __t.geometries();
-    return { gpu: geo.gpu, reach: geo.reach, leaked: geo.leaked, leakedTypes: geo.leakedTypes, t: renderer.info.memory.textures, p: renderer.info.programs.length,
+    return { gpu: geo.gpu, reach: geo.reach, leaked: geo.leaked, leakedTypes: geo.leakedTypes, t: renderer.info.memory.textures, p: renderer.info.memory.programs,
       scene: scene.children.length, enemies: ENEMIES.length, flybys: FLYBYS.length, missiles: MISSILES.length,
       // nav-light materials must belong to something alive: an object in the scene or a pooled ground vehicle (groundops.js)
-      navOrphans: (() => { const used = new Set(), add = r => r.traverse(o => { if (o.isPoints) used.add(o.material); });
+      navOrphans: (() => { const used = new Set(), add = r => r.traverse(o => { if (o.userData.nav) used.add(o.material); });
         add(scene); Object.values(VEH_TEMPLATES).forEach(add); Object.values(VEH_POOL).forEach(l => l.forEach(add)); return NAV_MATS.filter(m => !used.has(m)).length; })(),
       spots: SEARCHLIGHTS.length, aircraft: AIRCRAFT.length };
   });

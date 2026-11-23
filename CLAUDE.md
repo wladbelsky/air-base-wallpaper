@@ -7,10 +7,22 @@ Runs 24/7 inside Wallpaper Engine (CEF/Chromium); also previewable in a normal b
 User-facing docs: `README.md` (keep it in sync when behaviour or properties change).
 
 ## Stack & layout
-- Plain JS, no build step, no npm. `'use strict'` classic scripts sharing **global** scope
-  (no modules). three.js **r149** is vendored as `js/three.min.js` — never edit it.
+- Plain JS, no build step for the wallpaper. `'use strict'` classic scripts sharing **global** scope
+  (no modules). three.js **r187** is vendored as `js/three.r187.webgpu.min.js` — never edit it. three.js ships only ES
+  modules since r160: `tools/vendor_three.js` (`npm run vendor:three`; npm only for this and the tests) bundles
+  `three/webgpu` (all of three.js + WebGPURenderer + node materials), TSL as `THREE.TSL` and the addons listed in
+  `tools/three-entry.js` (`bloom`, `ClusteredLighting`) with esbuild into one IIFE that sets the global `THREE`.
+- **Renderer**: `WebGPURenderer` — WebGPU where the browser has it (Wallpaper Engine's CEF does), else its WebGL 2
+  backend (`?gl=webgl2` forces it; `GPU.webgpu`). `init()` is async (`await renderer.init()`; `ready` after it). No
+  `ShaderMaterial` / `onBeforeCompile` / `PointsMaterial` with a size: own shading is TSL node materials (`SpriteFX`, the
+  beams), sized points are instanced `Sprite`s with a `PointsNodeMaterial` (WebGPU draws Points 1 px wide: nav lights,
+  seasonal particles). Toggling a light's `castShadow` rebuilds materials: shadows switch by `shadow.intensity` /
+  `shadow.needsUpdate` (`autoUpdate` is off: `renderFrame` asks for the map every second frame at ≥ 50 fps —
+  `frameAvg`, ms between drawn frames — and every frame below; the map and its matrix are updated together). The renderer advances its node frame in its own rAF loop (a pass renders once per frame).
+  A new release gets a new file name (CEF caches the vendored file: it has no `?v=`; `repo.spec.js` checks the name
+  against `package.json`).
 - `index.html` loads scripts in dependency order (later files use globals of earlier ones):
-  `core → flightpath → models → base → terrain → airframes → effects → radio → airfield → aircraft → missions → persist → combat → airwar → tanker → groundops → main → properties → settings`,
+  `core → flightpath → models → base → terrain → airframes → effects → weather → radio → airfield → aircraft → missions → persist → combat → airwar → tanker → groundops → main → properties → settings`,
   then an inline script registers the WE audio listener (or starts the browser demo beat).
   `main.js` calls `init()` at its end, so anything `init()` needs must be defined before `main.js`.
 
@@ -22,7 +34,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/base.js` | `BASE_LAYOUT` (runway, taxiway, links, holding point, apron, lane, channels, remote stands, fence, service roads `roads` + `roadDist`) and `PARKING` (stands, shelters, hangars, remote stands, helicopter pads); the fence is a rectangle with chamfered corners and a west annex around both runways' approach lights (`fence`, `gate` = the gate segment, `towers` = guard-tower corners; the perimeter road is its 5-unit inward offset, `insetPoly`); `masts` (floodlight masts; units.spec keeps them clear of every taxiing aircraft's fuselage / wings and of the vehicles' ways); `buildBase()`: runway / markings, shelters (HAS) and hangars with doors, tower, radar, buildings, fence, guard towers, air defence and tank mounts, runway / approach / taxiway lights, floodlight masts, sky searchlights; `BASE.targets` (what the enemy aims at) |
 | `js/terrain.js` | `TERRAIN`: the ground (tiled canvas texture + vertex-colour patches) and the vegetation per season (InstancedMesh per kind: firs and snow drifts / cacti, rocks, shrubs / leafy trees in spring or autumn colours), weather particles (snowfall, falling leaves) |
 | `js/airframes.js` | aircraft model builders → `{ group, setFold(f), tick(dt, st) }` (`jetModel`, `propeller`, `heliModel`…; smooth fuselages are `lathe` bodies (profile `[x, r, axis lift]`, `transportBody` for the transports with the cockpit `windscreen` band on the nose); `gear(g, legs, h)` legs `[x, z, kind]` — `n` / `s` / `t` / `tan` / `b4` / `b6` — folding up over ~1 s with `st.gearDown` (`tickGear`); KC-46 boom and KC-130 hoses read `st.hoseOut`); enemy templates (Su-25/35/47/57/34, Tu-22M3, Tu-95 — propeller groups `prop` / `prop2`, spun contra-rotating on the clones (`e.props`) —, Ka-52, Mi-24 — rotor groups named `rotor*` —, T-90, BMP-3, BTR-82 — turret named `turret`) |
-| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — an instanced pool of slots (no longer a ring buffer); they flatten and shrink away at the end of their life — every one: `fadeOut` (3 s) is the only early way out (`repair`, `absorb`, and `crowd`: fewer than `CROWD` of the 120 slots free, the oldest start fading), and with no free slot a new crater simply isn't made — once a full ring buffer took over live ones and they vanished at once; a hit within `MERGE`·(r1 + r2) of a live one widens it (≤ 1.4×; `absorb` fades out the neighbours it then overlaps — the harness flags stacked craters, fading ones aside); on paved ground (`pavedAt`, base.js) ≤ 40 s, shell holes (r < 1.1: the tanks' rounds past the wire, several a second) ≤ 20 s), `FlashLights` |
+| `js/effects.js` | `Tracers` (InstancedMesh; `onSplash` when one hits the ground), `SpriteFX` (flash/smoke pools), `FlameFX` (`FX.fire`: procedural flames — see "Combat"), `FireLights`, `Scorch` (craters: a lathe `craterGeometry` — dark bowl, raised rim, ejecta fading out by vertex alpha (rgba colour attribute) — an instanced pool of slots (no longer a ring buffer); they flatten and shrink away at the end of their life — every one: `fadeOut` (3 s) is the only early way out (`repair`, `absorb`, and `crowd`: fewer than `CROWD` of the 120 slots free, the oldest start fading), and with no free slot a new crater simply isn't made — once a full ring buffer took over live ones and they vanished at once; a hit within `MERGE`·(r1 + r2) of a live one widens it (≤ 1.4×; `absorb` fades out the neighbours it then overlaps — the harness flags stacked craters, fading ones aside); on paved ground (`pavedAt`, base.js) ≤ 40 s, shell holes (r < 1.1: the tanks' rounds past the wire, several a second) ≤ 20 s), `FlashLights` |
+| `js/weather.js` | `WEATHER`: rain, fog, thunderstorms (`CFG.weatherMode`) — see "Weather" |
 | `js/radio.js` | callsigns (+ `ENEMY_NAMES`, `RADIO_NAMES` — the tower is `<base name> TOWER`), `RADIO` subtitle queue, mission orders, `STRESS` + `THREAT_TIERS`, `radioLine()`, line pools `OPS` / `OPS_VOICE` / `OPS_UNARMED` / `COMBAT` / `AIRWAR_LINES` / `ENEMY_LINES` / `TANKER_LINES` / `LINES` (see "Radio lines & threat tiers") |
 | `js/airfield.js` | `AIRFIELD`: homes (`assignHome` / `release`), taxi routes (`pushback`, `toHold`, `lineUp`, `exitFor`, `homeRoute`), runway use (`rwy`, `arrivals`, `canLineUp`, `canApproach`, `clearToLand`), ground traffic (`blocked`), shelter / hangar doors, stand markings and helicopter pads (`updateMarks`) — see "Airfield" |
 | `js/aircraft.js` | `Aircraft` → `FixedWing` / `Helicopter` state machines, types, `Flyby` |
@@ -32,19 +45,20 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 | `js/airwar.js` | `AIRWAR`: combat passes — armed aircraft wait off-screen (`cbt_wait`) and cross the screen chasing / chased by a dogfight bandit, on close air support runs (`cas`) or hunting armour (helicopters); gunships circle over the fight (`cbt_orbit`); screen helpers (`ndc`, `onScreen`, `groundAt`), pass weapons on the beat (`AIRWAR.onBeat`), pass radio |
 | `js/tanker.js` | `TANKER` (a mission-world object): refuelling passes — KC-46 boom with a fighter flight, KC-130 hoses with a helicopter pair (see "Refuelling passes") |
 | `js/groundops.js` | `GROUND_OPS` (a mission-world object): scenes on the ground — emergency landings (crash tenders, tug), unloading a transport (K-loader, pallets), parachutes of the paradrops, the ground crew (`ServiceScene`: fuel truck, ammo loader) and the pushback tug (`PushbackScene`); `Drive` (a vehicle on a smooth path, `vehHold`: gives way to aircraft); pooled vehicle templates `VEH_TEMPLATES` / `VEH_POOL` (see "Ground scenes") |
-| `js/main.js` | WE property listener, scene init, audio analysis + `onBeat`, base weapons (tanks, AA guns, flak, Patriot / NASAMS, Stingers, C-RAM), searchlights, missions, chatter, panel UI (aircraft list + base sites), main loop |
+| `js/main.js` | WE property listener, scene init, audio analysis + `onBeat`, base weapons (tanks, AA guns, flak, Patriot / NASAMS, Stingers, C-RAM), searchlights, missions, chatter, panel UI (aircraft list + base sites), main loop; `renderFrame` (bloom composer or straight), `warmShaders` (see "Light & colour") |
 | `js/properties.js` | **generated** from `project.json` — do not edit by hand |
 | `js/settings.js` | browser-only settings drawer, demo beat, audio-file player (returns early inside WE) |
 | `tools/gen_properties.py` | regenerates `js/properties.js` |
-| `tools/preview.spec.js` | renders image candidates (`powershell -ExecutionPolicy Bypass -File tools/test.ps1 -c tools/preview.config.js [-g gif]` → `test-results/gif-<seed>.gif` animated 256², scene only, + `-sheet.png` stills: the Workshop preview `preview.gif` from `project.json` — WE takes ≤ 256 px, < 1 MB (aim < 500 KB), encoded with the `gifenc` devDependency; `test-results/<scene>-<seed>.jpg` 1280x720 for each of `SCENES` (dogfight / night / refuel / emergency, each with its hour and season; `-g "refuel,"` for one), `screenshots/<scene>.jpg` in README.md; copy the best over them) |
+| `tools/vendor_three.js`, `tools/three-entry.js` | rebuild the vendored three.js bundle (`npm run vendor:three`) |
+| `tools/preview.spec.js` | renders image candidates (`powershell -ExecutionPolicy Bypass -File tools/test.ps1 -c tools/preview.config.js [-g gif]` → `test-results/gif-<seed>.gif` animated 256², scene only, + `-sheet.png` stills: the Workshop preview `preview.gif` from `project.json` — WE takes ≤ 256 px, < 1 MB (aim < 500 KB), encoded with the `gifenc` devDependency; `test-results/<scene>-<seed>.jpg` 1280x720 for each of `SCENES` (dogfight / night / refuel / storm / emergency, each with its hour and season; `-g "refuel,"` for one), `screenshots/<scene>.jpg` in README.md; copy the best over them) |
 | `tests/`, `playwright.config.js`, `package.json` | automated tests (Playwright Test) — see "Running & testing"; `tools/test.ps1` runs them in Docker, `.github/workflows/tests.yml` in CI |
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=39`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=63`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
-  (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
+  (0–9 camera/time, 10–19 audio/combat, 20–29 terrain, season & rendering (shadows, bloom, volumetric), 30–39 panel, 40–49 air wing, 50–59 base).
   `<key>count` sliders are picked up automatically for every key in `AIRCRAFT_TYPES`.
 - **New aircraft type**: builder in `airframes.js`, subclass with static `spec` + `buildModel()` in
   `aircraft.js` (start from `fighter({…})` / `heavy({…})` or `Helicopter.spec`), register in `AIRCRAFT_TYPES` and
@@ -81,10 +95,105 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 - Seasons (`SEASONS` in `core.js`): `CFG.season` `auto` (from the PC date, northern hemisphere) or fixed. `TERRAIN.build`
   (re)builds the ground texture, the vegetation and recolours `ROOF_MAT` / `ARCH_MAT` (white in winter); the hemisphere
   light's ground colour follows `SEASONS[s].hg`; dust (`ENV.dustTint`) takes the ground's colour. `updateEnvironment`
-  (every 2 s) rebuilds when `seasonNow()` changes. Weather (`CFG.weather`): snowfall in winter, leaves in autumn.
+  (every 2 s) rebuilds when `seasonNow()` changes. Seasonal particles (`CFG.weather`): snowfall in winter, leaves in autumn.
+
+## Light & colour (three.js r187)
+- **Colour management** is on: hex colours are sRGB and become linear (`Color.setHex`), canvas textures say so
+  (`srgbTex`, core.js), vertex colours are linear (terrain patches `k^2.2`; `mergeStatic` bakes `material.color`, already
+  linear). Output: sRGB, **Neutral tone mapping** (colours below ~0.8 untouched, bright ones roll off), then a final
+  **grade** on the screen colours (`gradeOut`, `GRADE.day` / `GRADE.night`, eased by `ENV.night` in `updateBloom` into
+  uniforms `GRADE.u`: saturation toward the luminance, contrast around a pivot — day sat 0.87, con 0.9 around 0.44;
+  night sat 0.8, con 0.87 around 0.33, fitted on three night scenes rendered with the pre-r187 code and now: mean 0.21
+  → 0.18, spread 0.072 → 0.099, saturation 0.070 → 0.109 — the grade lands each at the midpoint) — the pipeline's own output transform is off (`outputColorTransform` false: `renderOutput` in `gradeOut`). Linear
+  light made the picture more contrasty and saturated than before r187 (measured on WE screenshots: luminance spread
+  0.116 → 0.143, saturation 0.063 → 0.111); the grade takes it halfway back.
+- **Lights are physical** (legacy lights are gone since r165). The sky palette (`SKY_KEYS`) keeps its old sRGB meaning:
+  `skyLight(hi)` / `sunLightK(si, hi)` (core.js) turn it into intensities that give the old shade / lit contrast
+  (L in sRGB = L^2.2 lit linearly, × π). Spot / point lights fall off with the square of the distance (`decay` 2):
+  their old intensities × `SPOT_K` / `FLASH_K`. Shadows: `shadow.radius` (PCF, soft at a low sun or overcast) and
+  `shadow.intensity` (faint by moonlight / overcast) set in `updateEnvironment`. `PCFSoftShadowMap` is gone (r186).
+- **Frames** (`renderFrame`): a `RenderPipeline` — the scene `pass()` (half-float, 4× MSAA), + the volume (below),
+  + `bloom()` of everything brighter than its threshold when `CFG.bloom` (`updateBloom` swaps the output node; BloomNode's
+  scale is weaker than the old UnrealBloomPass's). HDR emitters (colour > 1) only with bloom on (`HDR`): nav / runway
+  lights, lit windows, `FX.flash` (`uK`), tracers, the lightning bolt. The scene is always drawn in the linear target,
+  where sprites and beams add up differently than on the old sRGB screen: `SPRITE_AG` (smoke alpha), `SPRITE_CP`
+  (additive sprite colour), `BEAM_G` (beams) keep the old look. `renderer.info` is reset per frame (`autoReset` off;
+  draw calls `info.render.drawCalls`, programs `info.memory.programs`). Render through `renderFrame()` (the harness's
+  `__t.render` does), never `renderer.render`.
+- **Clustered lighting** (`GPU.clustered`: experimental, off — `?clustered=1` on WebGPU; `renderer.lighting =
+  ClusteredLighting`, ceiling `LIGHT_MAX` 128): would make every searchlight a real light, 24 flash lights, 12
+  `FireLights`. Off because its clusters don't fit our orthographic camera: the spot lights lit nothing. Both backends
+  run the rationed lights: 4 flash lights, 4 helicopter lights (handed to the ones on screen), the 5 floodlight masts, spot lights hidden by day.
+- **WebGPU safety net** (`watchGpuErrors` / `gpuFellBack`, main.js): 20 uncaptured GPU errors in the first 30 s →
+  `localStorage` `fab.gl = { v: <cache-buster>, gl: 'webgl2' }` and a reload on the WebGL 2 backend; the next release
+  (another `?v`) tries WebGPU again. A lost device / context (a GPU reset, a driver update, sleep: WebGPURenderer stops
+  drawing for good, it never restores a context) → `renderer.onDeviceLost` reloads after 2 s (lost in the first 30 s on
+  WebGPU, or a second time within 10 min — `fab.lost`: WebGL 2 for this release; a driver resetting on our shaders once
+  reloaded on WebGPU for ever).
+- **Volumetric light** (`VOLUME`, main.js; `CFG.volumetric`, WebGPU, `?vol=1` forces it on WebGL 2): a box over the base
+  on `VOL_LAYER` with a `VolumeNodeMaterial`, drawn by its own quarter-resolution pass and added to the scene: the rays
+  are marched and every light on `VOL_LAYER` (spot / flash / fire lights enable it; not the sun or the sky) scatters by
+  the haze's density (night × weather: thick in fog and rain). The meshed beams of real lights are hidden meanwhile.
+  Its output is blurred (3×3 Gaussian in TSL, `VOLUME.texel`): the dithered ray starts at a quarter of the resolution
+  showed as a checkerboard in the floodlights' beams (`gaussianBlur` is an addon not in the vendored bundle). The march
+  is our own `VolumeModel` (r187's `VolumetricLightingModel` adapted, `setupLightingModel`): parallel rays along the
+  orthographic view (`VOLUME.rd` / `ird`) marched only through the box under the lights' ceiling (`VOLUME.top`: the highest
+  lit light on `VOL_LAYER` + 6, 8–44 — a slab test from the far side), and a light is softened within `VOL_R0` (2) of its
+  lamp (1/d² → 1/(d² + r0²)) — r187 marched from the camera's position, 160 away: steps ~11 long, a beam ~2 wide by its
+  lamp fell between them, and the dither lit it in some low-res texels only (a grid of blocks by the floodlights' and the
+  helicopters' lamps); through the whole box (44 high) the grid was smaller but still there. `steps` is a uniform:
+  webgpu.spec compares the volume's light with a 200-step march (noise 22 % → 4.4 % → ~0.8 %). Built with
+  the pipeline when `VOLUME.on()`; `VOLUME.live()` (built and `CFG.volumetric`) gates the mesh and the cone swap, and
+  switching it on when it wasn't built drops the pipeline (`dropPipeline`: rebuilt next frame). With its mesh hidden (no
+  haze — density ≤ 0.03, a clear night included: the meshed cones draw the beams there — switched off) the pass clears
+  once and is skipped. A real light's meshed cone hands its beam to the volume only
+  as far as the haze shows it (`VOLUME.cover()`: smoothstep of the density 0.03 → 0.09 — clear night none, rain about
+  half, fog all; in a clear night's thin haze the volume's beam was barely there: a light pool with no beam, the
+  helicopters' lights looked cut off) and draws the lamps' share beyond `ENV.lightsOn` (by day in fog its spot light is
+  hidden). Known gap: the rays aren't stopped at the scene's depth (the
+  glow of a beam behind a roof shows over it). Its
+  pass clears to black (its `updateBefore` is wrapped): with the renderer's clear colour (the sky) it was added over the
+  whole frame.
+- **Shader warm-up** (`warmShaders`, end of `init`, under the splash): `compileAsync` (async pipelines on WebGPU,
+  KHR_parallel_shader_compile on WebGL 2), one call at a time (it isn't re-entrant), of the scene, every enemy template,
+  the ground vehicles and a wreck; `compile()` takes visible objects only (r158+), so `compileVisible` shows the hidden
+  ones for the call; both states of the night-only spot lights. Never `setRenderTarget` a pass's target around it: the
+  target is 1×1 until the pass's first frame, and on WebGPU that broke the scene pass for good (destroyed textures, then
+  `output` as attachment and binding every frame — nothing drawn in WE). Frames under the splash make the pass
+  variants, the shadow-pass and post-processing programs and the batches for the templates: `warmFrame` draws them
+  through the real pipeline with every hidden object shown and every empty instanced pool drawing one instance, in both
+  spot-light states — `compileAsync` builds for its own context, the scene pass draws in the RenderPipeline's, and on
+  WebGPU a pipeline made later is a blocking `createRenderPipeline` (a fight's stalls: tracers, a wreck, a scramble out
+  of the shelters). The warm group also holds a wreck of every armour type and one fly-by jet per type (`FLYBY_MODELS`,
+  three a type — a fly-by takes 1–3 —, built here, no longer lazily); `BATCH.prefill` (see "Batched drawing"). `GPU.pipes` counts the render
+  pipelines made (`renderer.info.memory.programs` counts shader modules shared by code: it barely moves); the
+  webgpu.spec test checks a scramble, a fly-by and a fight after the warm-up make none. The loop draws nothing until `SHADERS_READY` (15 s fallback), the
+  splash waits for it (its CSS failsafe is 16 s: at 8 s it showed the undrawn canvas); after the fallback the warm-up
+  draws no `warmFrame` (every hidden object shown, the templates in mid-air: it would be on screen). A new kind of object that first appears in a fight must be in the scene (hidden is fine) or in
+  the template group. Turning a light's `visible` (or adding a light) recompiles every program. `?warm=0` skips it
+  (the harness does, unless `boot({ warm: true })`: SwiftShader compiles synchronously, ~4 s a boot).
+
+## Weather (`js/weather.js`)
+- `CFG.weatherMode` (property `weathermode`, `?weather=`): `default` (clear: the look it always had), `clear` / `rain`
+  / `fog` / `storm`, or `auto` (`next()`: a new kind every 15–40 min by `WX_ODDS[season]`; saved with the air wing,
+  `PERSIST` `wx`, restored once per page load — and only in `auto` mode: `resume`, waiting over the first 10 s for WE's properties). `WX_TARGET[kind]` gives targets the coefficients ease to over ~2 min:
+  `oc` (overcast), `rain`, `fog`, `wind` (× `WIND0`, with gusts: `WIND` is mutated, the smoke follows), `wet` (rises
+  in the rain, dries over ~10 min). Only the look: flights, the fight, the radio don't change.
+- `WEATHER.apply(k, elev)` (from `updateEnvironment`) dims the sun, greys the sky / haze / bounce light (a little glow in
+  night fog); `applyFog` closes `scene.fog` in (also from `updateCamera`); `lamps()` → `ENV.lamps`: runway / nav
+  lights, windows and beams on in bad visibility by day — the real spot lights stay on `ENV.lightsOn` (night only).
+- Pools made once in `build()` (after the FX in `init`): rain streaks (`drops`, `RAIN_N`, a ring buffer, spawned by a
+  time accumulator around the screen centre), `splash` rings, `FX.mist` (a sorted `SpriteFX` in `ENV.fogTint`; a bank's centre is raised by half its size × cos(camera elevation):
+  low down the camera-facing sprite was cut off by the ground along a straight line), the
+  lightning `bolt` (instanced segments, HDR). Lightning flashes the sky light (`hemi.intensity = ENV.hemiI × …`): no
+  light is added. In winter the rain falls as `TERRAIN`'s snow (heavier, shown even with `CFG.weather` off), no
+  lightning, nothing gets wet (the snow's ring — 3600 slots — wraps at 900 × rate / 220: a storm's flakes live as long
+  as at the base rate; only the slots in use are moved, drawn (`pts.count`) and uploaded). `default` mode has no gusts. `wet` darkens `PLAIN_MAT` / the ground and raises their gloss (uniforms only).
 
 ## Airfield (`js/airfield.js`, `js/aircraft.js`)
-- **Rooftops**: the builders in `base.js` list the buildings' boxes in `OBSTACLES` (`obstacle(p, x, z, w, d, top)`:
+- **Rooftops**: the builders in `base.js` list the buildings' boxes in `OBSTACLES` (`obstacle(p, x, z, w, d, top, rotY, shape)`;
+  `o[6]` = the roof's shape `(x, z)` → its height or 0 — the rotated rectangle, the hangars' barrel, the HAS arch and lintel, a
+  circle for the tower cab and the fuel tanks (`roundRoof`); `roofAt(x, z)` the roof surface there:
   hangars to the barrel roof's crown, shelters, the tower to its cab roof, buildings, sheds, the radar, the floodlight
   masts; one in a hidden group doesn't count); `obstacleTop(x, z)`. In flight
   (`followPath`, `orbitStep`) `clearRoofs` looks ahead along the way (≥ 6, ~1.5 s) and eases the aircraft up to
@@ -127,7 +236,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   `v0` to `v1` over the *whole* path — on a long path (takeoff → orbit is 100+ units) that is almost no change over
   the first stretch (it looked like the jet stopped accelerating and rolled on at lift-off speed).
   `canLineUp` lets the next departure line up behind one rolling fast; it rolls once that one is off the runway.
-- **Aircraft lights**: an airframe's nav lights / beacons (its `Points` nodes) are shown only while `lightsOn` (not
+- **Aircraft lights**: an airframe's nav lights / beacons (its `userData.nav` sprites) are shown only while `lightsOn` (not
   `parked` or `towed`: engines running, or stopped on the runway in an emergency) — `Aircraft.update`.
 - **FixedWing states**: `parked` → `ready` (engines, the tug hooks up (`tugReady`), waits for the door and `pushbackClear`) → `pushback` →
   `taxi_out` → `hold_short` → `lineup` → `takeoff_roll` (brakes, roll, rotate at `vR`) → `climb` → `orbit` →
@@ -251,7 +360,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   and the x 35 heavy stand's wingtip west of it are why it is narrow), the heliport's beside the fire station (door
   east onto the road at x 5.5).
 - **Vehicles vs vehicles** (`vehHold`, `GROUND_OPS.vehicles()`): one stops behind another close ahead (two holding for
-  each other: the lower id goes; several setting off from one spot: in id order; 8 s behind the same one *standing* gives
+  each other: the lower id goes; a cycle of three or more (`heldBy` links, `vehCycleGo`): its lowest id goes past that one only — another in its way still holds it; several setting off from one spot: in id order; 8 s behind the same one *standing* gives
   up — one that moves, however slowly, is waited for); a helicopter's loader sets off before its fuel truck (`inAfter`:
   it goes further up the corridor; reversed they block each other there); one
   sets off from a start point only once the last to leave it is 1.8 clear and none is arriving there
@@ -293,9 +402,20 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   radius is now never below the stop's). Dogfight bandits (`duel`)
   fly a pass path and are left to the fighters.
 - Anything that gets through: `baseImpact` (explosion, scorch, `BASE_FIRES` entry named after the structure — the panel
-  site rows show DAMAGED; on its roof (`obstacleTop`), the blast too; 30–40 s: flame tongues over `r` of it, a tall black
+  site rows show DAMAGED; on its roof, the blast too: `roofBox` — the obstacle under the hit, else the nearest within 4 (a
+  bomb beside the building, the OPS aim point between its two buildings, the FUEL one between the tanks) — the point is
+  moved onto its roof shape, no roof near (the Patriot site): on the ground; every flame / glow / ember / smoke puff is
+  placed by `fireSpot` over that roof's shape (an arch's eaves are lower), narrow roofs get narrower tongues (`f.wk`) —
+  they once spread over a square at the crown's height and hung in the air around the tower's cab; 30–40 s: flame tongues over `r` of it, a tall black
   smoke column, dying down over the last 8 s, spawned by time accumulators (`fl`, `sm`); a hit near a burning one spreads
-  that fire instead of stacking another; the smoke pool is 420 for it). Craters (`Scorch`) sit `Scorch.LIFT` (0.055) up: above the paving and its painted lines. Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
+  that fire instead of stacking another; the smoke pool is 420 for it). **Flames** are `FX.fire` (`FlameFX`, effects.js):
+  one instanced Sprite anchored at its base, each instance a tall tongue whose colour is TSL noise, not a texture — a
+  teardrop mask cut by fractal noise scrolling up (by the tongue's own age + its seed, `aPos.w`: three's `time` is
+  wall-clock and loses float precision over days, and a wrapped `T % 600` made every flame jump at the wrap), heat from a white-yellow core through orange to a red tip, HDR by `uK` with bloom; spawned by
+  time accumulators from structure fires (~14/s, embers `ember()` and a hot glow at the roots in `FX.flash`), burning
+  wrecks (`e.fire`), units / aircraft on fire (`DAMAGE.smoke`), falling aircraft and explosions (their fireballs rise).
+  `FireLights` light the biggest fires (structures, then wrecks): 2 point lights without clustered lighting (12 with),
+  built in `init` and always in the scene, only their intensity moves (dark with nothing burning). Craters (`Scorch`) sit `Scorch.LIFT` (0.055) up: above the paving and its painted lines. Ground hits: `groundHit` (dust in `ENV.dustTint`, scorch for the big ones). Bombs are
   tracers with gravity (`dropBomb`, `FixedWing.dropBombs`), resolved in `FX.tracers.onSplash` (splash ≥ 2.3 = an enemy
   bomb → `enemyBomb`: a structure within 3 of where it fell takes the hit, else a crater; then `DAMAGE.hit`).
   **Threat (`STRESS`) goes by time only** (10 min up while `AUD.fighting`, 3 min down): hits used to bump it +0.03 per
@@ -307,7 +427,9 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   `STICK_DT` (0.15 s), its middle on the aim point (a row of craters, not a pile). Ballistic missiles spread ±3.
 - **Damage** (`DAMAGE`, `combat.js`; `update` from `updateCombat`): `hit(p, R)` for every enemy bomb (2.6), cruise (3),
   ballistic (3.5) and a bandit / helicopter crashing (2). Air-defence units (`units()`: AA, Avengers, C-RAM, tanks,
-  SAM launchers, `BASE.patriotRadar`) within R + 0.8 get `downT` 60–120 s: no tracking (`knockedOut` in
+  SAM launchers, `BASE.patriotRadar`) within R + 0.8 get `downT` 60–120 s — LANCER (`DAMAGE.hard`: the radar, the
+  Patriot / NASAMS launchers, the Avengers) within R + 0.3 and 35–70 s, and one of the Patriot battery (`battery`:
+  the radar or a launcher) down at a time: no tracking (`knockedOut` in
   `updateMounts`: gun barrels droop), no fire (guards in `fireAA` / `fireFlak` / `fireTank` / `startCIWS` /
   `launchSAM` — the Patriot radar down stops the Patriots — / `launchStinger`, the CIWS last-ditch loop), search
   antennas / the radar head still; fire then smoke (`DAMAGE.smoke`), back with its crater repaired. Aircraft `parked`
@@ -324,7 +446,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   limit: a truck not on its way in by `RWY_MAX` − 45 is called off (crater patched, runway open), one that is fits
   its work in (`W`); a runway crater keeps its life until then (other paved ones ≤ 40 s). The harness checks the caps, knocked-out units neither tracking nor
   firing, no new line-up / final onto a closed runway, and the closure's length.
-- **Runway repair** (`RepairScene`, `groundops.js`): the `repair` truck (MAN HX 10x10 style, olive drab: five axles, a
+- **Runway repair** (`RepairScene`, `groundops.js`; a truck not on the runway yet that no longer fits `RWY_MAX` is
+  called off even once let through — one held on the link by traffic once ran the closure past it): the `repair` truck (MAN HX 10x10 style, olive drab: five axles, a
   flatbed with three `mat` nodes, a crane `crane` → `boom` → `arm` / `hook` → `cable` / `block` → `carry`, all dynamic)
   from the nearest crew depot over a link (−30 / 0 / 32) for the north runway, from `HELI_DEPOT` along the road z 27.2
   and up at x −14 / 5.5 / 36 for the south one (an entry ≥ 8.2 from the crater); it waits on the service strip / the
@@ -352,6 +475,12 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   rad/s while `AUD.armed` and run down after; the tracking dish is on `pitchG` (follows the aim). The Patriot radar
   (`BASE.patriotRadar`) has a turntable head (`.head`, dynamic) that slews at 0.35 rad/s toward the nearest live air
   threat (`.tgt`, kept while it lives), holds in a lull, and goes back to 0 in peace; its angle is kept wrapped.
+- **LANCER** (`RADIO_NAMES.patriot`: Patriot / NASAMS `launchSAM`, Avenger Stingers `launchStinger`) on the beat from
+  `AUD.heavy` > 0.35 (Patriot vs bandits also `strength` > 1.2; at an incoming ballistic missile on any low beat), only
+  at an enemy in range when enemies are on — the launcher is one that has one (no cooldown burnt on the empty sky; with them off: the show as before),
+  `SAM_PK` 0.9 / 0.85 / 0.78. Guided missiles steer at a lead point (≤ 1.5 s) and arrive within what the two close in a
+  step (≥ 3) — a pure chase with a fixed 3 never caught a ballistic missile (they passed through each other between
+  steps); a SAM's hit on a cruise / ballistic missile is rolled on arrival (`queueHit` `now`), not on the next beat.
 - Base weapons on the beat (`onBeat`): tanks (`fireTank`: at armour in range (110), else far out past the wire;
   with nothing to shoot their turrets look around now and then, `scanT`), AA guns
   (`fireAA`, `fireFlak`), C-RAM bursts (`startCIWS`), Patriot / NASAMS (`launchSAM`; always at an incoming ballistic
@@ -428,46 +557,89 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   (mount yaw/pitch/barrel groups, radars, door leaves / panels, gear, rotors, blades, props, boom / hoses, searchlight
   holders, enemy rotors / turrets) **must be listed as dynamic**, or it gets baked into the static mesh. Code must not keep
   references to static meshes after the builder returns.
+- **Batched drawing** (`BATCH`, models.js): every merged mesh (`userData.batched`, on `BATCH_LAYER`, which the camera
+  doesn't draw) stays in the scene graph as before — visibility, `matrixWorld`, doors, clones, Box3, raycasts (enable the
+  layer) work — and `BATCH.sync()` (in `renderFrame`, after `scene.updateMatrixWorld()`: `matrixWorldAutoUpdate` is off)
+  gives it an instance in a shared `BatchedMesh` (one draw call per batch, WEBGL_multi_draw) and copies its world matrix
+  / visibility. Batches: one per `M(colour, options)` options set (material `M(white, options)`, colour per instance —
+  so `M()` materials must never be changed), one per other material (`PLAIN_MAT`, seasonal roofs, windows). A geometry
+  enters its batch once (clones share it) and leaves it when disposed; an instance whose mesh left the scene for ~1 s of
+  sim time is freed; an empty batch is disposed; a mesh whose material is swapped (`wreckArmor`) moves to that material's
+  batch (`BATCH.sync`: `remove` + `add`).
+  Only what is drawn gets an instance (an aircraft behind a shut door gets one when it comes out), but every geometry is
+  in its batch from the warm-up (`BATCH.prefill`: hidden meshes too, the templates, the fly-by jets) and the batches
+  start at 1024 instances: growth (`optimize` / `setGeometrySize` copy and upload a whole batch, `setInstanceCount` new
+  textures) and a new batch (a new pipeline) mid-fight were stalls — counted in `BATCH.ev` (perfReport's hitch log).
+  **A batch resized once drawn must rebind** (`bm.material.needsUpdate` in the growth branches): on WebGPU its render
+  object keeps the textures / geometry it was built with (r187 re-reads its cache key, which holds the textures'
+  uuids, only when the material's version changes) — a resize at the end of the warm-up once left the plain-colour
+  batch drawing from its old matrices texture: in WE the aircraft and the base stood where the warm-up had put them
+  while their sprite lights moved on (webgpu.spec checks every batch draws from its current texture). Nothing may
+  resize a batch after the first frame except these fallbacks.
 - Many repeated objects are one `InstancedMesh` (vegetation, fence posts, stand marks, helicopter pads, scorch marks, tracers).
 - `shade()` sets `castShadow`/`receiveShadow` per mesh; don't blanket-enable shadows with `traverse`.
 - Shared scratch vectors (`_v`, `_p`, `_d`, `_al`…) must not be passed into a function that also
   writes them; give the callee its own scratch. Top-level names are global across all files: no duplicates.
 - Pools are ring buffers (`SpriteFX`, `Tracers`, weather; `Scorch` takes a free slot and makes none when full): spawn rates must not scale with FPS
   (use time accumulators, see missile glow in `updateFlybys`).
-- `SpriteFX` (flash / smoke) is one instanced mesh per pool with its own billboard shader that
-  reproduces `SpriteMaterial` (color × texture, opacity, scene fog). Normal-blended pools sort live
-  particles back to front on the CPU each update (needs the camera: `FX.smoke.update(dt, tint, camera)`).
+- `SpriteFX` (flash / smoke / mist) is one instanced `Sprite` per pool with a `SpriteNodeMaterial` (position, colour +
+  alpha, size + rotation per instance; colour × texture, scene fog). Normal-blended pools sort live particles back to
+  front on the CPU each update (needs the camera: `FX.smoke.update(dt, tint, camera)`).
 - The sun's shadow camera is fitted to the visible ground every frame (`fitShadow`, `main.js`; one 2048² map):
   don't set fixed shadow bounds.
 - Searchlight `SpotLight`s are hidden by day (`updateLights`): every visible light costs every lit
-  fragment even at zero intensity. Only two apron floodlights and the first four helicopters have a real light; the
+  fragment even at zero intensity. **The set of lights must never change while the wallpaper runs** (beyond the dusk /
+  dawn toggle the warm-up covers): r187 gathers lights from visible subtrees only and a changed set rebuilds every
+  render object and recompiles every lit pipeline. So the helicopters' real lights are a scene-level pool
+  (`HELI_LIGHTS`, 4, built in `init`) that follows their searchlight (`s.follow`, `followLight`) and is dark while the
+  helicopter is hidden; `HELI_LIGHTS.assign` (every `updateLights`) hands them to the helicopters on screen with their
+  searchlight on, the nearest the centre first (kept while on screen, taken by one half a screen nearer) — once the
+  first four built kept them for good and the rest flew with the meshed cone only — as children of the helicopter, every combat pass (`cbt_wait` hides it) was a stall at night. Two fire lights (`FireLights`) are a fixed pair the same way. The five floodlight masts and four helicopters at a time have a real light; the
   guard-tower and sky searchlights are beams (`noLight`).
 - Main loop (`frame`): FPS limit keeps cadence via `frameDue`; simulation runs in ≤50 ms sub-steps
   (stalls capped at 0.25 s). `onBeat` does nothing while `paused`.
-- **Shader warm-up** (`warmShaders`, end of `init`, under the splash): `renderer.compile` with every enemy template in
-  the scene (the idle FX pools are in it too, compile covers invisible objects) — a first fight otherwise compiled ~a
-  dozen programs mid-action (tens to hundreds of ms each in WE's ANGLE / D3D). A new kind of object that first appears
-  in a fight should be added there. Turning a light's `visible` (or adding a light) recompiles every program.
+- **Shader warm-up**: see "Light & colour" — a first fight once compiled ~a dozen programs mid-action (tens to
+  hundreds of ms each in WE's ANGLE / D3D).
 - **The panel's DOM** is written only where a value changed (`setTxt` / `setCls`, the clock once a minute, nothing
   while `showPanel` is off; the meter in whole percent): it was ~28% of the simulation's time.
-- Measured 2026-10 (peace, 27 aircraft): ~370 main-pass draw calls (~500 with the shadow pass; ~450 / ~660 before the
-  plain-colour merge), ~0.25 ms per simulation step in the test container. `vehHoldAir` skips aircraft too far for
+- Measured 2026-11 (peace, 27 aircraft, r187, WebGPURenderer on WebGL 2 in the test container): ~164 draw calls for
+  the scene pass and the output, ~176 with the shadow pass, ~188 with bloom (WebGLRenderer + batching: ~137 / ~149;
+  before the batching ~342 / ~511; ~450 / ~660 before the plain-colour merge); `BATCH.sync` ~0.15 ms a frame, a
+  simulation step ~0.25–0.4 ms in the test container. `vehHoldAir` skips aircraft too far for
   their next 8 units to matter (the route sampling is the costly part).
 
 ## Running & testing
 - WE: "Open from File" → `project.json` (audio listener + properties come from WE).
 - Browser preview: serve the folder, e.g. `python -m http.server 8765`, open `http://localhost:8765/`.
   The ⚙ SETTINGS drawer mirrors all WE properties (stored in `localStorage`); URL params `?hour=22`,
-  `?zoom=150`, `?season=winter`, `?demo=1`, `?ts=N` (time scale).
-- **Automated tests** (`tests/`, Playwright Test in headless Chromium + SwiftShader WebGL): run them in Docker —
-  `powershell -ExecutionPolicy Bypass -File tools/test.ps1 [file / -g pattern]` (no local Node; `$env:SEED = N` for
-  another seed); CI runs the same image on every push / PR (`.github/workflows/tests.yml`). Run them after a change.
+  `?zoom=150`, `?season=winter`, `?weather=storm`, `?demo=1`, `?ts=N` (time scale), `?warm=0` (no shader warm-up),
+  `?gl=webgl2` (the WebGL 2 backend), `?clustered=1` (experimental), `?vol=1` (the volume on WebGL 2), `?gputime=1`
+  (`GPU.ms` = GPU time of the last frame's render / compute passes, timestamp queries, sampled twice a second).
+- **Performance on a real GPU** (also inside Wallpaper Engine: Settings → General → "CEF devtools port", then
+  `http://localhost:<port>` in Chrome → the wallpaper's console): `perfReport(60)` (main.js) logs and returns frame / CPU
+  (`simMs` the steps + `renderMs` renderFrame's CPU side) / GPU times, hitches, WE pauses (not counted as frames), draw
+  calls, lit point / spot lights, batches, memory, the backend and the settings in effect, `made` (render pipelines /
+  programs / batch growth / new batches made while measuring: after the warm-up each is a likely stall) and `hitchLog`
+  (the worst frames > 50 ms — or 2 intervals of a lower FPS limit; `hitches` > 1.5 — with what they and the frame before made) (on WebGPU a `BatchedMesh` is
+  one draw per geometry, not one multi-draw: the draw calls stay high, the state changes are what batching saves);
+  `perfFlags({ gputime: true })` / `perfFlags({ gl: 'webgl2' })` / `perfFlags({ clustered: true })` / `perfFlags({})`
+  store debug switches in `localStorage` (`fab-perf`, read at load: `PERF.flags`) since WE passes no URL parameters.
+- **Automated tests** (`tests/`, Playwright Test, two projects): `webgl2` — everything, headless Chromium + SwiftShader,
+  WebGPURenderer's WebGL 2 backend; `webgpu` — `tests/webgpu.spec.js` on real WebGPU (SwiftShader through Vulkan): a
+  *headed* Chromium (headless drops its WebGPU instance, even for a bare clear), so the suite runs under `xvfb-run -a`.
+  Any WebGPU-only change needs a test there (pixels: `drawImage` of the canvas into a 2D canvas right after
+  `__t.render()`). Run them in Docker — `powershell -ExecutionPolicy Bypass -File tools/test.ps1 [file / -g pattern /
+  --project=webgpu]` (no local Node; `$env:SEED = N` for another seed); CI runs the same image on every push / PR
+  (`.github/workflows/tests.yml`). Run them after a change.
   - The harness (`tests/support/harness.js`) boots the page deterministically: seeded `Math.random` (`SEED`), fixed
     date in UTC, no `requestAnimationFrame` (time only advances through `__t.sim(sec)` = `step(0.05)` per tick),
-    `RT()` on simulated time, Wallpaper Engine mode (audio fed by `__t.sim(sec, { audio: true/false })`).
+    `RT()` on simulated time, Wallpaper Engine mode (audio fed by `__t.sim(sec, { audio: true/false })`), no shader
+    warm-up (`?warm=0`; `boot({ warm: true })` for it), the WebGL 2 backend (`?gl=webgl2`; `boot({ gl: 'webgpu' })` in
+    the webgpu project). Three.js draws UUIDs from `Math.random`: a three.js update
+    or new objects at start-up shift the seeded timelines (see "Debugging").
   - `tests/support/inpage.js` (`window.__t`): `sim` runs `checkInvariants()` after every step (runway / arrivals,
     homes and their markings, known states; NaN; under ground; mission / tanker consistency; bounded pools) and the
-    stuck detector (`STATE_LIMITS`); `forceFight` / `fightOff`; `sample` (pixels); `geometries` (leak check: geometries
+    stuck detector (`STATE_LIMITS`); `forceFight` / `fightOff`; `render` (= `renderFrame`), `sample` (pixels), `bright` (share of bright pixels); `geometries` (leak check: geometries
     dropped without `dispose`).
   - **When adding a state, an airfield resource, a line pool, a placeholder or a cache**, update the harness: aircraft
     states come from `STATUS` (so `registerLeg` / `Object.assign(STATUS, …)` is enough), but mission / tanker / runway /
@@ -479,8 +651,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   a world point on screen: `new THREE.Vector3(x, 0, z).project(camera)`. The Browser pane's screenshot can show the frame
   from before the last JS call (or older): take it in a call of its own after the change, and wait ~1 s if it still shows the old view.
 - **When the Browser pane's screenshots stay stale** (the splash, an old frame): a throw-away spec that boots the page,
-  sets the camera, calls `renderer.render(scene, camera)` and `wp.page.screenshot({ path: 'test-results/x.png' })`, then
-  Read the png (the harness has no rAF: render by hand).
+  sets the camera, calls `__t.render()` and `wp.page.screenshot({ path: 'test-results/x.png' })`, then Read the png (the
+  harness has no rAF: render by hand; `__t.render` advances the renderer's node frame too).
 - **Debugging an invariant failure**: re-run the failing test with the same seed (deterministic), then a throw-away
   spec (`tests/zz-debug.spec.js`, deleted afterwards) whose `wp.until(pred)` predicate runs every step and pushes a log
   line per step (positions, `drive.s`, phases, the aircraft's state) — print the last lines around the first violation.
@@ -488,7 +660,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   latent ground-traffic bug in an untouched file: treat it as real. `test.ps1 … | Select-Object -First N` may end with
   exit code 255 (the pipe was cut), not a failure: read the "passed / failed" line.
 - Console checks by hand: all globals are reachable; set `paused = true` and drive the sim with `step(0.05)` +
-  `renderer.render(scene, camera)`; check `renderer.info.render.calls` (main-pass draw calls, shadow pass excluded)
+  `__t.render()`; check `renderer.info.render.drawCalls` (the whole frame: set `CFG.shadows` / `CFG.bloom` off for the main pass)
   and `renderer.info.memory.geometries`. To force a fight: `AUD.combat` alone gives `armed` but not `fighting` (no
   waves / passes / beats); use `Object.defineProperty(AUD, 'active', { get: () => true }); AUD.soundStart = RT() - 10;
   AUD.combat = true;` (what `__t.forceFight()` does), then `onBeat('low', 2)`.

@@ -7,6 +7,7 @@ function M(color, o) {
     MAT_CACHE[k] = new THREE.MeshPhongMaterial(Object.assign({ color: color, flatShading: true, shininess: 8, specular: 0x151515 }, o || {}));
     MAT_CACHE[k].userData.shared = true;   // cached: never disposed with a model
     if (!o) MAT_CACHE[k].userData.plain = true;   // just a colour: mergeStatic may bake it into vertex colours (PLAIN_MAT)
+    MAT_CACHE[k].userData.mopts = o ? JSON.stringify(o) : '';   // never changed after: BATCH draws all of one options set in one batch (colour per instance)
   }
   return MAT_CACHE[k];
 }
@@ -32,15 +33,14 @@ function mergeStatic(root, dynamic) {
     for (const c of o.children) {
       if (skip.has(c)) { nested.push(c); continue; }
       const mt = c.material;
-      if (c.isMesh && !c.children.length && mt && !Array.isArray(mt) && !mt.transparent && !mt.map && c.geometry.attributes.normal) {
+      if (c.isMesh && !c.isInstancedMesh && !c.isBatchedMesh && !c.children.length && mt && !Array.isArray(mt) && !mt.transparent && !mt.map && c.geometry.attributes.normal) {
         const key = (mt.userData.plain ? 'plain' : mt.uuid) + '|' + c.castShadow + '|' + c.receiveShadow;
         (groups.get(key) || groups.set(key, []).get(key)).push(c);
       }
       walk(c);
     }
   })(root);
-  for (const list of groups.values()) {
-    if (list.length < 2) continue;
+  for (const list of groups.values()) {   // (a lone mesh too: the merged one is non-indexed and batched like the rest)
     const vc = list.some(m => m.material !== list[0].material), pos = [], nor = [], col = [];   // several colours: baked into the vertices
     for (const m of list) {
       const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
@@ -55,10 +55,113 @@ function mergeStatic(root, dynamic) {
     if (vc) geo.setAttribute('color', new THREE.BufferAttribute(concatF32(col), 3));
     const mesh = new THREE.Mesh(geo, vc ? PLAIN_MAT : list[0].material);
     mesh.castShadow = list[0].castShadow; mesh.receiveShadow = list[0].receiveShadow;
+    mesh.userData.batched = true; mesh.layers.set(BATCH_LAYER);   // drawn by its batch (BATCH, below), not on its own
     root.add(mesh);
   }
   for (const d of nested) mergeStatic(d, dynamic);
 }
+/* ===== Batched drawing of the merged static meshes (three.js BatchedMesh) =====
+   mergeStatic leaves one merged mesh per material in every model / dynamic node; there are hundreds of them (every
+   aircraft, vehicle, enemy, the base). They stay in the scene graph as they are — visibility, matrixWorld, the doors,
+   clones, Box3 all work as before — but on BATCH_LAYER, which the camera doesn't draw. BATCH.sync() (renderFrame, before
+   the render) gives each one an instance in a shared BatchedMesh per (material, shadows, vertex colours) and copies its
+   world matrix / visibility: a batch is one draw call (WEBGL_multi_draw) for all its instances.
+   - A geometry is added to its batch once (enemy / vehicle clones share their template's), removed when it is disposed
+     (disposeTree): its instances go with it.
+   - A mesh not drawn this frame (hidden, behind a shut door, not in the scene) has its instance hidden; one out of the
+     scene for good (a dropped enemy clone, a pooled vehicle) gives its instance back after ~1 s (taken again when it is
+     back).
+   - A mesh whose material was swapped (wreckArmor: a burnt M() colour) moves to that material's batch (no new program).
+   - The M(colour, options) materials (cached, never changed) share one batch per options set: its material is
+     M(white, options), the colour goes per instance. Others (PLAIN_MAT, the seasonal roofs, windows) get one each.
+   - The batches grow (instances, vertices: optimize first) and never shrink; an empty one is disposed. */
+const BATCH_LAYER = 1;
+const BATCH = {
+  groups: new Map(), recs: new WeakMap(), live: [], frame: 0, gcT: 0,
+  ev: { grow: 0, batch: 0 },   // growth (a whole-buffer copy + upload) / new batches (a new pipeline) — perfReport's hitch log
+  key(m) { const mo = m.material.userData.mopts; return (mo != null ? 'M' + mo : m.material.uuid) + '|' + m.castShadow + '|' + m.receiveShadow + '|' + !!m.geometry.attributes.color; },
+  group(m) {
+    const k = this.key(m); let G = this.groups.get(k);
+    if (!G) {
+      this.ev.batch++;
+      const mo = m.material.userData.mopts, bm = new THREE.BatchedMesh(1024, 32768, 0, mo != null ? M(0xffffff, mo ? JSON.parse(mo) : undefined) : m.material);
+      bm.castShadow = m.castShadow; bm.receiveShadow = m.receiveShadow;
+      bm.frustumCulled = false; bm.perObjectFrustumCulled = true; bm.sortObjects = false;   // (instances move: no whole-batch bounds; opaque, unsorted)
+      bm.userData.batch = true; scene.add(bm);
+      G = { bm, geos: new Map(), k, tint: mo != null }; this.groups.set(k, G);
+    }
+    return G;
+  },
+  /* the batch's id of a geometry, added on first use (room made by optimize(), else by growing the buffers) */
+  geoId(G, geo) {
+    let e = G.geos.get(geo);
+    if (e) return e;
+    const bm = G.bm, n = geo.attributes.position.count;
+    let id;
+    try { id = bm.addGeometry(geo); }
+    catch (err) {
+      this.ev.grow++; bm.optimize();
+      try { id = bm.addGeometry(geo); }
+      catch (err2) { bm.setGeometrySize(Math.max(bm._maxVertexCount * 2, bm._maxVertexCount + n * 2), 0); bm.material.needsUpdate = true; id = bm.addGeometry(geo); }
+    }
+    e = { id, recs: new Set() }; G.geos.set(geo, e);
+    geo.addEventListener('dispose', () => this.dropGeometry(G, geo));
+    return e;
+  },
+  dropGeometry(G, geo) {
+    const e = G.geos.get(geo); if (!e) return;
+    G.bm.deleteGeometry(e.id);                                   // (deletes its instances)
+    for (const r of e.recs) { r.dead = true; this.recs.delete(r.m); }
+    G.geos.delete(geo); this.live = this.live.filter(r => !r.dead);
+    if (!G.geos.size) { scene.remove(G.bm); G.bm.dispose(); this.groups.delete(G.k); }   // (the materials of a rebuilt model: its batch is gone)
+  },
+  add(m) {
+    const G = this.group(m), e = this.geoId(G, m.geometry), bm = G.bm;
+    let inst;
+    try { inst = bm.addInstance(e.id); }
+    catch (err) { this.ev.grow++; bm.setInstanceCount(bm.maxInstanceCount * 2); bm.material.needsUpdate = true; inst = bm.addInstance(e.id); }
+    if (G.tint) bm.setColorAt(inst, m.material.color);
+    const r = { m, G, e, inst, mat: m.material, seen: 0, seenT: T, vis: true, dead: false };
+    e.recs.add(r); this.recs.set(m, r); this.live.push(r);
+    return r;
+  },
+  remove(r) {
+    if (r.dead) return;
+    r.dead = true; r.G.bm.deleteInstance(r.inst); r.e.recs.delete(r); this.recs.delete(r.m);
+    const i = this.live.indexOf(r); if (i >= 0) this.live.splice(i, 1);
+  },
+  /* before every render (scene.updateMatrixWorld() done): every merged mesh in view → its instance */
+  sync() {
+    const f = ++this.frame;
+    scene.traverseVisible(o => {
+      if (!o.isMesh || !o.userData.batched) return;
+      let r = this.recs.get(o);
+      if (r && o.material !== r.mat) { this.remove(r); r = null; }   // its material swapped (a wreck: burnt M()): into that material's batch
+      if (!r) r = this.add(o);
+      r.seen = f; r.seenT = T; r.G.bm.setMatrixAt(r.inst, o.matrixWorld);
+      if (!r.vis) { r.vis = true; r.G.bm.setVisibleAt(r.inst, true); }
+    });
+    let dead = false; const gc = T - this.gcT > 0.5; if (gc) this.gcT = T; if (this.gone) this.gone.length = 0;
+    for (const r of this.live) {
+      if (r.seen === f || r.dead) continue;
+      if (r.vis) { r.vis = false; r.G.bm.setVisibleAt(r.inst, false); }
+      // out of the scene for ~1 s (sim time; a dropped clone, a pooled vehicle): the instance is freed (taken again on its return)
+      if (gc && T - r.seenT > 1) { let p = r.m; while (p.parent) p = p.parent; if (p !== scene) dead = true, (this.gone || (this.gone = [])).push(r); }
+    }
+    if (dead) for (const r of this.gone) this.remove(r);   // (not while iterating: remove() takes it off `live`)
+  },
+  /* the warm-up (under the splash, before anything is drawn): every merged mesh's geometry into its batch now, hidden
+     ones too (an aircraft in a shut shelter, the enemy / vehicle / fly-by templates) — the batches grew mid-fight
+     otherwise (optimize / setGeometrySize copy and upload a whole batch: a stall). Instances: 1024 a batch from the
+     start. A batch resized once drawn must rebind: its render object keeps the textures / geometry it was built with
+     (r187 re-reads the cache key — which holds the textures' uuids — only when the material's version changes), so
+     the growth branches above bump the material (needsUpdate): without it the batch went on drawing from its old
+     matrices texture, the models frozen where they were at the resize while their (sprite) lights moved on */
+  prefill(root) { root.traverse(o => { if (o.isMesh && o.userData.batched) this.geoId(this.group(o), o.geometry); }); },
+  /* draw calls / instances / vertices in the batches (tests, the measurements in CLAUDE.md) */
+  stats() { let n = 0, v = 0; for (const G of this.groups.values()) { n += G.bm._instanceInfo.filter(i => i.active).length; v += G.bm._maxVertexCount; } return { batches: this.groups.size, instances: n, vertices: v, live: this.live.length }; }
+};
+
 const mm = c => (c && c.isMaterial) ? c : M(c);
 function shade(m, cast) { m.castShadow = cast !== false; m.receiveShadow = true; return m; }
 function box(p, w, h, d, c, x, y, z) { const m = shade(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mm(c))); m.position.set(x, y, z); p.add(m); return m; }
@@ -102,40 +205,49 @@ function dashed(p, x1, z1, x2, z2, w, color, y, dash, gap) {
 }
 function windowMat() { return new THREE.MeshPhongMaterial({ color: 0x14202c, emissive: 0x000000, shininess: 70, specular: 0x7090b0, flatShading: true }); }
 
-/* ===== Navigation lights (point sprites) ===== */
+/* ===== Navigation lights (point sprites) =====
+   One instanced Sprite per group (WebGPU draws points only 1 px wide: a PointsNodeMaterial on a Sprite gives sized ones):
+   per instance the light's position and colour; size in pixels (material.size), opacity, the glow texture. Tagged
+   userData.nav (aircraft switch theirs with their engines). NavSprite keeps its instance count when cloned (Sprite.copy
+   doesn't copy `count`: a cloned vehicle showed only the first of its head / tail lights). */
 const NAV_MATS = [];
+class NavSprite extends THREE.Sprite { copy(s, r) { super.copy(s, r); this.count = s.count; return this; } }
 function navLights(parent, list, blink, scale) {
-  const pos = [], col = [], c = new THREE.Color();
-  list.forEach(l => { pos.push(l[0], l[1], l[2]); c.setHex(l[3]); col.push(c.r, c.g, c.b); });
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  const m = new THREE.PointsMaterial({ size: 8, map: TEX.glow, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false, fog: false, opacity: 0 });
+  const n = list.length, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color();
+  list.forEach((l, i) => { pos[i * 3] = l[0]; pos[i * 3 + 1] = l[1]; pos[i * 3 + 2] = l[2]; c.setHex(l[3]); c.toArray(col, i * 3); });
+  const { instancedBufferAttribute: iba, vec4, materialColor } = THREE.TSL;
+  const m = new THREE.PointsNodeMaterial({ size: 8, map: TEX.glow, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: false, fog: false, opacity: 0 });
+  m.positionNode = iba(new THREE.InstancedBufferAttribute(pos, 3));
+  m.colorNode = vec4(iba(new THREE.InstancedBufferAttribute(col, 3)), 1).mul(materialColor);
   m.userData = { scale: scale || 1.1, blink: blink || null };
   NAV_MATS.push(m);
-  const pts = new THREE.Points(g, m); pts.frustumCulled = false; pts.renderOrder = 5;
+  const pts = new NavSprite(m); pts.count = n; pts.frustumCulled = false; pts.renderOrder = 5; pts.userData.nav = true;
   parent.add(pts); return pts;
 }
 
 /* ===== Searchlights with visible beam ===== */
 const SEARCHLIGHTS = [];
+/* the beam: additive, fading along its length and toward its edges (a node material). Shaded in sRGB as it always was,
+   turned linear by c^BEAM_G: added in the linear HDR target, the exact sRGB curve came out ~4x fainter than on the old
+   sRGB screen */
+const BEAM_G = 1.25;
 function coneMaterial(color, len) {
-  return new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: 0 }, uLen: { value: len } },
-    vertexShader: `uniform float uLen; varying float vD; varying float vRim;
-      void main(){ vD = position.z/uLen; vec3 n = normalize(normalMatrix*normal); vRim = abs(n.z);
-      gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 uColor; uniform float uOpacity; varying float vD; varying float vRim;
-      void main(){ float d = clamp(vD,0.0,1.0); float a = uOpacity*pow(1.0-d,1.7)*(0.25+0.75*pow(vRim,1.3)); gl_FragColor = vec4(uColor*a,1.0); }`,
-    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
-  });
+  const { uniform, positionLocal, normalView, vec3, vec4, pow, clamp, abs, float } = THREE.TSL;
+  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const c = new THREE.Color(color).convertLinearToSRGB(), uOpacity = uniform(0);
+  const d = clamp(positionLocal.z.div(len), 0, 1), a = uOpacity.mul(pow(float(1).sub(d), 1.7)).mul(float(0.25).add(pow(abs(normalView.z), 1.3).mul(0.75)));
+  m.colorNode = vec4(pow(vec3(c.r, c.g, c.b).mul(a), vec3(BEAM_G)), 1);
+  m.uOpacity = uOpacity;   // (updateLights)
+  return m;
 }
 function makeSearchlight(parent, x, y, z, opts) {
   const o = Object.assign({ color: 0xfff1d6, angle: 0.16, len: 22, intensity: 2.2, cone: true, coneOpacity: 0.35, housing: true }, opts || {});
   const holder = new THREE.Object3D(); holder.position.set(x, y, z); parent.add(holder);
   let light = null;
-  if (!o.noLight) {   // real light is optional: many spotlights get expensive on the GPU
-    light = new THREE.SpotLight(o.color, 0, o.len * 2.2, o.angle, 0.45, 1.0);
+  if (o.light) light = o.light;   // a light in the scene, following the holder
+  else if (!o.noLight || GPU.clustered) {   // real light is optional: many spotlights get expensive on the GPU (not with clustered lighting)
+    light = new THREE.SpotLight(o.color, 0, o.len * 2.2, o.angle, 0.45, 2);   // (intensity × SPOT_K: updateLights)
+    light.layers.enable(2);   // (VOL_LAYER: it lights the haze, main.js VOLUME)
     holder.add(light);
     const target = new THREE.Object3D(); target.position.set(0, 0, 10); holder.add(target); light.target = target;
   }
@@ -147,7 +259,7 @@ function makeSearchlight(parent, x, y, z, opts) {
     cone = new THREE.Mesh(g, coneMaterial(o.color, o.len)); cone.renderOrder = 4; cone.frustumCulled = false;
     holder.add(cone);
   }
-  const s = { holder, light, cone, o, enabled: 1 };
+  const s = { holder, light, cone, o, enabled: 1, follow: !!(o.light || o.pool) };   // (pool: a HELI_LIGHTS light comes and goes)
   SEARCHLIGHTS.push(s);
   return s;
 }

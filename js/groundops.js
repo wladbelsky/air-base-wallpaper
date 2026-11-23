@@ -296,8 +296,9 @@ function vehHold(d, own) {
     d.ahead(_vh3, 0.8);
     if (Math.hypot(op.x - _vh.x, op.z - _vh.z) < 0.9 || Math.hypot(op.x - _vh3.x, op.z - _vh3.z) < 0.9 || Math.hypot(op.x - m.x, op.z - m.z) < 0.75) {
       const od = o.userData.drive;
-      if (od && d.s < 0.3 && od.s < 0.3 && Math.hypot(op.x - m.x, op.z - m.z) < 0.7) { if (d.m.id < o.id) continue; byVeh = o; break; }   // both setting off from one spot: in id order (no cycle)
+      if (od && d.s < 0.3 && od.s < 0.3 && Math.hypot(op.x - m.x, op.z - m.z) < 0.7) { if (d.m.id < o.id || vehCycleGo(d, o)) continue; byVeh = o; break; }   // both setting off from one spot: in id order (no cycle)
       if (od && od.heldBy === d.m && T - od.heldAt < 0.2 && d.m.id < o.id) continue;
+      if (vehCycleGo(d, o)) continue;   // (only that one: another in the way still holds it — once the first was skipped and the rest never looked at)
       byVeh = o; break;
     }
   }
@@ -310,6 +311,17 @@ function vehHold(d, own) {
   } else d.vehBy = null;
   d.holdSince = h ? d.holdSince ?? T : null;                                              // how long it has been held (giving way above)
   return h;
+}
+/* a cycle of holds through o (three round each other: a fuel truck behind a loader, the loader beside a truck backing off
+   its stand, that truck backing toward the first — they stood until the 25 s rule sent one into another): true when this
+   vehicle is its lowest id and goes */
+function vehCycleGo(d, o) {
+  for (let ids = [d.m.id], k = 0; k < 6; k++) {
+    const od = o.userData.drive; if (!od || !od.heldBy || T - od.heldAt > 0.2) return false;
+    ids.push(o.id); if (od.heldBy === d.m) return d.m.id === Math.min(...ids);
+    o = od.heldBy;
+  }
+  return false;
 }
 /* the aircraft rule of vehHold (p: the point ahead, m: the vehicle) */
 function vehHoldAir(d, own, p, m) {
@@ -758,8 +770,10 @@ class RepairScene {
         const q = this.d.ahead(_cl, 1.6), past = this.sz > 0 ? q.z < ROAD_S - 1.2 : q.z > SERVICE_Z + 1.2;
         if (past && !this.through) this.through = !AIRFIELD.setOf(c.L).size && (this.sz > 0 || !AIRCRAFT.some(a => (a.state === 'rollout' || a.state === 'taxi_in') && a.mesh.position.z > BASE_LAYOUT.twy.z - 1.5));
         // too late to go in and be done within RWY_MAX (the rest of the way in, the shortest work, the way off; held up on
-        // the way): called off — the crater is patched, the runway opens, the truck fades where it stands
-        if (!this.through && (DAMAGE.rwy !== c || c.t + (this.d.len - this.d.s) * 1.2 / REPAIR_V + CYCLE_T + this.offT > RWY_MAX)) { DAMAGE.reopen(c); this.phase = 'fade'; this.k = 1; this.off = true; break; }
+        // the way — also once let through: giving way to traffic on the link it once stood 15 s short of the runway):
+        // called off — the crater is patched, the runway opens, the truck fades where it stands. On the runway it goes on.
+        const onRwy = Math.abs(m.position.z - c.L.z) < c.L.w / 2 + 0.5;
+        if (!onRwy && (DAMAGE.rwy !== c || c.t + (this.d.len - this.d.s) * 1.2 / REPAIR_V + CYCLE_T + this.offT > RWY_MAX)) { DAMAGE.reopen(c); this.phase = 'fade'; this.k = 1; this.off = true; break; }
         const h = (past && !this.through) || vehHold(this.d, null); if (!h || this.d.s > 0) vehScale(m, this.k += dt * 2.5);
         if (this.d.step(dt, h)) { this.phase = 'work'; this.t = 0; this.W = clamp(RWY_MAX - c.t - this.offT, CYCLE_T, 18); this.n = 0; }
         break;

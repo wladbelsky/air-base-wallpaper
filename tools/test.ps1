@@ -8,6 +8,6 @@ $image = 'mcr.microsoft.com/playwright:v1.63.0-noble'   # keep in sync with @pla
 $root = Split-Path -Parent $PSScriptRoot
 $seed = if ($env:SEED) { $env:SEED } else { '1' }
 $quoted = $args | ForEach-Object { "'" + ($_ -replace "'", "'''") + "'" }   # passed to bash as single-quoted words
-$cmd = 'npm ci --no-audit --no-fund --loglevel=error && npx playwright test ' + ($quoted -join ' ')
+$cmd = 'npm ci --no-audit --no-fund --loglevel=error && xvfb-run -a npx playwright test ' + ($quoted -join ' ')   # (a virtual display: the webgpu project runs a headed browser)
 docker run --rm --ipc=host -e SEED=$seed -e NPM_CONFIG_UPDATE_NOTIFIER=false -v "${root}:/work" -v fab-node-modules:/work/node_modules -w /work $image bash -c $cmd
 exit $LASTEXITCODE

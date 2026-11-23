@@ -3,10 +3,13 @@
   "private": true,
   "description": "Automated tests for the Forward Air Base wallpaper (the wallpaper itself has no build step)",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "vendor:three": "node tools/vendor_three.js"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
-    "gifenc": "1.0.3"
+    "esbuild": "0.28.2",
+    "gifenc": "1.0.3",
+    "three": "0.187.0"
   }
 }

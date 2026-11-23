@@ -5,7 +5,7 @@
 Isometric forward air base: a runway, hardened aircraft shelters, hangars, a control tower, air defence and tanks on
 the perimeter, and a configurable air wing that taxis, takes off and lands. Everything reacts to the music playing on
 your PC: air defence, tanks and aircraft fire to the beat, Ace Combat style radio subtitles run at the top of the
-screen, the time of day follows your PC clock and the ground follows the seasons.
+screen, the time of day follows your PC clock, the ground follows the seasons and the weather changes.
 The sequel to [Carrier Strike Group](https://github.com/wladbelsky/carrier-wallpaper).
 
 ![Autumn afternoon air raid: jets fighting low over the shelters, the fuel farm burning](screenshots/dogfight.jpg)
@@ -13,9 +13,13 @@ The sequel to [Carrier Strike Group](https://github.com/wladbelsky/carrier-wallp
 - **Steam Workshop:** https://steamcommunity.com/sharedfiles/filedetails/?id=3829499782
 - **Live demo** (runs in the browser): https://wladbelsky.github.io/air-base-wallpaper/
 
-| Winter night under attack | Refuelling pass (KC-46 and F-16s) | Emergency on 09R while 09L keeps launching |
-|---|---|---|
-| ![Night attack](screenshots/night.jpg) | ![Refuelling pass](screenshots/refuel.jpg) | ![Emergency landing](screenshots/emergency.jpg) |
+| Winter night under attack | Summer night thunderstorm |
+|---|---|
+| ![Night attack](screenshots/night.jpg) | ![Thunderstorm: rain, wet paving and a lightning strike](screenshots/storm.jpg) |
+
+| Refuelling pass (KC-46 and F-16s) | Emergency on 09R while 09L keeps launching |
+|---|---|
+| ![Refuelling pass](screenshots/refuel.jpg) | ![Emergency landing](screenshots/emergency.jpg) |
 
 ## Install
 
@@ -47,7 +51,20 @@ From source:
   and big sky searchlights sweeping the sky (in a fight they follow the enemy aircraft).
 - **Seasons** (property **Season**: by the PC date, or fixed): winter — snow, snowy firs and roofs, snowfall;
   spring — green grass and trees; summer — desert, saguaro cacti, rocks and dry shrubs; autumn — golden and red trees,
-  falling leaves. **Snowfall / falling leaves** can be switched off.
+  falling leaves. **Seasonal snowfall / falling leaves** can be switched off.
+- **Weather** (property **Weather**): *Default* is a clear sky as always; *Rain*, *Fog* or *Thunderstorm* fixed; or
+  *Changing*: a new kind every 15–40 minutes, by the season (mostly clear in the desert summer, rain and fog in
+  autumn). Rain falls in streaks slanted by the wind and splashes on the concrete, which turns dark and glossy (and dries
+  off slowly afterwards); fog closes in, banks of mist drift low over the ground and the runway and approach lights come
+  on by day; a thunderstorm brings driving rain, gusts that push the smoke around and lightning strikes around the base.
+  Overcast skies dim the sun and soften the shadows. In winter rain falls as heavy snow. Only the look changes: flights
+  and the fight go on as usual.
+- **Lighting:** colours are lit in linear space and tone mapped, so floodlights, fires and flashes no longer clip to
+  white; shadows are crisp under a high sun, long and soft at dusk, faint by moonlight. **Glow (bloom)** puts a halo
+  around the lights, fires, explosions, tracers and lightning (on by default). With WebGPU (Wallpaper Engine has it), **Volumetric
+  light beams** let the floodlights and the helicopters' searchlights cut shafts through the night haze, thick in fog
+  and rain; without WebGPU (or if it keeps failing: the wallpaper then switches to it by itself) it runs on WebGL 2 with
+  the meshed beams.
 - **Base name** property: the tower's radio callsign and the panel title (default SAND ISLAND).
 - **Runways:** the north runway (09L) takes the departures and the south one (09R) the arrivals, which then hold short
   of the north runway on the connector and cross it when the tower clears them.
@@ -154,12 +171,15 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
 - **Our fighters** fly passes across the screen: chasing a bandit, chased by one (flares, the wingman saves them), or
   sweeping; the A-10 (and now and then an F-15E with bombs) on close air support runs.
 - **Hits:** a projectile that reaches its target scores on the **next beat** of the music. What gets through hits the
-  base: explosions, a structure hit burns for half a minute (flames over its roof, a tall column of black smoke) and
+  base: explosions, a structure hit burns for half a minute (tongues of flame licking over its roof — following its shape: the hangars' barrel, a shelter's arch, the tower cab, a fuel tank — and lighting it up,
+  sparks rising, a tall column of black smoke) and
   craters in the ground (a second hit on a crater widens it rather than piling on; every
   crater shrinks away in the end). Aircraft in flight always pass above the buildings' roofs.
   Knocked-out armour burns black, smokes, then settles into the ground.
-- **Damage:** whatever a bomb or missile lands on is out for a while. An AA gun, C-RAM, Avenger, tank, launcher or the
-  Patriot radar stops tracking and firing for one to two minutes, burning and then smoking, until it is back on line.
+- **Damage:** whatever a bomb or missile lands on is out for a while. An AA gun, C-RAM or tank stops tracking and
+  firing for one to two minutes, burning and then smoking, until it is back on line. LANCER (the Patriot battery, the
+  NASAMS and the Avengers) is dug in: it has to be hit closer, is back in about half a minute to a minute, and only one
+  part of the Patriot battery (the radar or a launcher) is out at a time.
   An aircraft hit on its stand is DAMAGED: a crash tender foams it, then a maintenance truck (the same green 10x10
   with a workshop body) sets a spare engine down beside it with its crane while the crew works on it — repaired, it
   gets the usual fuel truck (in a shelter or hangar it is repaired out of sight, in up to two minutes). A crater on a runway closes it: a green 10x10 repair truck drives out, its crane lowers repair mats into
@@ -176,7 +196,8 @@ When the music has been playing for 5 seconds, the base goes to an air raid:
 ## Heavy music
 
 Hits are detected both by loudness jumps and by spectral flux, so riffs and drums are caught even in dense mixes.
-A "heaviness" meter drives the bigger weapons: Patriot and NASAMS launches on the biggest hits, Stingers, flak
+A "heaviness" meter drives the bigger weapons: Patriot and NASAMS launches and Stingers from moderately heavy
+passages on (only at an enemy in range; a SAM that reaches a cruise or ballistic missile scores at once), flak
 barrages from the AA guns, the C-RAM's bursts, and subtle camera shake (**Camera shake on heavy hits**).
 
 ## Stress / threat
@@ -187,19 +208,26 @@ changes the radio tone (calm → tense → panic), enemy wave size and spawn rat
 
 ## Properties
 
-Camera zoom and rotation, time of day (PC clock or fixed hour), audio sensitivity, fire intensity, fly-by frequency,
-automatic flight ops, missions, camera shake, enemies, season, snowfall / leaves, shadows, the control panel (show,
-position, size, colour), the counts of every aircraft type, session memory, subtitles and the base name.
+Camera zoom and rotation, time of day (PC clock or fixed hour), glow (bloom), volumetric beams, audio sensitivity, fire intensity,
+fly-by frequency, automatic flight ops, missions, camera shake, enemies, season, weather, snowfall / leaves, shadows, the
+control panel (show, position, size, colour), the counts of every aircraft type, session memory, subtitles and the base
+name.
+
+To measure performance on your machine: in Wallpaper Engine's settings set a **CEF devtools port** (General tab),
+open `http://localhost:<port>` in Chrome, pick the wallpaper and run `perfReport(60)` in its console — after a minute
+it logs frame rate, hitches, CPU and GPU time, draw calls and lights. `perfFlags({ gputime: true })` and a reload adds
+GPU timing; `perfFlags({ gl: 'webgl2' })` compares with the WebGL 2 backend; `perfFlags({})` resets.
 
 ## Development
 
-Plain JavaScript, no build step: three.js r149 is vendored. See `CLAUDE.md` for the code layout. Browser preview:
+Plain JavaScript, no build step: three.js r187 (WebGPURenderer, WebGL 2 fallback) is vendored as one bundle
+(`js/three.r187.webgpu.min.js`, rebuilt from npm with `npm run vendor:three`). See `CLAUDE.md` for the code layout. Browser preview:
 
 ```bash
 python -m http.server 8765
 ```
 
-then open `http://localhost:8765/` (`?hour=22`, `?season=winter`, `?zoom=60`, `?demo=1`). The automated tests run in
+then open `http://localhost:8765/` (`?hour=22`, `?season=winter`, `?weather=storm`, `?zoom=60`, `?demo=1`). The automated tests run in
 Docker (Playwright):
 
 ```bash

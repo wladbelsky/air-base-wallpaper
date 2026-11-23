@@ -76,6 +76,18 @@ const WE_PROPERTIES = {
   "precision": 1,
   "condition": "timemode.value == 'fixed'"
  },
+ "bloom": {
+  "order": 23,
+  "text": "Glow around lights and fire (bloom)",
+  "type": "bool",
+  "value": true
+ },
+ "volumetric": {
+  "order": 24,
+  "text": "Volumetric light beams (WebGPU)",
+  "type": "bool",
+  "value": true
+ },
  "audiosensitivity": {
   "order": 10,
   "text": "Audio sensitivity, %",
@@ -156,9 +168,41 @@ const WE_PROPERTIES = {
  },
  "weather": {
   "order": 21,
-  "text": "Snowfall / falling leaves",
+  "text": "Seasonal snowfall / falling leaves",
   "type": "bool",
   "value": true
+ },
+ "weathermode": {
+  "order": 21,
+  "text": "Weather",
+  "type": "combo",
+  "value": "default",
+  "options": [
+   {
+    "label": "Default (clear, as always)",
+    "value": "default"
+   },
+   {
+    "label": "Changing (auto cycle)",
+    "value": "auto"
+   },
+   {
+    "label": "Clear",
+    "value": "clear"
+   },
+   {
+    "label": "Rain",
+    "value": "rain"
+   },
+   {
+    "label": "Fog",
+    "value": "fog"
+   },
+   {
+    "label": "Thunderstorm",
+    "value": "storm"
+   }
+  ]
  },
  "shadows": {
   "order": 22,
