@@ -77,13 +77,13 @@ const WE_PROPERTIES = {
   "condition": "timemode.value == 'fixed'"
  },
  "bloom": {
-  "order": 7,
+  "order": 23,
   "text": "Glow around lights and fire (bloom)",
   "type": "bool",
   "value": true
  },
  "volumetric": {
-  "order": 8,
+  "order": 24,
   "text": "Volumetric light beams (WebGPU)",
   "type": "bool",
   "value": true

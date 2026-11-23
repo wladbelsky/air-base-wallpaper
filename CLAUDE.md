@@ -55,10 +55,10 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
 
 ## Rules / conventions
 - **After changing any JS/CSS file, bump the cache-buster** `?v=N` on all `<script>`/`<link>` tags in
-  `index.html` (WE's CEF caches aggressively). Current: `v=59`.
+  `index.html` (WE's CEF caches aggressively). Current: `v=60`.
 - **New WE property**: add it to `project.json`, read it in `applyUserProperties` (`main.js`) into `CFG`,
   then run `python tools/gen_properties.py`. Property `order` decides the browser-drawer group
-  (0–9 camera/time, 10–19 audio/combat, 20–29 terrain & season, 30–39 panel, 40–49 air wing, 50–59 base).
+  (0–9 camera/time, 10–19 audio/combat, 20–29 terrain, season & rendering (shadows, bloom, volumetric), 30–39 panel, 40–49 air wing, 50–59 base).
   `<key>count` sliders are picked up automatically for every key in `AIRCRAFT_TYPES`.
 - **New aircraft type**: builder in `airframes.js`, subclass with static `spec` + `buildModel()` in
   `aircraft.js` (start from `fighter({…})` / `heavy({…})` or `Helicopter.spec`), register in `AIRCRAFT_TYPES` and
@@ -128,7 +128,8 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   `localStorage` `fab.gl = { v: <cache-buster>, gl: 'webgl2' }` and a reload on the WebGL 2 backend; the next release
   (another `?v`) tries WebGPU again. A lost device / context (a GPU reset, a driver update, sleep: WebGPURenderer stops
   drawing for good, it never restores a context) → `renderer.onDeviceLost` reloads after 2 s (lost in the first 30 s on
-  WebGPU: WebGL 2 for this release).
+  WebGPU, or a second time within 10 min — `fab.lost`: WebGL 2 for this release; a driver resetting on our shaders once
+  reloaded on WebGPU for ever).
 - **Volumetric light** (`VOLUME`, main.js; `CFG.volumetric`, WebGPU, `?vol=1` forces it on WebGL 2): a box over the base
   on `VOL_LAYER` with a `VolumeNodeMaterial`, drawn by its own quarter-resolution pass and added to the scene: the rays
   are marched and every light on `VOL_LAYER` (spot / flash / fire lights enable it; not the sun or the sky) scatters by
@@ -157,17 +158,18 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   spot-light states — `compileAsync` builds for its own context, the scene pass draws in the RenderPipeline's, and on
   WebGPU a pipeline made later is a blocking `createRenderPipeline` (a fight's stalls: tracers, a wreck, a scramble out
   of the shelters). The warm group also holds a wreck of every armour type and one fly-by jet per type (`FLYBY_MODELS`,
-  built here, no longer lazily); `BATCH.prefill` (see "Batched drawing"). `GPU.pipes` counts the render
+  three a type — a fly-by takes 1–3 —, built here, no longer lazily); `BATCH.prefill` (see "Batched drawing"). `GPU.pipes` counts the render
   pipelines made (`renderer.info.memory.programs` counts shader modules shared by code: it barely moves); the
   webgpu.spec test checks a scramble, a fly-by and a fight after the warm-up make none. The loop draws nothing until `SHADERS_READY` (15 s fallback), the
-  splash waits for it. A new kind of object that first appears in a fight must be in the scene (hidden is fine) or in
+  splash waits for it (its CSS failsafe is 16 s: at 8 s it showed the undrawn canvas); after the fallback the warm-up
+  draws no `warmFrame` (every hidden object shown, the templates in mid-air: it would be on screen). A new kind of object that first appears in a fight must be in the scene (hidden is fine) or in
   the template group. Turning a light's `visible` (or adding a light) recompiles every program. `?warm=0` skips it
   (the harness does, unless `boot({ warm: true })`: SwiftShader compiles synchronously, ~4 s a boot).
 
 ## Weather (`js/weather.js`)
 - `CFG.weatherMode` (property `weathermode`, `?weather=`): `default` (clear: the look it always had), `clear` / `rain`
   / `fog` / `storm`, or `auto` (`next()`: a new kind every 15–40 min by `WX_ODDS[season]`; saved with the air wing,
-  `PERSIST` `wx`, restored once per page load). `WX_TARGET[kind]` gives targets the coefficients ease to over ~2 min:
+  `PERSIST` `wx`, restored once per page load — and only in `auto` mode: `resume`, waiting over the first 10 s for WE's properties). `WX_TARGET[kind]` gives targets the coefficients ease to over ~2 min:
   `oc` (overcast), `rain`, `fog`, `wind` (× `WIND0`, with gusts: `WIND` is mutated, the smoke follows), `wet` (rises
   in the rain, dries over ~10 min). Only the look: flights, the fight, the radio don't change.
 - `WEATHER.apply(k, elev)` (from `updateEnvironment`) dims the sun, greys the sky / haze / bounce light (a little glow in
@@ -179,7 +181,7 @@ User-facing docs: `README.md` (keep it in sync when behaviour or properties chan
   lightning `bolt` (instanced segments, HDR). Lightning flashes the sky light (`hemi.intensity = ENV.hemiI × …`): no
   light is added. In winter the rain falls as `TERRAIN`'s snow (heavier, shown even with `CFG.weather` off), no
   lightning, nothing gets wet (the snow's ring — 3600 slots — wraps at 900 × rate / 220: a storm's flakes live as long
-  as at the base rate). `default` mode has no gusts. `wet` darkens `PLAIN_MAT` / the ground and raises their gloss (uniforms only).
+  as at the base rate; only the slots in use are moved, drawn (`pts.count`) and uploaded). `default` mode has no gusts. `wet` darkens `PLAIN_MAT` / the ground and raises their gloss (uniforms only).
 
 ## Airfield (`js/airfield.js`, `js/aircraft.js`)
 - **Rooftops**: the builders in `base.js` list the buildings' boxes in `OBSTACLES` (`obstacle(p, x, z, w, d, top, rotY, shape)`;
@@ -351,7 +353,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   and the x 35 heavy stand's wingtip west of it are why it is narrow), the heliport's beside the fire station (door
   east onto the road at x 5.5).
 - **Vehicles vs vehicles** (`vehHold`, `GROUND_OPS.vehicles()`): one stops behind another close ahead (two holding for
-  each other: the lower id goes; a cycle of three or more (`heldBy` links): its lowest id goes; several setting off from one spot: in id order; 8 s behind the same one *standing* gives
+  each other: the lower id goes; a cycle of three or more (`heldBy` links, `vehCycleGo`): its lowest id goes past that one only — another in its way still holds it; several setting off from one spot: in id order; 8 s behind the same one *standing* gives
   up — one that moves, however slowly, is waited for); a helicopter's loader sets off before its fuel truck (`inAfter`:
   it goes further up the corridor; reversed they block each other there); one
   sets off from a start point only once the last to leave it is 1.8 clear and none is arriving there
@@ -401,8 +403,8 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   smoke column, dying down over the last 8 s, spawned by time accumulators (`fl`, `sm`); a hit near a burning one spreads
   that fire instead of stacking another; the smoke pool is 420 for it). **Flames** are `FX.fire` (`FlameFX`, effects.js):
   one instanced Sprite anchored at its base, each instance a tall tongue whose colour is TSL noise, not a texture — a
-  teardrop mask cut by fractal noise scrolling up (`uT` = `T % 600`: three's `time` is wall-clock and loses float
-  precision over days), heat from a white-yellow core through orange to a red tip, HDR by `uK` with bloom; spawned by
+  teardrop mask cut by fractal noise scrolling up (by the tongue's own age + its seed, `aPos.w`: three's `time` is
+  wall-clock and loses float precision over days, and a wrapped `T % 600` made every flame jump at the wrap), heat from a white-yellow core through orange to a red tip, HDR by `uK` with bloom; spawned by
   time accumulators from structure fires (~14/s, embers `ember()` and a hot glow at the roots in `FX.flash`), burning
   wrecks (`e.fire`), units / aircraft on fire (`DAMAGE.smoke`), falling aircraft and explosions (their fireballs rise).
   `FireLights` light the biggest fires (structures, then wrecks): 2 point lights without clustered lighting (12 with),
@@ -468,7 +470,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   threat (`.tgt`, kept while it lives), holds in a lull, and goes back to 0 in peace; its angle is kept wrapped.
 - **LANCER** (`RADIO_NAMES.patriot`: Patriot / NASAMS `launchSAM`, Avenger Stingers `launchStinger`) on the beat from
   `AUD.heavy` > 0.35 (Patriot vs bandits also `strength` > 1.2; at an incoming ballistic missile on any low beat), only
-  at an enemy in range when enemies are on (no cooldown burnt on the empty sky; with them off: the show as before),
+  at an enemy in range when enemies are on — the launcher is one that has one (no cooldown burnt on the empty sky; with them off: the show as before),
   `SAM_PK` 0.9 / 0.85 / 0.78. Guided missiles steer at a lead point (≤ 1.5 s) and arrive within what the two close in a
   step (≥ 3) — a pure chase with a fixed 3 never caught a ballistic missile (they passed through each other between
   steps); a SAM's hit on a cruise / ballistic missile is rolled on arrival (`queueHit` `now`), not on the next beat.
@@ -609,7 +611,7 @@ clones of one template each (`VEH_BUILD` → `VEH_TEMPLATES`), taken from / retu
   (`simMs` the steps + `renderMs` renderFrame's CPU side) / GPU times, hitches, WE pauses (not counted as frames), draw
   calls, lit point / spot lights, batches, memory, the backend and the settings in effect, `made` (render pipelines /
   programs / batch growth / new batches made while measuring: after the warm-up each is a likely stall) and `hitchLog`
-  (the worst frames > 50 ms with what they and the frame before made) (on WebGPU a `BatchedMesh` is
+  (the worst frames > 50 ms — or 2 intervals of a lower FPS limit; `hitches` > 1.5 — with what they and the frame before made) (on WebGPU a `BatchedMesh` is
   one draw per geometry, not one multi-draw: the draw calls stay high, the state changes are what batching saves);
   `perfFlags({ gputime: true })` / `perfFlags({ gl: 'webgl2' })` / `perfFlags({ clustered: true })` / `perfFlags({})`
   store debug switches in `localStorage` (`fab-perf`, read at load: `PERF.flags`) since WE passes no URL parameters.

@@ -77,12 +77,17 @@ async function init() {
   renderer = new THREE.WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', trackTimestamp: GPU.timing,
     forceWebGL: QS.get('gl') === 'webgl2' || PERF.flags.gl === 'webgl2' || gpuFellBack() });
   // the device / context lost (a GPU reset, a driver update, sleep): WebGPURenderer stops drawing for good (WebGLRenderer
-  // restored its context) — reload (PERSIST saves on pagehide); lost early on WebGPU: WebGL 2 for this release
+  // restored its context) — reload (PERSIST saves on pagehide); lost on WebGPU early on, or a second time within 10 min
+  // (a driver resetting on our shaders: it reloaded on WebGPU for ever): WebGL 2 for this release
   const lost = renderer.onDeviceLost;
   renderer.onDeviceLost = (info) => {
     lost.call(renderer, info);                                     // (logs it, stops drawing)
     if (GPU.reloading) return; GPU.reloading = true;
-    if (GPU.webgpu && performance.now() < 30000) try { localStorage.setItem(GL_KEY, JSON.stringify({ v: GL_VER, gl: 'webgl2' })); } catch (e) {}
+    if (renderer.backend && renderer.backend.isWebGPUBackend) try {   // (not GPU.webgpu: unset while init() waits)
+      const now = Date.now(), d = JSON.parse(localStorage.getItem(LOST_KEY) || 'null'), ts = (d && d.v === GL_VER ? d.t : []).filter(t => now - t < 600000);
+      ts.push(now); localStorage.setItem(LOST_KEY, JSON.stringify({ v: GL_VER, t: ts }));
+      if (performance.now() < 30000 || ts.length >= 2) localStorage.setItem(GL_KEY, JSON.stringify({ v: GL_VER, gl: 'webgl2' }));
+    } catch (e) {}
     setTimeout(() => location.reload(), 2000);
   };
   await renderer.init();
@@ -157,14 +162,15 @@ const PERF = { recs: [],
   flags: (() => { try { return JSON.parse(localStorage.getItem('fab-perf') || '{}') || {}; } catch (e) { return {}; } })(),
   /* what a frame made: render pipelines (GPU.pipes), shader programs, batch growth / new batches (BATCH.ev) */
   counts() { return [GPU.pipes, renderer.info.memory.programs, BATCH.ev.grow, BATCH.ev.batch]; },
+  gap() { return fpsLimit > 0 ? 1000 / fpsLimit : 1000 / 60; },   // the frame interval expected (at an FPS limit of 25 every frame was a 'hitch')
   sample(ms, sim, draw, c0) {   // into every report running (each perfReport() call has its own record)
     let lit = 0; scene.traverseVisible(o => { if ((o.isPointLight || o.isSpotLight) && o.intensity > 0) lit++; });
     const c = this.counts(), d = { pipes: c[0] - c0[0], programs: c[1] - c0[1], batchGrow: c[2] - c0[2], newBatch: c[3] - c0[3] };
     for (const r of this.recs) {
       for (const k in d) r.made[k] += d[k];
-      // a hitch (> 50 ms since the last frame): what this frame and the one before it made (a pipeline built in one frame
+      // a hitch (> 50 ms since the last frame, or two frame intervals of a lower FPS limit): what this frame and the one before it made (a pipeline built in one frame
       // blocks the GPU process: the gap shows before the next) — the worst ones go into the report's hitchLog
-      if (r.last && ms - r.last > 50) r.hitches.push({ at: +(T - r.T0).toFixed(1), ms: Math.round(ms - r.last), simMs: +sim.toFixed(1), renderMs: +draw.toFixed(1), made: d, before: r.pd, enemies: ENEMIES.length, combat: AUD.fighting });
+      if (r.last && ms - r.last > Math.max(50, 2 * this.gap())) r.hitches.push({ at: +(T - r.T0).toFixed(1), ms: Math.round(ms - r.last), simMs: +sim.toFixed(1), renderMs: +draw.toFixed(1), made: d, before: r.pd, enemies: ENEMIES.length, combat: AUD.fighting });
       r.pd = d;
       if (r.last) r.frame.push(ms - r.last); r.last = ms;
       r.cpu.push(sim + draw); r.sim.push(sim); r.draw.push(draw); r.calls.push(renderer.info.render.drawCalls); r.lights.push(lit);
@@ -179,7 +185,7 @@ const GPU = { webgpu: false, clustered: false, pipes: 0,   // which backend WebG
 const LIGHT_MAX = 128;
 /* safety net: WebGPU failing (a stream of validation errors in the first 30 s — once a nothing-drawn screen in WE) →
    remember it for this release (the cache-buster) and reload on the WebGL 2 backend; the next release tries WebGPU again */
-const GL_KEY = 'fab.gl', GL_VER = ((document.querySelector('script[src*="main.js"]') || {}).src || '').replace(/^.*[?&]v=(\d+).*$/, '$1');
+const GL_KEY = 'fab.gl', LOST_KEY = 'fab.lost', GL_VER = ((document.querySelector('script[src*="main.js"]') || {}).src || '').replace(/^.*[?&]v=(\d+).*$/, '$1');
 function gpuFellBack() { try { const d = JSON.parse(localStorage.getItem(GL_KEY) || 'null'); return !!d && d.v === GL_VER && d.gl === 'webgl2'; } catch (e) { return false; } }
 function watchGpuErrors() {
   const dev = renderer.backend.device, t0 = performance.now(); let n = 0;
@@ -212,7 +218,7 @@ async function warmShaders() {
   for (const k of ['cruise', 'ballistic', ...Object.keys(ENEMY_TYPES), ...Object.keys(HELI_TYPES), ...Object.keys(ARMOR_TYPES)]) g.add(enemyMesh(k));
   for (const k of Object.keys(ARMOR_TYPES)) { const w = enemyMesh(k); w.traverse(o => { if (o.isMesh) o.material = M(0x2c2a26); }); g.add(w); }   // the wrecks' batch (wreckArmor)
   for (const k of Object.keys(VEH_BUILD)) g.add((VEH_TEMPLATES[k] || (VEH_TEMPLATES[k] = VEH_BUILD[k]())).clone());   // the ground vehicles (crane parts, hoses: drawn on their own)
-  const fly = Object.keys(FLYBY_JETS).map(k => { const m = FLYBY_JETS[k](); FLYBY_MODELS[k].push(m); m.setFold(0); g.add(m.group); return m; });   // fly-by jets built now (once lazily, mid-fight)
+  const fly = Object.keys(FLYBY_JETS).flatMap(k => [0, 1, 2].map(() => { const m = FLYBY_JETS[k](); FLYBY_MODELS[k].push(m); m.setFold(0); g.add(m.group); return m; }));   // fly-by jets built now, 3 a type (a fly-by takes 1–3; once lazily, mid-fight)
   BATCH.prefill(scene); BATCH.prefill(g);
   scene.updateMatrixWorld(); BATCH.sync();   // the batches exist (their programs are compiled with the rest)
   const spots = [...new Set([...SEARCHLIGHTS.filter(s => s.light).map(s => s.light), ...HELI_LIGHTS.pool])], flip = () => spots.forEach(l => { l.visible = !l.visible; });
@@ -226,7 +232,7 @@ async function warmShaders() {
   // pass draws in the RenderPipeline's — its variants, the shadow-pass (depth) programs and the post-processing passes
   // were otherwise built the first time each was drawn (mid-fight: the first tracers, a wreck, a scramble)
   g.position.copy(CAM_TGT); g.children.forEach((m, i) => m.position.set((i % 6 - 2.5) * 4, 6, Math.floor(i / 6) * 4 - 4));
-  scene.add(g); warmFrame(); if (!SHADERS_READY) { flip(); warmFrame(); flip(); } scene.remove(g);
+  if (!SHADERS_READY) { scene.add(g); warmFrame(); flip(); warmFrame(); flip(); scene.remove(g); }   // (not once the loop runs — the 15 s fallback: the frame with every hidden thing shown would be on screen)
   for (const m of fly) m.group.removeFromParent();
   spots.forEach(l => { l.visible = GPU.clustered || ENV.lightsOn > 0; });
   renderFrame();
@@ -337,7 +343,7 @@ const VOLUME = {
     vp.updateBefore = function (frame) {
       if (!VOLUME.mesh.visible && VOLUME.blank) return;
       VOLUME.blank = !VOLUME.mesh.visible;
-      renderer.getClearColor(cc); const a = renderer.getClearAlpha(); renderer.setClearColor(0x000000, 0); const r = up.call(this, frame); renderer.setClearColor(cc, a); return r;
+      renderer.getClearColor(cc); const a = renderer.getClearAlpha(); renderer.setClearColor(0x000000, 0); try { return up.call(this, frame); } finally { renderer.setClearColor(cc, a); }   // (a throw left the sky black)
     };
     vp.setLayers(new THREE.Layers()); vp.getLayers().set(VOL_LAYER); vp.setResolutionScale(0.25);
     this.vp = vp; this.active = true;
@@ -370,6 +376,7 @@ function updateBloom() {
   HDR = CFG.bloom ? 1 : 0;
   const k = HDR * (0.35 + 0.65 * ENV.lightsOn);   // (by day a flame stays a flame, not a red ball)
   FX.flash.uK.value = 1 + 1.1 * k; FX.fire.uK.value = 1 + 1.3 * k; FX.tracers.mesh.material.color.setScalar(1 + 1.2 * k);
+  if (WEATHER.bolt) WEATHER.bolt.material.color.setRGB(0.75, 0.8, 1).multiplyScalar(1 + 3 * HDR);   // the lightning bolt: HDR white with bloom, white without
   if (!pipeline) return;
   if (pipeBloom !== CFG.bloom) { pipeBloom = CFG.bloom; pipeline.outputNode = gradeOut(CFG.bloom ? sceneOut.add(bloomNode) : sceneOut); pipeline.needsUpdate = true; }
   const D = GRADE.day, N = GRADE.night, kn = ENV.night; GRADE.u.sat.value = lerp(D.sat, N.sat, kn); GRADE.u.con.value = lerp(D.con, N.con, kn); GRADE.u.mid.value = lerp(D.mid, N.mid, kn);
@@ -593,12 +600,15 @@ function spawnGuidedMissile(p, v, turnAt, dir, speed, life, big, target, chance,
 function launchSAM(kind) {
   if (kind === 'patriot' && DAMAGE.patriotDown()) return;                                   // its radar knocked out
   const cands = ALL_SAMS.filter(m => m.sam === kind && (m.cd || 0) <= 0 && !(m.downT > 0)); if (!cands.length) return;
-  const m = pick(cands);
+  // a ready launcher with a target in range (picking the launcher first sat out a target only another one reached)
+  const kinds = kind === 'patriot' ? [['ballistic'], ['bandit']] : [['cruise', 'heli'], ['bandit']];
+  let m = null, tgt = null;
+  if (CFG.enemies) {
+    for (let i = 0, i0 = randi(0, cands.length - 1); i < cands.length; i++) { const c = cands[(i0 + i) % cands.length], q = mountPos(c), t = nearestEnemy(q, kinds[0], 160) || nearestEnemy(q, kinds[1], 120); if (t) { m = c; tgt = t; break; } }
+    if (!m) return;
+  } else m = pick(cands);
   m.muzzle = pick(m.cells); mountMuzzle(m, _p, _d);
   const p = _p.clone(), out = _d.clone();
-  const kinds = kind === 'patriot' ? [['ballistic'], ['bandit']] : [['cruise', 'heli'], ['bandit']];
-  const tgt = CFG.enemies ? nearestEnemy(p, kinds[0], 160) || nearestEnemy(p, kinds[1], 120) : null;
-  if (CFG.enemies && !tgt) return;
   m.cd = kind === 'patriot' ? 3.2 : 2.2;
   const dir = tgt ? tgt.p.clone().sub(p).normalize() : out.clone();
   spawnGuidedMissile(p, out.clone().multiplyScalar(18), kind === 'patriot' ? 0.6 : 0.35, dir, kind === 'patriot' ? 55 : 48, 6, kind === 'patriot', tgt, kind === 'patriot' ? SAM_PK.patriot : SAM_PK.nasams, m);
@@ -608,15 +618,19 @@ function launchSAM(kind) {
 }
 /* Avenger: a Stinger at the nearest helicopter / cruise missile / low bandit */
 function launchStinger() {
-  const m = ALL_SHORAD.filter(s => (s.cd || 0) <= 0 && !(s.downT > 0)).sort((a, b) => !!b.track - !!a.track)[0]; if (!m) return;
+  const ready = ALL_SHORAD.filter(s => (s.cd || 0) <= 0 && !(s.downT > 0)).sort((a, b) => !!b.track - !!a.track); if (!ready.length) return;
+  // the first ready Avenger with a target (tracking first): the first in the list alone once sat out a helicopter the
+  // other one had in range; nothing in range: all kept ready
+  let m = ready[0], tgt = null;
+  if (CFG.enemies) { m = null; for (const c of ready) { const t = c.track || nearestEnemy(mountPos(c), ['heli', 'cruise', 'bandit'], 80); if (t) { m = c; tgt = t; break; } } if (!m) return; }
   m.mi = (m.mi + 1) % 2; m.muzzle = m.muzzles[m.mi];
   mountMuzzle(m, _p, _d);
-  const p = _p.clone(), dir = _d.clone(), tgt = CFG.enemies ? m.track || nearestEnemy(p, ['heli', 'cruise', 'bandit'], 80) : null;
-  if (CFG.enemies && !tgt) return;   // (nothing in range: kept ready)
+  const p = _p.clone(), dir = _d.clone();
   m.cd = 1.4;
   spawnGuidedMissile(p, dir.clone().multiplyScalar(20), 0.2, dir, 60, 4, false, tgt, SAM_PK.stinger, m);
   FX.flash.spawn(p, { s0: 1.6, s1: 2.2, life: 0.12, a0: 1 });
 }
+const _mp = new V3(); const mountPos = m => { m.pitchG.updateWorldMatrix(true, false); return _mp.setFromMatrixPosition(m.pitchG.matrixWorld); };   // a mount's pivot (choosing a launcher)
 let ciwsGap = 0;
 function startCIWS(dur) {
   if (RT() < ciwsGap) return;                                           // short pause between new bursts
@@ -1164,7 +1178,7 @@ function perfReport(sec = 30) {
       // simulated seconds per real second: 1 at any frame rate (below 1 only when frames take over 0.25 s, or paused)
       simRate: +((T - r.T0) / Math.max(1e-3, (performance.now() - r.t0) / 1000)).toFixed(3), fps: r.frame.length ? +(1000 / avg(r.frame)).toFixed(1) : 0,
       frameMs: avg(r.frame), frameMsP95: p95(r.frame), frameMsMax: r.frame.length ? +Math.max(...r.frame).toFixed(1) : null,
-      hitches: r.frame.filter(t => t > 33.4).length,   // frames longer than two vsyncs: visible stutter
+      hitches: r.frame.filter(t => t > Math.max(33.4, 1.5 * PERF.gap())).length,   // frames longer than two vsyncs (1.5 intervals of a lower FPS limit): visible stutter
       pauses: r.pauses,   // WE paused the wallpaper (another window in front…): those gaps aren't frames
       cpuMs: avg(r.cpu), cpuMsP95: p95(r.cpu), cpuMsMax: r.cpu.length ? +Math.max(...r.cpu).toFixed(1) : null,
       simMs: avg(r.sim), simMsP95: p95(r.sim), renderMs: avg(r.draw), renderMsP95: p95(r.draw),   // (cpuMs = the simulation steps + renderFrame's CPU side)
@@ -1219,7 +1233,7 @@ function step(dt) {
   FX.smoke.update(dt, ENV.smokeTint, camera);
   FX.scorch.update(dt);
   FX.lights.update(dt, 0.6 + ENV.night * 0.8);
-  FX.fire.update(dt, T); FX.fireLights.update(dt, 0.6 + ENV.night * 0.8);
+  FX.fire.update(dt); FX.fireLights.update(dt, 0.6 + ENV.night * 0.8);
   WEATHER.update(dt);
   TERRAIN.update(dt);
   STRESS.update(dt);

@@ -36,7 +36,7 @@ const WEATHER = {
     this.splash.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.splash.frustumCulled = false; this.splash.renderOrder = 2; this.splash.count = 0; this.splash.visible = false;
     for (let i = 0; i < SPLASH_N; i++) this.splash.setColorAt(i, _wc.setRGB(0, 0, 0));
     this.sp = new Float32Array(SPLASH_N * 3); this.sl = new Float32Array(SPLASH_N); this.sNext = 0;
-    // the lightning bolt: a jagged line of thin boxes from the cloud base to the ground, HDR white (it glows under bloom)
+    // the lightning bolt: a jagged line of thin boxes from the cloud base to the ground, HDR white with bloom (updateBloom)
     const seg = new THREE.BoxGeometry(1, 1, 1); seg.translate(0, 0.5, 0);
     this.bolt = new THREE.InstancedMesh(seg, new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 3.2, 4), fog: false, transparent: true, depthWrite: false }), BOLT_N);
     this.bolt.frustumCulled = false; this.bolt.renderOrder = 7; this.bolt.count = 0; this.bolt.visible = false; this.boltT = 0;
@@ -54,9 +54,17 @@ const WEATHER = {
     this.timer = rand(900, 2400);
   },
   /* the saved kind (persist.js), once per page load */
-  restore(w) { if (this.back || !w || !WX_TARGET[w.kind]) return; this.back = true; this.kind = w.kind; this.timer = clamp(Number.isFinite(+w.t) ? +w.t : 900, 60, 2400); const tg = WX_TARGET[w.kind]; this.oc = tg.oc; this.rain = tg.rain; this.fog = tg.fog; this.wind = tg.wind; this.wet = tg.rain > 0 && !this.snowy() ? 1 : 0; },   // (t 0: due now, not 15 min; winter: nothing wet)
+  restore(w) { if (this.back || !w || !WX_TARGET[w.kind]) return; this.back = true; this.saved = w; this.resume(); },
+  /* the saved kind put back at once — only in auto mode (the mode switched off auto since: it opened in the old storm and
+     cleared over 2 min); WE's properties can come in after the build, so it waits for them over the first seconds */
+  resume() {
+    const w = this.saved; if (!w) return; if (T > 10) { this.saved = null; return; } if (CFG.weatherMode !== 'auto') return;
+    this.saved = null; this.kind = w.kind; this.timer = clamp(Number.isFinite(+w.t) ? +w.t : 900, 60, 2400);   // (t 0: due now, not 15 min)
+    const tg = WX_TARGET[w.kind]; this.oc = tg.oc; this.rain = tg.rain; this.fog = tg.fog; this.wind = tg.wind; this.wet = tg.rain > 0 && !this.snowy() ? 1 : 0;   // (winter: nothing wet)
+  },
   save() { return CFG.weatherMode === 'auto' ? { kind: this.kind, t: Math.round(this.timer / 60) * 60 } : null; },
   update(dt) {
+    if (this.saved) this.resume();
     if (CFG.weatherMode === 'auto' && (this.timer -= dt) <= 0) this.next();
     else if (CFG.weatherMode !== 'auto') this.kind = this.want();
     const tg = WX_TARGET[this.kind], k = 1 - Math.exp(-dt / 40);   // ~2 min to settle

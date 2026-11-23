@@ -116,18 +116,18 @@ class SpriteFX {
 /* Flames: tall tongues of procedural fire instead of round blobs. One instanced Sprite (one draw call), anchored at its
    base (center y 0.12) and stretched up (scale: width, height); per instance its position, size, a seed and its alpha.
    The colour is noise, not a texture: a teardrop mask (wide at the base, narrowing up, swaying more toward the tip)
-   cut by fractal noise scrolling up through it (uT: the simulation's time, wrapped — three's `time` is wall-clock and
-   loses float precision over days of uptime), so every tongue licks and flickers on its own; its "heat" runs from a
+   cut by fractal noise scrolling up through it (by the tongue's own age plus its seed: small numbers that never wrap —
+   three's `time` is wall-clock and loses float precision over days, and T % 600 made every flame jump at the wrap), so every tongue licks and flickers on its own; its "heat" runs from a
    white-yellow core through orange to a deep red edge and tip. Additive, HDR by uK (bloom) like FX.flash. */
 class FlameFX {
   constructor(scene, n) {
     this.n = n; this.items = []; this.live = []; this.next = 0;
     for (let i = 0; i < n; i++) this.items.push({ on: false, p: new V3(), v: new V3(), life: 0, max: 1, w0: 1, w1: 1, h: 1.8, seed: 0, a0: 1, w: 1, a: 0 });
     const attr = (size) => new THREE.InstancedBufferAttribute(new Float32Array(n * size), size).setUsage(THREE.DynamicDrawUsage);
-    this.aPos = attr(3); this.aD = attr(4); this.attrs = [this.aPos, this.aD];
+    this.aPos = attr(4); this.aD = attr(4); this.attrs = [this.aPos, this.aD];   // (aPos.w: its age)
     const { instancedBufferAttribute: iba, uv, uniform, vec2, vec3, vec4, float, abs, mix, smoothstep, clamp, pow, mx_fractal_noise_float: fbm } = THREE.TSL;
-    this.uK = uniform(1); this.uT = uniform(0);
-    const d = iba(this.aD), seed = d.z, alpha = d.w, q = uv(), y = q.y, t = this.uT;
+    this.uK = uniform(1);
+    const d = iba(this.aD), ap = iba(this.aPos), seed = d.z, alpha = d.w, q = uv(), y = q.y, t = ap.w.add(seed);
     const n1 = fbm(vec3(q.x.mul(2.2).add(seed), y.mul(1.6).sub(t.mul(1.9)), seed.mul(1.7)), 3, 2.0, 0.5);
     const n2 = fbm(vec3(q.x.mul(5).add(seed.mul(3.1)), y.mul(3.4).sub(t.mul(3.6)), seed), 2, 2.0, 0.5);
     const x = q.x.sub(0.5).add(n1.mul(0.16).mul(y.add(0.15)));                    // sways, more toward the tip
@@ -140,7 +140,7 @@ class FlameFX {
     const col = mix(mix(red, orange, smoothstep(0.1, 0.5, heat)), core, smoothstep(0.68, 0.98, heat));
     const a = smoothstep(0.04, 0.32, heat).mul(alpha);
     const mat = new THREE.SpriteNodeMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false });
-    mat.positionNode = iba(this.aPos); mat.scaleNode = vec2(d.x, d.y);
+    mat.positionNode = ap.xyz; mat.scaleNode = vec2(d.x, d.y);
     mat.colorNode = vec4(col.mul(this.uK.mul(heat.mul(0.5).add(0.6))), a);   // (the core brightest: it blooms)
     this.mesh = new THREE.Sprite(mat); this.mesh.center.set(0.5, 0.12); this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.visible = false;
     this.mesh.renderOrder = 7; scene.add(this.mesh);
@@ -153,8 +153,7 @@ class FlameFX {
     if (o.v) it.v.copy(o.v); else it.v.set(0, 0, 0);
     return it;
   }
-  update(dt, T) {
-    this.uT.value = T % 600;
+  update(dt) {
     const live = this.live; live.length = 0;
     for (const it of this.items) {
       if (!it.on) continue;
@@ -169,7 +168,7 @@ class FlameFX {
     const P = this.aPos.array, D = this.aD.array;
     for (let i = 0; i < live.length; i++) {
       const it = live[i];
-      P[i * 3] = it.p.x; P[i * 3 + 1] = it.p.y; P[i * 3 + 2] = it.p.z;
+      P[i * 4] = it.p.x; P[i * 4 + 1] = it.p.y; P[i * 4 + 2] = it.p.z; P[i * 4 + 3] = it.max - it.life;
       D[i * 4] = it.w; D[i * 4 + 1] = it.w * it.h; D[i * 4 + 2] = it.seed; D[i * 4 + 3] = it.a;
     }
     if (live.length) for (const a of this.attrs) { a.clearUpdateRanges(); a.addUpdateRange(0, live.length * a.itemSize); a.needsUpdate = true; }
@@ -252,15 +251,19 @@ class Scorch {
   }
 }
 
-/* the burning structures (BASE_FIRES) light their surroundings with a flicker: a fixed pool of point lights given to the
-   biggest fires (clustered lighting only, WebGPU: GPU.clustered) */
+/* the burning structures (BASE_FIRES) and wrecks light their surroundings with a flicker: a fixed pool of point lights
+   given to the biggest fires (2; 12 with clustered lighting), always in the scene (the set of lights never changes) */
 class FireLights {
-  constructor(scene, n) { this.items = []; for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xff8a3a, 0, 16, 2); l.layers.enable(2); scene.add(l); this.items.push(l); } this.ph = 0; }
+  constructor(scene, n) { this.items = []; for (let i = 0; i < n; i++) { const l = new THREE.PointLight(0xff8a3a, 0, 16, 2); l.layers.enable(2); scene.add(l); this.items.push(l); } this.ph = 0; this.fires = []; this.wr = []; }
   update(dt, nightBoost) {
-    // the biggest fires: burning structures, then burning wrecks (an armour wreck's flames: `fire`, updateArmor)
-    this.ph += dt; const fires = BASE_FIRES.slice();
-    for (const e of ENEMIES) if (e.kind === 'armor' && e.falling && e.fire > 0.05) fires.push({ p: e.p, r: 0.7 * e.fire, t: 8 });
-    fires.sort((a, b) => b.r * Math.min(1, b.t / 8) - a.r * Math.min(1, a.t / 8));
+    // the biggest fires: burning structures, then burning wrecks (an armour wreck's flames: `fire`, updateArmor) — in
+    // reused arrays / entries (it ran every step all day: garbage even with nothing burning)
+    this.ph += dt; const fires = this.fires; fires.length = 0; let w = 0;
+    for (const f of BASE_FIRES) fires.push(f);
+    for (const e of ENEMIES) if (e.kind === 'armor' && e.falling && e.fire > 0.05) { const o = this.wr[w] || (this.wr[w] = { p: null, r: 0, t: 8 }); w++; o.p = e.p; o.r = 0.7 * e.fire; fires.push(o); }
+    if (!fires.length) { if (this.lit) { this.lit = false; for (const l of this.items) l.intensity = 0; } return; }
+    this.lit = true;
+    if (fires.length > 1) fires.sort((a, b) => b.r * Math.min(1, b.t / 8) - a.r * Math.min(1, a.t / 8));
     this.items.forEach((l, i) => {
       const f = fires[i]; if (!f) { l.intensity = 0; return; }
       const k = Math.min(1, f.t / 8) * f.r, fl = 0.75 + 0.25 * Math.sin(this.ph * 13 + i * 2.1) * Math.sin(this.ph * 7.3 + i);

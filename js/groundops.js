@@ -296,17 +296,11 @@ function vehHold(d, own) {
     d.ahead(_vh3, 0.8);
     if (Math.hypot(op.x - _vh.x, op.z - _vh.z) < 0.9 || Math.hypot(op.x - _vh3.x, op.z - _vh3.z) < 0.9 || Math.hypot(op.x - m.x, op.z - m.z) < 0.75) {
       const od = o.userData.drive;
-      if (od && d.s < 0.3 && od.s < 0.3 && Math.hypot(op.x - m.x, op.z - m.z) < 0.7) { if (d.m.id < o.id) continue; byVeh = o; break; }   // both setting off from one spot: in id order (no cycle)
+      if (od && d.s < 0.3 && od.s < 0.3 && Math.hypot(op.x - m.x, op.z - m.z) < 0.7) { if (d.m.id < o.id || vehCycleGo(d, o)) continue; byVeh = o; break; }   // both setting off from one spot: in id order (no cycle)
       if (od && od.heldBy === d.m && T - od.heldAt < 0.2 && d.m.id < o.id) continue;
+      if (vehCycleGo(d, o)) continue;   // (only that one: another in the way still holds it — once the first was skipped and the rest never looked at)
       byVeh = o; break;
     }
-  }
-  // a cycle of holds (three round each other: a fuel truck behind a loader, the loader beside a truck backing off its
-  // stand, that truck backing toward the first — they stood until the 25 s rule sent one into another): the lowest id goes
-  if (byVeh) for (let o = byVeh, ids = [d.m.id], k = 0; k < 6; k++) {
-    const od = o.userData.drive; if (!od || !od.heldBy || T - od.heldAt > 0.2) break;
-    ids.push(o.id); if (od.heldBy === d.m) { if (d.m.id === Math.min(...ids)) byVeh = null; break; }
-    o = od.heldBy;
   }
   // 8 s behind the same one standing gives up on it (a deadlock; in a queue the one ahead keeps changing, and one that is
   // moving — however slowly — is waited for)
@@ -317,6 +311,17 @@ function vehHold(d, own) {
   } else d.vehBy = null;
   d.holdSince = h ? d.holdSince ?? T : null;                                              // how long it has been held (giving way above)
   return h;
+}
+/* a cycle of holds through o (three round each other: a fuel truck behind a loader, the loader beside a truck backing off
+   its stand, that truck backing toward the first — they stood until the 25 s rule sent one into another): true when this
+   vehicle is its lowest id and goes */
+function vehCycleGo(d, o) {
+  for (let ids = [d.m.id], k = 0; k < 6; k++) {
+    const od = o.userData.drive; if (!od || !od.heldBy || T - od.heldAt > 0.2) return false;
+    ids.push(o.id); if (od.heldBy === d.m) return d.m.id === Math.min(...ids);
+    o = od.heldBy;
+  }
+  return false;
 }
 /* the aircraft rule of vehHold (p: the point ahead, m: the vehicle) */
 function vehHoldAir(d, own, p, m) {

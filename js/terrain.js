@@ -155,9 +155,9 @@ const TERRAIN = {
       const mat = new THREE.PointsNodeMaterial({ size: 3, map: TEX.soft, transparent: true, depthWrite: false, sizeAttenuation: false, opacity: 0.9 });
       mat.positionNode = iba(posA); mat.colorNode = vec4(iba(colA), 1).mul(materialColor);
       const pts = new THREE.Sprite(mat); pts.count = n; pts.frustumCulled = false; pts.renderOrder = 2; scene.add(pts);
-      this.weather = { pts, posA, colA, n, v: new Float32Array(n * 3), life: new Float32Array(n), ph: new Float32Array(n), next: 0, acc: 0, kind: null };
+      this.weather = { pts, posA, colA, n, hi: 0, v: new Float32Array(n * 3), life: new Float32Array(n), ph: new Float32Array(n), next: 0, acc: 0, kind: null };
     }
-    const w = this.weather; w.kind = kind; w.life.fill(0);
+    const w = this.weather; w.kind = kind; w.life.fill(0); w.hi = 0;
     w.pts.material.size = kind === 'leaves' ? 4 : 3; w.pts.material.blending = kind === 'snow' ? THREE.AdditiveBlending : THREE.NormalBlending;
     w.pts.visible = !!kind;
   },
@@ -179,13 +179,17 @@ const TERRAIN = {
       const c = snow ? _tc.setRGB(0.8, 0.82, 0.86) : _tc.setHex(pick(SEASONS.autumn.leaf));
       C[i * 3] = c.r; C[i * 3 + 1] = c.g; C[i * 3 + 2] = c.b;
     }
-    for (let i = 0; i < w.n; i++) {
+    // only the slots in use are moved, drawn and uploaded (up to the ring, or a storm's flakes still beyond it): all 3600
+    // were, every step, all autumn and winter
+    let top = 0;
+    for (let i = 0, n = Math.max(cap, w.hi); i < n; i++) {
       if (w.life[i] <= 0) { P[i * 3 + 1] = -50; continue; }
       const sway = Math.sin(T * (snow ? 1.3 : 2.4) + w.ph[i]) * (snow ? 0.6 : 1.6);
       P[i * 3] += (w.v[i * 3] + sway) * dt; P[i * 3 + 1] += w.v[i * 3 + 1] * dt; P[i * 3 + 2] += (w.v[i * 3 + 2] + sway * 0.5) * dt;
-      if (P[i * 3 + 1] < 0.05) w.life[i] = 0;
+      if (P[i * 3 + 1] < 0.05) w.life[i] = 0; else top = i + 1;
     }
-    w.posA.needsUpdate = true; w.colA.needsUpdate = true;
+    w.hi = Math.max(cap, top); w.pts.count = Math.max(1, w.hi);
+    for (const a of [w.posA, w.colA]) { a.clearUpdateRanges(); a.addUpdateRange(0, w.hi * 3); a.needsUpdate = true; }
     if (snow) w.pts.material.opacity = lerp(0.55, 0.9, ENV.night);
   }
 };
